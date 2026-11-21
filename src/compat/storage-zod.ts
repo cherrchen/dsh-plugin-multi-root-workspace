@@ -49,7 +49,7 @@ export type DomainValueSchema<V> = DomainTableSpec<string, V>['valueSchema']
 interface DomainZodModule {
   object(shape: Record<string, unknown>): any
   strictObject(shape: Record<string, unknown>): any
-  string(): { min(length: number): any; max(length: number): any; optional(): any }
+  string(): { min(length: number): any; max(length: number): any; uuid(): any; optional(): any }
   array(item: unknown): any
   enum(values: readonly string[]): any
   literal(value: unknown): any

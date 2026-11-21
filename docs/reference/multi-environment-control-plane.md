@@ -76,11 +76,11 @@ Host 启动时用 `node:fs` 直接读取（不经 `ctx.fs` 或工作区读路径
 
 ## 远端记录域
 
-独立域 `multi_root_workspace_remote`（version 1，`backup-and-skip`），表 `grants`，键为 primary key，值 `{ grants: RemoteGrant[] }`；记录严格，带 `access`/`mode` 或未知键即无效。`RemoteGrant` 只含 `environmentId`、`rootId`、`displayPath`、`verifiedTarget {kind: object|path, value}`、`configVersion`、`bindingDigest`、`addedAt`，不存连接、密钥或准入句柄。只有 v1 lease 的 owner 在同一介质上打开它；旧版本只读 v1 域，不受影响。读取时按当前清单判定：绑定消失为 `revoked`，绑定摘要变化为 `withheld`（须在可信控制面重新登记），否则 `registered`。远端记录从不进入 `setAdditionalRoots`、scope、方言、指令或 Skills。
+独立域 `multi_root_workspace_remote`（version 1，`backup-and-skip`），表 `grants`，键为 primary key，值 `{ grants: RemoteGrant[] }`；记录严格，带 `access`/`mode` 或未知键即无效。`RemoteGrant` 只含 `environmentId`、`rootId`、`displayPath`、`verifiedTarget {kind: object|path, value}`、`configVersion`、`bindingDigest`、`addedAt` 和 `grantId`（新登记的 UUID，旧记录以 `addedAt` 识别），不存连接、密钥或准入句柄。只有 v1 lease 的 owner 在同一介质上打开它；旧版本只读 v1 域，不受影响。读取时按当前清单判定：绑定消失为 `revoked`，绑定摘要变化为 `withheld`（须在可信控制面重新登记），否则 `registered`。远端记录从不进入 `setAdditionalRoots`、scope、方言、指令或 Skills。
 
 ## `remote-1` 协议入口
 
-v1 线协议不变。远端请求走同一介质派生的**第二**监听端点 `/tmp/dsh-registry-<uid>/<store 前 48 位>.r1.sock`，沿用内核 peer 认证与帧预算；旧 owner 没有该端点，follower 即记 `owner-without-remote-protocol`。请求带 `protocol: "remote-1"`、`domain`、`store`、`id`、`epoch`、`method`、`args`；`domain` 不是 `remote` 时显式回 `unknown-domain` 且通道保留。`hello` 携带清单摘要，回复与 v1 相同的 epoch；摘要不符回 `config-digest-mismatch`。方法：`remote-snapshot`、`remote-add [primary, {environmentId, rootId}]`、`remote-remove`、`remote-admit [primary, {purpose, endpoints, manifestDigest}]`。mutation 的请求 ID 去重与 v1 相同；回复丢失时 follower 以 `authority-disconnected` 报结果未知，不重放。v1 断开、接管或换 epoch 时 `remote-1` 通道随之关闭，须重新 hello。
+v1 线协议不变。远端请求走同一介质派生的**第二**监听端点 `/tmp/dsh-registry-<uid>/<store 前 48 位>.r1.sock`，沿用内核 peer 认证与帧预算；旧 owner 没有该端点，follower 即记 `owner-without-remote-protocol`。请求带 `protocol: "remote-1"`、`domain`、`store`、`id`、`epoch`、`method`、`args`；`domain` 不是 `remote` 时显式回 `unknown-domain` 且通道保留。`hello` 携带清单摘要，回复与 v1 相同的 epoch；后续请求也携带当期 `manifestDigest`，由 owner 重新加载后核对。摘要不符回 `config-digest-mismatch`。方法：`remote-snapshot`、`remote-add [primary, {environmentId, rootId}]`、`remote-remove`、`remote-admit [primary, {purpose, endpoints, manifestDigest}]`。mutation 的请求 ID 去重与 v1 相同；回复丢失时 follower 以 `authority-disconnected` 报结果未知，不重放。v1 断开、接管或换 epoch 时 `remote-1` 通道随之关闭，须重新 hello。
 
 ## Host 侧接口与拒绝码
 
@@ -90,7 +90,7 @@ v1 线协议不变。远端请求走同一介质派生的**第二**监听端点 
 2. 主根取 `primaryKey(session.header.cwd)`；模式取 `ctx.sandboxPolicy.resolve({ session })`，取不到为 `session-policy-unavailable`（不以工作区读写补缺）。有效模式：只读→只读，工作区读写与完全访问→工作区读写。
 3. 发起侧先收窄：只读会话的 write/exec 及目的端为远端的 transfer 为 `mode-denies`；被 `toolAccess` 封顶的工具同类操作为 `tool-capped`。
 4. owner 在同一 `serialize` 队列内准入：`config-digest-mismatch`、`endpoint-not-registered`、`endpoint-revoked`、`endpoint-withheld`、`action-not-allowed`、`transfer-pair-not-allowed`、`invalid-arguments`（read/write/exec 恰一个远端端点；transfer 为 `[源, 目的]`，可含 `{environmentId: "local", rootId}`，至少一端远端，且两端远端绑定分别声明 export/import 配对）。回复 epoch 与当前通道不符为 `stale-epoch`。
-5. body 收到冻结的操作身份（operationId、purpose、toolName、sessionId、primaryRoot、epoch、revision、effectiveMode）；`endpoints` 在 body 结束后读取即抛错。排序轨迹以 debug 日志记录 operationId、阶段、epoch 与决定，不含路径内容、密钥或输出。
+5. body 收到冻结的操作身份（operationId、purpose、toolName、sessionId、primaryRoot、epoch、authorizationFingerprint、effectiveMode）；`authorizationFingerprint` 涵盖该主根和用途以及实际参与准入的登记 ID、绑定摘要与目标证明。远端端点同时携带环境摘要供连接管理器核对。`endpoints` 在 body 结束后读取即抛错。排序轨迹以 debug 日志记录 operationId、阶段、epoch 与决定，不含路径内容、密钥或输出。
 
 `addRemote(primary, {environmentId, rootId})` 只接受这两个键；先在队列外调用经 `setRemoteEndpointVerifier()` 注入的校验器（broker 行挂载时安装 `SshEndpointVerifier`，未挂载固定为 `endpoint-unverifiable`；因控制面未 `ready` 而早退的挂载不占用重挂载键，`ready` 翻转或下一次远端变更时按现状重挂），平台不符为 `platform-mismatch`，入队后绑定摘要变化为 `binding-changed`，清单未授权为 `binding-not-authorized`。`removeRemote` 与 `remoteList` 在 follower 上经 `remote-1` 转发。
 
@@ -99,7 +99,7 @@ v1 线协议不变。远端请求走同一介质派生的**第二**监听端点 
 `src/remote/exec.ts` 的 `runRemoteCommand` 与 `src/remote/exec-tool.ts` 的 `remoteBashTool` 由可选的 broker 证明行统一挂载（测试组合直接注册同一注册函数）。参数 `{environmentId, rootId, cwdRelative?, command, timeoutMs}`；工具名、Session 与取消信号只取自调度。后端（G4 以后由连接管理器提供，测试为 fake）声明部署控制的 shell、环境变量、时限与 stdout/stderr 上限，实现 `confine` / `currentGeneration` / 同步 `spawn`。
 
 1. **准入 A**：`purpose: exec` 的远端准入；校验后端存在（`backend-unavailable`）、`cwdRelative`（空或相对 POSIX，无 `.`/`..`/空段/NUL/反斜杠，`invalid-cwd`）与时限（`invalid-timeout`）；以 `workspace-write`、端点 displayPath 和真实 sessionId 调用 `confine`，非 `full` 为 `sandbox-unverified`。
-2. **准入 B**：同一请求重新准入，比对 epoch、端点身份（displayPath、bindingDigest、verifiedTarget）、有效模式与后端代次，任一不同为 `admission-changed` 并丢弃 argv；`spawn` 只在 B 的回调内调用。A、B 之间的撤权使 B 拒绝且不调用 `spawn`。
+2. **准入 B**：同一请求重新准入，比对 epoch、授权指纹、端点身份（displayPath、bindingDigest、verifiedTarget）、有效模式与后端代次，任一不同为 `admission-changed` 并丢弃 argv；`spawn` 只在 B 的回调内调用。A、B 之间的撤权使 B 拒绝且不调用 `spawn`。
 3. **结果**：`not-started{code}`；`admitted-may-start`（spawn 抛错或 `started` 失败）；`exited`（观察到直接退出、托管范围未确认）与 `scope-exited`（`waitForExit` 确认）；`unknown{reconcileId}`（启动后断线）。超时与取消各只 `terminate()` 一次并标 `termination`；输出按上限截断并标 `truncated`；从不重连或重跑。
 
 SSH 兼容门禁（`classifySshCapability`、`SUPPORTED_SSH_RELEASES`、宿主锚定的 `loadHostSshPackages`）的检查器落点见[基线参考](./multi-environment-baseline.md#ssh-兼容门禁落地清单)。
@@ -114,7 +114,7 @@ SSH 兼容门禁（`classifySshCapability`、`SUPPORTED_SSH_RELEASES`、宿主�
 
 任何传输类型的可连接环境都可声明可选 `transfer: { maxBytes (≤1 GiB), timeoutMs (≤3_600_000) }`；缺席即该环境不能作传输端点（`transfer-unavailable`）。传输通道是环境别名上的 SFTP 子系统，与环境用于执行的 transport 无关：helper 环境可同时收/发文件并经 helper 执行（G5 的构建机），`exec` 仍只允许 helper 环境。`openSftp` 与 `open` 共享同一组有序拒绝与 `ssh -G` 身份检查，再经 `ssh -s <别名> sftp` 拉起 `src/remote/sftp.ts` 的最小 v3 客户端；服务端必须宣告 `hardlink@openssh.com` 与 `fsync@openssh.com`，否则 `publish-unsupported`。SFTP 校验分支：`realpath` 必须等于绑定路径（`endpoint-redirected`）、`lstat` 必须是目录，注册身份为 `{kind: "path"}`——v3 无 inode，同名换物无法在注册时识别（ADR-0030 已知限制），远端平台取清单声明值（SFTP 无握手）。
 
-`src/remote/transfer.ts` 的 `runRemoteCopy` 支持 `local → sftp`、`sftp → local` 与 `sftp → sftp`；`local → local` 为 `direction-unsupported`，在任何准入前拒绝。每次复制仍是七阶段：准入 A（`purpose: transfer`；目的端为远端时只读会话 `mode-denies`、capped 工具 `tool-capped`；两个远端端点必须分别声明 `read`/`export` 与 `write`/`import` 配对，缺配对 `transfer-pair-not-allowed`，配对存在但缺动作 `action-not-allowed`）→ 受缚源打开 → 目的预检（目标必须不存在）→ EXCL staging + 有界流 + SHA-256 + fsync + 回读、源版本复检 → 准入 B（epoch、有效模式、两端端点身份、两端 SFTP 代次，任一变化 `admission-changed` ⇒ `cancelled`）→ no-replace 发布 → 只清理本操作确切 staging。
+`src/remote/transfer.ts` 的 `runRemoteCopy` 支持 `local → sftp`、`sftp → local` 与 `sftp → sftp`；`local → local` 为 `direction-unsupported`，在任何准入前拒绝。每次复制仍是七阶段：准入 A（`purpose: transfer`；目的端为远端时只读会话 `mode-denies`、capped 工具 `tool-capped`；两个远端端点必须分别声明 `read`/`export` 与 `write`/`import` 配对，缺配对 `transfer-pair-not-allowed`，配对存在但缺动作 `action-not-allowed`）→ 受缚源打开 → 目的预检（目标必须不存在）→ EXCL staging + 有界流 + SHA-256 + fsync + 回读、源版本复检 → 准入 B（epoch、授权指纹、有效模式、两端端点身份、两端 SFTP 代次，任一变化 `admission-changed` ⇒ `cancelled`）→ no-replace 发布 → 只清理本操作确切 staging。
 
 **源。** 本地源沿用 `O_NOFOLLOW` 的单 inode 绑定（普通文件、`nlink===1`、fd 与 lstat 同 inode、父目录 realpath 在根内、≤`maxBytes`）。远端源先对父目录与目标各做一次 `realpath`（必须与拼写相等，拒绝 symlink 替换），再 `lstat` 必须为普通文件且不超过上限，`open(P_READ)` 后复检 size/mtime；读完整流后再复检 size/mtime 与父/目标 realpath（`source-changed`）。SFTP v3 没有 inode 与 link count：远端源无法证明 `nlink===1`，同名替换与多硬链接由部署账户隔离承担，与路径型目标同一前提。
 

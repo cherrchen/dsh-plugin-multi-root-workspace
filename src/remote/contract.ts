@@ -27,6 +27,8 @@ export interface RemoteGrant {
   readonly configVersion: string
   readonly bindingDigest: string
   readonly addedAt: string
+  /** Durable incarnation; older registrations use addedAt until re-registered. */
+  readonly grantId?: string | undefined
 }
 
 /** One endpoint carried by an `admit` decision; local endpoints have no remote identity. */
@@ -36,6 +38,7 @@ export interface AdmittedRemoteEndpoint {
   readonly displayPath: string
   readonly verifiedTarget: { readonly kind: 'object' | 'path'; readonly value: string } | null
   readonly bindingDigest: string | null
+  readonly environmentDigest: string | null
   readonly configVersion: string | null
 }
 
@@ -43,7 +46,7 @@ export interface AdmittedRemoteEndpoint {
 export interface RemoteAdmission {
   readonly decision: 'admit'
   readonly epoch: string
-  readonly revision: number
+  readonly authorizationFingerprint: string
   readonly primary: string
   readonly endpoints: readonly AdmittedRemoteEndpoint[]
 }
@@ -102,7 +105,7 @@ export interface RemoteOperationIdentity {
   readonly sessionId: string
   readonly primaryRoot: string
   readonly authorityEpoch: string | undefined
-  readonly revision: number
+  readonly authorizationFingerprint: string
   readonly effectiveMode: 'read-only' | 'workspace-write'
 }
 

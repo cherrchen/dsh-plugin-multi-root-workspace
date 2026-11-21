@@ -1433,14 +1433,14 @@ describe('the remote-environment section', () => {
     rootId: 'app',
     path: '/srv/root',
     platform: 'linux',
-    target: 'deploy@build.example:2222',
+    target: 'ssh://deploy@build.example:2222',
     state: 'unregistered',
     actions: ['read', 'write', 'exec'],
     transfers: [{ direction: 'import', environmentId: 'local', rootId: 'primary' }],
     capabilities: { read: false, write: false, exec: false, receive: false, send: false },
     reason: 'remote-unregistered',
   }
-  const ENDPOINT_LOCATION = 'deploy@build.example:2222/srv/root'
+  const ENDPOINT_LOCATION = 'ssh://deploy@build.example:2222/srv/root'
 
   it('hides the section entirely while the control plane is disabled and issues no remote action', async () => {
     const harness = mount()
@@ -1500,6 +1500,9 @@ describe('the remote-environment section', () => {
     expect(screen.queryByRole('button', { name: `${NS}.panel.remoteRemove` })).toBeNull()
     fireEvent.click(within(remoteRow).getByRole('button', { name: `${NS}.panel.more` }))
     fireEvent.click(screen.getByRole('button', { name: `${NS}.panel.remoteRemove` }))
+    const confirm = await screen.findByRole('dialog', { name: `${NS}.panel.remoteRemove` })
+    expect(harness.calls.some(call => call.endpoint === 'removeRemote')).toBe(false)
+    fireEvent.click(within(confirm).getByRole('button', { name: `${NS}.ssh.confirmDelete` }))
     await waitFor(() => { expect(screen.getByTitle(`${NS}.remote.state.unregistered`)).toBeTruthy() })
     expect(harness.calls.find(call => call.endpoint === 'removeRemote')?.payload)
       .toEqual({ sessionId: 'session-1', environmentId: 'build', rootId: 'app' })

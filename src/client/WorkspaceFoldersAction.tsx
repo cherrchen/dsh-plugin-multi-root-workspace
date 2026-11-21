@@ -28,6 +28,7 @@
 
 import { useCallback, useEffect, useRef, useState, type KeyboardEvent as ReactKeyboardEvent, type ReactNode } from 'react'
 import { createPortal } from 'react-dom'
+import { sshLocation } from '../remote/ssh-location.ts'
 import { Menu, Modal } from '@deepseek-ai/dsh-client-ui-primitives'
 import {
   IconAccessInherit,
@@ -43,7 +44,7 @@ import {
   IconTrash,
   IconWorkspaceTree,
 } from '../compat/client-icons.ts'
-import { errorHasDetail, errorKeyOf, PanelError, type PanelClient } from './panel-client.ts'
+import { PanelError, type PanelClient } from './panel-client.ts'
 import type { WorkspaceFoldersDialogController } from './workspace-folders-dialog.ts'
 import type { RemotesClient } from './remotes-client.ts'
 import type { RemoteModeControl } from '../compat/skills-client.ts'
@@ -1035,7 +1036,7 @@ export function WorkspaceFoldersDialog(props: WorkspaceFoldersActionProps & { on
                   // The panel row shows where the workspace lives, not just
                   // its POSIX path: personal targets carry the resolved port,
                   // deployment manifests have no port to show.
-                  const location = endpoint.target === undefined ? endpoint.path : `${endpoint.target}${endpoint.path}`
+                  const location = sshLocation(endpoint.target, endpoint.path)
                   return <WorkspaceRow
                     key={key}
                     t={t}

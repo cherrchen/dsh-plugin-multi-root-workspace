@@ -5,13 +5,13 @@
  * identity (dev:ino) the grant pins to.
  */
 import type { RemoteEndpointVerifier } from './contract.ts'
-import type { RemoteBinding, RemoteEnvironment } from './manifest.ts'
+import { environmentDigest, type RemoteBinding, type RemoteEnvironment } from './manifest.ts'
 import type { SshEnvironment, SftpEnvironment } from './ssh-environment.ts'
 
 /** The two connection openings verification needs; the SSH manager implements it. */
 export interface SshEndpointManager {
-  open(environmentId: string, workspace?: string): Promise<SshEnvironment>
-  openSftp(environmentId: string): Promise<SftpEnvironment>
+  open(environmentId: string, workspace?: string, expectedDigest?: string): Promise<SshEnvironment>
+  openSftp(environmentId: string, signal?: AbortSignal, expectedDigest?: string): Promise<SftpEnvironment>
 }
 
 /** Verification errors keep the registry's RemoteAdmissionError codes. */
@@ -28,7 +28,7 @@ export class SshEndpointVerifier implements RemoteEndpointVerifier {
   async verify(environment: RemoteEnvironment, binding: Pick<RemoteBinding, 'path'>, signal: AbortSignal, workspace = binding.path): Promise<{ platform: 'linux' | 'darwin'; target: { kind: 'object' | 'path'; value: string } }> {
     if (environment.transport === 'sftp') return await this.verifySftp(environment, binding, signal)
     if (signal.aborted) throw new EndpointVerifyError('endpoint-unverifiable', 'verification aborted')
-    const env = await this.manager.open(environment.environmentId, workspace)
+    const env = await this.manager.open(environment.environmentId, workspace, environmentDigest(environment))
     if (signal.aborted) throw new EndpointVerifyError('endpoint-unverifiable', 'verification aborted')
     const policy = { mode: 'read-only' as const, workspaceRoot: workspace, sessionId: 'endpoint-verification' }
     const confined = await env.sandbox.confine([String(env.hello.executable), '-e',
@@ -81,7 +81,7 @@ export class SshEndpointVerifier implements RemoteEndpointVerifier {
    * manifest's declared platform stands in for the absent remote handshake.
    */
   private async verifySftp(environment: RemoteEnvironment, binding: Pick<RemoteBinding, 'path'>, signal: AbortSignal): Promise<{ platform: 'linux' | 'darwin'; target: { kind: 'object' | 'path'; value: string } }> {
-    const env = await this.manager.openSftp(environment.environmentId)
+    const env = await this.manager.openSftp(environment.environmentId, signal, environmentDigest(environment))
     if (signal.aborted) throw new EndpointVerifyError('endpoint-unverifiable', 'verification aborted')
     const real = await env.client.realpath(binding.path).catch((error: unknown) => {
       throw new EndpointVerifyError('endpoint-unverifiable', `realpath failed: ${error instanceof Error ? error.message : String(error)}`)

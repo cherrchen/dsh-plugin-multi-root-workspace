@@ -5,6 +5,7 @@
  * body so a revocation between them can never reach a spawned process. No
  * retry, no reconnect: uncertainty is reported, not replayed.
  */
+import { setTimeout as delay } from 'node:timers/promises'
 import { posix } from 'node:path'
 import type { MultiRootRegistry } from '../registry.ts'
 import { RemoteAdmissionError } from './contract.ts'
@@ -81,6 +82,11 @@ export type RemoteCommandResult =
     })
   | (Base & { status: 'unknown'; reconcileId: string; reason: string; termination?: 'timeout' | 'cancelled' | 'revoked' })
 
+const TRANSIENT_ADMISSION_ERRORS = new Set([
+  'remote-unavailable', 'config-digest-mismatch', 'owner-without-remote-protocol',
+  'authority-unavailable', 'authority-disconnected', 'authority-busy',
+])
+
 const notStarted = (base: Base, code: string): RemoteCommandResult =>
   base.operationId === undefined
     ? { environmentId: base.environmentId, rootId: base.rootId, status: 'not-started', code }
@@ -93,6 +99,7 @@ function checkCwdRelative(cwdRelative: string): boolean {
 
 interface Prep {
   readonly epoch: string | undefined
+  readonly authorizationFingerprint: string
   readonly effectiveMode: string
   readonly endpoint: AdmittedRemoteEndpoint
   readonly generation: string
@@ -107,7 +114,7 @@ interface Prep {
  */
 export async function runRemoteCommand(
   registry: MultiRootRegistry,
-  backendFor: (environmentId: string, workspace: string) => RemoteExecutionBackend | undefined,
+  backendFor: (environmentId: string, workspace: string, environmentDigest?: string) => RemoteExecutionBackend | undefined,
   request: RemoteCommandRequest,
   toolName: string,
   signal: AbortSignal,
@@ -125,7 +132,7 @@ export async function runRemoteCommand(
     prep = await registry.withRemoteOperation(admission(), async operation => {
       const denied = (code: string): RemoteCommandResult => notStarted({ ...base, operationId: operation.identity.operationId }, code)
       const admitted = operation.endpoints[0]!
-      const backend = backendFor(request.environmentId, admitted.displayPath)
+      const backend = backendFor(request.environmentId, admitted.displayPath, admitted.environmentDigest ?? undefined)
       if (backend === undefined) return denied('backend-unavailable')
       const cwdRelative = request.cwdRelative ?? ''
       if (!checkCwdRelative(cwdRelative)) return denied('invalid-cwd')
@@ -148,7 +155,8 @@ export async function runRemoteCommand(
       } catch { return denied('confine-failed') }
       if (confined.enforcement !== 'full') return denied('sandbox-unverified')
       return {
-        epoch: operation.identity.authorityEpoch, effectiveMode: operation.identity.effectiveMode,
+        epoch: operation.identity.authorityEpoch, authorizationFingerprint: operation.identity.authorizationFingerprint,
+        effectiveMode: operation.identity.effectiveMode,
         endpoint: admitted, generation: confined.generation, argv: confined.argv, remoteCwd, deployment,
       } satisfies Prep
     })
@@ -161,16 +169,17 @@ export async function runRemoteCommand(
   // Admission B: the FINAL launch admission. The identical request re-enters
   // the owner's ordering point; a revocation since A denies here and spawn is
   // never called. The argv built under A is never cached across calls.
-  interface Launched { revision: number; operationId: string; handle: RemoteProcessHandle; stdout: Sink; stderr: Sink }
+  interface Launched { operationId: string; handle: RemoteProcessHandle; stdout: Sink; stderr: Sink }
   let launch: { result: RemoteCommandResult } | { launched: Launched }
   try {
     launch = await registry.withRemoteOperation(admission(), operation => {
       const denied = (code: string) => ({ result: notStarted({ ...base, operationId: operation.identity.operationId }, code) })
       if (signal.aborted) return denied('cancelled')
       const admitted = operation.endpoints[0]!
-      const backend = backendFor(request.environmentId, admitted.displayPath)
+      const backend = backendFor(request.environmentId, admitted.displayPath, admitted.environmentDigest ?? undefined)
       if (backend === undefined) return denied('backend-unavailable')
       const unchanged = operation.identity.authorityEpoch === prep!.epoch
+        && operation.identity.authorizationFingerprint === prep!.authorizationFingerprint
         && operation.identity.effectiveMode === prep!.effectiveMode
         && admitted.environmentId === prep!.endpoint.environmentId && admitted.rootId === prep!.endpoint.rootId
         && admitted.displayPath === prep!.endpoint.displayPath && admitted.bindingDigest === prep!.endpoint.bindingDigest
@@ -184,7 +193,7 @@ export async function runRemoteCommand(
         const handle = backend.spawn(prep!.argv, {
           cwd: prep!.remoteCwd, env: prep!.deployment.env, generation: prep!.generation,
         }, { stdout: stdout.append, stderr: stderr.append })
-        return { launched: { revision: operation.identity.revision, operationId: operation.identity.operationId, handle, stdout, stderr } }
+        return { launched: { operationId: operation.identity.operationId, handle, stdout, stderr } }
       } catch (error) {
         return { result: { ...base, operationId: operation.identity.operationId, status: 'admitted-may-start' as const, reason: error instanceof Error ? error.message : String(error) } }
       }
@@ -222,17 +231,24 @@ export async function runRemoteCommand(
     checking = true
     const timer = setTimeout(() => terminateOnce('revoked'), 1_000)
     try {
-      await registry.withRemoteOperation(admission(), operation => {
-        // Conservatively end the operation on any grant-store revision change:
-        // remove+re-add between observations must not revive a running grant.
-        if (operation.identity.authorityEpoch !== prep.epoch
-          || operation.identity.revision !== launch.launched.revision
-          || operation.identity.effectiveMode !== prep.effectiveMode
-          || operation.endpoints[0]!.bindingDigest !== prep.endpoint.bindingDigest
-          || backendFor(request.environmentId, prep.endpoint.displayPath)?.currentGeneration() !== prep.generation) terminateOnce('revoked')
-      })
-    } catch { terminateOnce('revoked') }
-    finally { clearTimeout(timer); checking = false }
+      while (active && termination === undefined && !signal.aborted) {
+        try {
+          await registry.withRemoteOperation(admission(), operation => {
+            if (operation.identity.authorityEpoch !== prep.epoch
+              || operation.identity.authorizationFingerprint !== prep.authorizationFingerprint
+              || operation.identity.effectiveMode !== prep.effectiveMode
+              || backendFor(request.environmentId, prep.endpoint.displayPath, prep.endpoint.environmentDigest ?? undefined)?.currentGeneration() !== prep.generation) terminateOnce('revoked')
+          })
+          return
+        } catch (error) {
+          if (!(error instanceof RemoteAdmissionError) || !TRANSIENT_ADMISSION_ERRORS.has(error.code)) {
+            terminateOnce('revoked')
+            return
+          }
+          await delay(50)
+        }
+      }
+    } finally { clearTimeout(timer); checking = false }
   }
   const unsubscribe = registry.onRemoteChange(() => { void checkGrant() })
   const poll = setInterval(() => { void checkGrant() }, 250)

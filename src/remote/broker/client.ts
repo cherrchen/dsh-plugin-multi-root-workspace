@@ -222,6 +222,7 @@ class BrokerSftp {
     readonly environmentId: string,
     version: SftpVersion,
     private readonly generation: string,
+    private readonly invalidate: () => void,
   ) { this.version = version }
 
   get negotiated(): SftpVersion { return this.version }
@@ -261,7 +262,10 @@ class BrokerSftp {
   async remove(path: string): Promise<void> { await this.call('remove', { path }) }
   async hardlink(oldPath: string, newPath: string): Promise<void> { await this.call('hardlink', { oldPath, newPath }) }
   async fsync(handle: Buffer): Promise<void> { await this.call('fsync', { handle: encodeData(handle) }) }
-  dispose(): void { void this.connection.request('sftp', { environmentId: this.environmentId, generation: this.generation, op: 'dispose' }).catch(() => {}) }
+  dispose(): void {
+    this.invalidate()
+    void this.connection.request('sftp', { environmentId: this.environmentId, generation: this.generation, op: 'dispose' }).catch(() => {})
+  }
 }
 
 const DEFINITE_SPAWN_REFUSALS = new Set([
@@ -303,14 +307,19 @@ export class BrokerEnvironmentManager implements RemoteToolsManager {
     const opened = await this.connection.request<{ generation: string; version: SftpVersion }>('openSftp', { environmentId })
     const existing = this.sftp.get(environmentId)
     if (existing !== undefined && existing.generation === opened.generation) return existing
-    const client = new BrokerSftp(this.connection, environmentId, opened.version, opened.generation) as unknown as SftpClient
+    const invalidate = (): void => {
+      if (this.sftp.get(environmentId)?.generation !== opened.generation) return
+      this.sftp.delete(environmentId)
+      this.sftpGenerations.delete(environmentId)
+    }
+    const client = new BrokerSftp(this.connection, environmentId, opened.version, opened.generation, invalidate) as unknown as SftpClient
     const environment: SftpEnvironment = {
       environmentId,
       generation: opened.generation,
       client,
       version: opened.version,
       dispose: async () => {
-        if (this.sftp.get(environmentId) === environment) this.sftp.delete(environmentId)
+        invalidate()
         await this.connection.request('sftp', { environmentId, generation: opened.generation, op: 'dispose' }).catch(() => {})
       },
     }
@@ -362,7 +371,8 @@ export class BrokerEnvironmentManager implements RemoteToolsManager {
 
   generationOf(environmentId: string): string { return this.generations.get(environmentId) ?? 'stale' }
 
-  markStale(environmentId: string): void {
+  markStale(environmentId: string, _workspace?: string, generation?: string): void {
+    if (generation !== undefined && this.generationOf(environmentId) !== generation) return
     this.environments.delete(environmentId)
     this.generations.delete(environmentId)
     this.sftp.delete(environmentId)

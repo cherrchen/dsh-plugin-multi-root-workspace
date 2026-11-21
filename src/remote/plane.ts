@@ -4,6 +4,7 @@
  * object owned by `MultiRootRegistry`; it shares the registry's lease,
  * medium, and operation queue but never the v1 records.
  */
+import { createHash, randomUUID } from 'node:crypto'
 import type { Context } from '@deepseek-ai/cordis'
 import type { KvTable } from '@deepseek-ai/dsh-storage-domain'
 import { openAuthorityStorage } from '../compat/authority-storage.ts'
@@ -13,7 +14,7 @@ import type {
   RemoteGrant, RemotePurpose, RemoteSnapshotReply, RemoteStatus,
 } from './contract.ts'
 import { RemoteAdmissionError } from './contract.ts'
-import { bindingDigest, loadDeploymentManifest, ManifestError, type DeploymentManifest } from './manifest.ts'
+import { bindingDigest, environmentDigest, loadDeploymentManifest, ManifestError, type DeploymentManifest } from './manifest.ts'
 import { loadPersonalManifest, type PersonalManifest } from './personal/config.ts'
 import { findBinding, grantState, remoteDomainSpec, REMOTE_TABLE_NAME, type PersistedRemoteGrants } from './records.ts'
 import { RemoteClient, RemoteServer } from './protocol.ts'
@@ -111,11 +112,11 @@ export class RemoteControlPlane {
 
   /**
    * Personal mode: check both protected stores before every remote operation.
-   * @returns 'unchanged' | 'reloaded' (digest may or may not differ — the
-   *   caller decides whether a re-listen/re-hello is needed) | 'disabled'.
+   * A personal reload publishes facts synchronously and retains the grant
+   * domain and IPC channel. Invalid facts immediately close admission.
    */
-  refreshPersonal(path?: string): 'unchanged' | 'reloaded' | 'disabled' | 'missing' | 'invalid' {
-    if (!this.enabled || this.mode !== 'personal') return 'disabled'
+  refreshPersonal(path?: string): 'unchanged' | 'reloaded' | 'disabled' | 'invalid' {
+    if (!this.enabled || this.mode !== 'personal' || this.state.state === 'storage-failed') return 'disabled'
     const target = path ?? this.liveManifestPath ?? this.config?.personalPath
     if (target === undefined) return 'disabled'
     let loaded: PersonalManifest
@@ -123,11 +124,13 @@ export class RemoteControlPlane {
       loaded = loadPersonalManifest(target, this.personalSnapshot)
       if (loaded === this.personalSnapshot) return 'unchanged'
     } catch (error) {
+      const reason = error instanceof Error ? error.message : String(error)
+      if (this.state.state === 'config-invalid' && this.state.reason === reason) return 'unchanged'
       this.manifest = undefined
       this.manifestDigest = undefined
       this.personalRevision = 0
       this.personalSnapshot = undefined
-      this.setState('config-invalid', error instanceof Error ? error.message : String(error))
+      this.setState('config-invalid', reason)
       return 'invalid'
     }
     const changed = loaded.digest !== this.manifestDigest
@@ -135,6 +138,7 @@ export class RemoteControlPlane {
     this.manifestDigest = loaded.digest
     this.personalRevision = loaded.revision
     this.personalSnapshot = loaded
+    if (this.table !== undefined && this.state.state === 'config-invalid') this.setState('ready')
     return changed ? 'reloaded' : 'unchanged'
   }
 
@@ -148,7 +152,19 @@ export class RemoteControlPlane {
     }
   }
 
+  requireReady(): void {
+    if (this.state.state !== 'ready') {
+      throw new RemoteAdmissionError('remote-unavailable', `the remote control plane is ${this.state.state}${this.state.reason === undefined ? '' : `: ${this.state.reason}`}`)
+    }
+  }
+
+  private requireOwner(): void {
+    this.requireReady()
+    if (this.table === undefined) throw new RemoteAdmissionError('remote-unavailable', 'the remote grant store is closed')
+  }
+
   private grantsOf(key: string): readonly RemoteGrant[] {
+    this.requireOwner()
     try {
       return this.table?.get(key)?.grants ?? []
     } catch (error) {
@@ -169,6 +185,7 @@ export class RemoteControlPlane {
 
   /** Owner-side snapshot; called inside the registry's operation queue. */
   snapshot(key: string, epoch: string): RemoteSnapshotReply {
+    this.requireReady()
     return {
       epoch, revision: this.revision, primary: key, manifestDigest: this.manifestDigest!,
       grants: this.grantsOf(key).map(grant => ({ ...grant, state: grantState(this.manifest!, key, grant) })),
@@ -181,6 +198,7 @@ export class RemoteControlPlane {
    * change during the verify window is refused rather than written.
    */
   async commitAdd(key: string, ref: RemoteEndpointRef, digest: string, verifiedTarget: RemoteGrant['verifiedTarget'], epoch: string): Promise<RemoteSnapshotReply> {
+    this.requireOwner()
     const found = findBinding(this.manifest!, key, ref)
     if (found === undefined || bindingDigest(found.environment, found.binding) !== digest) {
       throw new RemoteAdmissionError('binding-changed', 'the deployment binding changed while the endpoint was being verified; retry the add')
@@ -189,7 +207,7 @@ export class RemoteControlPlane {
     const existing = grants.findIndex(grant => grant.environmentId === ref.environmentId && grant.rootId === ref.rootId)
     const record: RemoteGrant = {
       environmentId: ref.environmentId, rootId: ref.rootId, displayPath: found.binding.path,
-      verifiedTarget, configVersion: this.manifest!.configVersion, bindingDigest: digest, addedAt: new Date().toISOString(),
+      verifiedTarget, configVersion: this.manifest!.configVersion, bindingDigest: digest, addedAt: new Date().toISOString(), grantId: randomUUID(),
     }
     if (existing !== -1 && grants[existing]!.bindingDigest === digest) return this.snapshot(key, epoch)
     const next = [...grants]
@@ -201,6 +219,7 @@ export class RemoteControlPlane {
 
   /** Owner-side remove; called inside the queue. */
   async remove(key: string, ref: RemoteEndpointRef, epoch: string): Promise<RemoteSnapshotReply> {
+    this.requireReady()
     const grants = this.grantsOf(key)
     const next = grants.filter(grant => !(grant.environmentId === ref.environmentId && grant.rootId === ref.rootId))
     if (next.length === grants.length) throw new RemoteAdmissionError('endpoint-not-registered', `no remote grant is registered for ${ref.environmentId}:${ref.rootId}`)
@@ -213,23 +232,28 @@ export class RemoteControlPlane {
    * `captureSnapshot`/`admit` on the v1 side.
    */
   admit(key: string, request: { purpose: RemotePurpose; endpoints: readonly RemoteEndpointRef[]; manifestDigest: string }, epoch: string): RemoteAdmission {
+    this.requireReady()
     if (request.manifestDigest !== this.manifestDigest) {
       throw new RemoteAdmissionError('config-digest-mismatch', 'the deployment manifest digest does not match the owner\'s')
     }
     const manifest = this.manifest!
     const grants = this.grantsOf(key)
+    const identities: unknown[] = []
     const admitted = (ref: RemoteEndpointRef): AdmittedRemoteEndpoint => {
       if (ref.environmentId === 'local') {
-        return { environmentId: 'local', rootId: ref.rootId, displayPath: ref.rootId, verifiedTarget: null, bindingDigest: null, configVersion: null }
+        identities.push([ref.environmentId, ref.rootId])
+        return { environmentId: 'local', rootId: ref.rootId, displayPath: ref.rootId, verifiedTarget: null, bindingDigest: null, environmentDigest: null, configVersion: null }
       }
       const grant = grants.find(candidate => candidate.environmentId === ref.environmentId && candidate.rootId === ref.rootId)
       if (grant === undefined) throw new RemoteAdmissionError('endpoint-not-registered', `no remote grant is registered for ${ref.environmentId}:${ref.rootId}`)
       const state = grantState(manifest, key, grant)
       if (state === 'revoked') throw new RemoteAdmissionError('endpoint-revoked', `the remote grant for ${ref.environmentId}:${ref.rootId} was revoked`)
       if (state === 'withheld') throw new RemoteAdmissionError('endpoint-withheld', `the remote grant for ${ref.environmentId}:${ref.rootId} is withheld pending re-registration`)
+      identities.push([ref.environmentId, ref.rootId, grant.grantId ?? grant.addedAt, grant.bindingDigest, grant.verifiedTarget])
       return {
         environmentId: ref.environmentId, rootId: ref.rootId, displayPath: grant.displayPath,
         verifiedTarget: grant.verifiedTarget, bindingDigest: grant.bindingDigest, configVersion: grant.configVersion,
+        environmentDigest: environmentDigest(findBinding(manifest, key, ref)!.environment),
       }
     }
     let endpoints: AdmittedRemoteEndpoint[]
@@ -268,7 +292,8 @@ export class RemoteControlPlane {
       }
       endpoints = [endpoint]
     }
-    return { decision: 'admit', epoch, revision: this.revision, primary: key, endpoints }
+    const authorizationFingerprint = createHash('sha256').update(JSON.stringify([key, request.purpose, identities])).digest('hex')
+    return { decision: 'admit', epoch, authorizationFingerprint, primary: key, endpoints }
   }
 
   /** Verify outside the queue; the queued recheck is {@link commitAdd}. */
@@ -277,6 +302,7 @@ export class RemoteControlPlane {
     ref: RemoteEndpointRef,
     signal: AbortSignal,
   ): Promise<{ digest: string; verifiedTarget: RemoteGrant['verifiedTarget'] }> {
+    this.requireOwner()
     const found = findBinding(this.manifest!, key, ref)
     if (found === undefined) throw new RemoteAdmissionError('binding-not-authorized', `no deployment binding authorizes ${ref.environmentId}:${ref.rootId} for this primary root`)
     if (this.verifier === undefined) throw new RemoteAdmissionError('endpoint-unverifiable', 'no remote endpoint verifier is configured; remote endpoints cannot be registered')
@@ -294,24 +320,31 @@ export class RemoteControlPlane {
    * Open the remote domain and the remote-1 listener under the held lease.
    * Failures degrade the remote side only — the local registry commits normally.
    */
-  async openOwner(ctx: Context, medium: Medium, epoch: string, dispatch: (method: string, args: unknown[]) => Promise<unknown>): Promise<void> {
-    if (!this.enabled || this.manifest === undefined) return
+  async openOwner(ctx: Context, medium: Medium, epoch: string, dispatch: (method: string, args: unknown[], manifestDigest?: string) => Promise<unknown>): Promise<void> {
+    if (!this.enabled || (this.manifest === undefined && !(this.mode === 'personal' && this.state.state === 'config-invalid'))) return
     // A retryable v1 failure keeps this handle open; never stack a second one.
     await this.closeOwner()
     try {
       const domain = await openAuthorityStorage(ctx, medium.root, remoteDomainSpec)
       try {
-        this.server = await RemoteServer.listen(medium.remoteEndpoint!, { store: medium.id, epoch, manifestDigest: this.manifestDigest! }, dispatch as never)
+        this.server = await RemoteServer.listen(medium.remoteEndpoint!, { store: medium.id, epoch, manifestDigest: () => this.digestForHello() }, dispatch)
       } catch (error) {
         // The listener is for followers; a failure must not block owner-side ops.
         this.logger.warn(`multi-root-workspace: remote-1 listener failed (${error instanceof Error ? error.message : String(error)}); followers cannot reach the remote plane`)
       }
       this.domain = domain
       this.table = domain.table(REMOTE_TABLE_NAME) as KvTable<string, PersistedRemoteGrants>
-      this.setState('ready')
+      if (this.manifest !== undefined) this.setState('ready')
     } catch (error) {
       this.setState('storage-failed', error instanceof Error ? error.message : String(error))
     }
+  }
+
+  private digestForHello(): string | undefined {
+    if (this.mode !== 'personal') return this.manifestDigest
+    const path = this.liveManifestPath ?? this.config?.personalPath
+    if (path === undefined) return undefined
+    try { return loadPersonalManifest(path, this.personalSnapshot).digest } catch { return undefined }
   }
 
   /** The v1 store failed: stop serving remote admission too. */
@@ -337,9 +370,12 @@ export class RemoteControlPlane {
       const adopted: { client: RemoteClient | undefined } = { client: undefined }
       const client = await RemoteClient.connect(medium.remoteEndpoint!, medium.id, this.manifestDigest!, () => {
         if (adopted.client === undefined) return
-        if (this.client === adopted.client) this.client = undefined
+        const current = this.client === adopted.client
         adopted.client = undefined
-        this.setState('owner-without-remote-protocol', 'the remote channel closed')
+        if (current) {
+          this.client = undefined
+          if (this.state.state === 'ready') this.setState('owner-without-remote-protocol', 'the remote channel closed')
+        }
       })
       adopted.client = client
       if (client.epoch !== epoch) { client.close(); adopted.client = undefined; this.setState('epoch-mismatch', 'the remote-1 epoch differs from the v1 authority epoch'); return }
@@ -361,15 +397,11 @@ export class RemoteControlPlane {
     }
   }
 
-  async severForInvalid(reason: string | undefined): Promise<void> {
-    this.dropFollower()
-    await this.closeOwner()
-    this.setState('config-invalid', reason)
-  }
-
   /** The v1 client died: the remote channel dies with it; a new epoch needs a new hello. */
   dropFollower(): void {
-    this.client?.close(); this.client = undefined
+    const client = this.client
+    this.client = undefined
+    client?.close()
     if (this.enabled && this.manifest !== undefined && this.state.state === 'ready') {
       this.setState('owner-without-remote-protocol', 'the remote channel closed with the registry connection')
     }
@@ -380,7 +412,7 @@ export class RemoteControlPlane {
     const client = this.client
     if (client === undefined) throw new RemoteAdmissionError('owner-without-remote-protocol', 'the remote control plane has no live remote-1 channel')
     try {
-      return await client.request(method, args)
+      return await client.request(method, args, this.manifestDigest)
     } catch (error) {
       const code = (error as { code?: unknown })?.code
       throw new RemoteAdmissionError(typeof code === 'string' ? code : 'remote-unavailable', error instanceof Error ? error.message : String(error))

@@ -36,7 +36,7 @@ export interface SshClient {
   credentialPassword(sessionId: string | undefined, label: string, password: string, signal?: AbortSignal): Promise<SshStateView>
   credentialRemove(sessionId: string | undefined, id: string, signal?: AbortSignal): Promise<SshStateView>
   hostKeyScan(sessionId: string | undefined, target: { hostname?: string; port?: number; alias?: string }, signal?: AbortSignal): Promise<SshScanResult>
-  environmentSave(sessionId: string | undefined, revision: number, environment: unknown, fingerprint: string, hostKeyToken?: string, signal?: AbortSignal): Promise<SshStateView>
+  environmentSave(sessionId: string | undefined, revision: number, environment: unknown, fingerprint: string, hostKeyToken: string | undefined, intent: 'create' | 'update', signal?: AbortSignal): Promise<SshStateView>
   environmentRemove(sessionId: string | undefined, revision: number, environmentId: string, signal?: AbortSignal): Promise<SshStateView>
   environmentTest(sessionId: string | undefined, environmentId: string, signal?: AbortSignal): Promise<{ platform: string; nodePath?: string; nodeVersion?: string }>
   helperInstall(sessionId: string | undefined, revision: number, environmentId: string, nodePath?: string, signal?: AbortSignal): Promise<SshStateView>
@@ -112,7 +112,7 @@ export function createSshClient(connection: Channel, channel: typeof PANEL_CHANN
       ...(target.hostname === undefined ? {} : { hostname: target.hostname }),
       ...(target.alias === undefined ? {} : { alias: target.alias }),
     }, signal),
-    environmentSave: async (sessionId, revision, environment, fingerprint, hostKeyToken, signal) => await call('sshEnvironmentSave', { sessionId, revision, environment, fingerprint, ...(hostKeyToken === undefined ? {} : { hostKeyToken }) }, signal),
+    environmentSave: async (sessionId, revision, environment, fingerprint, hostKeyToken, intent, signal) => await call('sshEnvironmentSave', { sessionId, revision, intent, environment, fingerprint, ...(hostKeyToken === undefined ? {} : { hostKeyToken }) }, signal),
     environmentRemove: async (sessionId, revision, environmentId, signal) => await call('sshEnvironmentRemove', { sessionId, revision, environmentId }, signal),
     environmentTest: async (sessionId, environmentId, signal) => await call('sshEnvironmentTest', { sessionId, environmentId }, signal),
     helperInstall: async (sessionId, revision, environmentId, nodePath, signal) => await call('sshHelperInstall', { sessionId, revision, environmentId, ...(nodePath === undefined ? {} : { nodePath }) }, signal),

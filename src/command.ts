@@ -29,6 +29,7 @@
  * @module @dsh-electron/dsh-plugin-multi-root-workspace/command
  */
 
+import { sshTarget } from './remote/ssh-location.ts'
 import { AuthorityRpcError } from './authority/protocol.ts'
 import { statSync } from 'node:fs'
 import { isAbsolute } from 'node:path'
@@ -749,8 +750,8 @@ export function remoteTargetOf(
   environment: Pick<RemoteEnvironment, 'account' | 'connection'>,
   personal?: Pick<PersonalEnvironment, 'endpoint'> | undefined,
 ): string {
-  if (personal !== undefined) return `${personal.endpoint.user}@${personal.endpoint.hostname}:${personal.endpoint.port}`
-  return `${environment.account}@${environment.connection.host}`
+  if (personal !== undefined) return sshTarget(personal.endpoint.user, personal.endpoint.hostname, personal.endpoint.port)
+  return sshTarget(environment.account, environment.connection.host)
 }
 
 /**

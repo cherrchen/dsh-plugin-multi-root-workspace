@@ -66,7 +66,7 @@ async function sshState(registry: MultiRootRegistry, paths: PersonalPaths, prima
     enabled: registry.remoteEnabled,
     linked: linkStatus(paths.credentialRoot).linked,
     revision: config.revision,
-    environments: config.environments,
+    environments: config.environments.map(({ identityId: _identityId, ...environment }) => environment),
     credentials: store.list(),
     bindings: key === undefined ? [] : config.bindings.filter(binding => primaryKey(binding.primary) === key)
       .map(({ bindingId: _bindingId, ...binding }) => binding),
@@ -76,10 +76,15 @@ async function sshState(registry: MultiRootRegistry, paths: PersonalPaths, prima
 async function mutate(
   registry: MultiRootRegistry, primary: string | undefined, paths: PersonalPaths,
   expectedRevision: number, edit: (config: PersonalConfig) => PersonalConfig | Promise<PersonalConfig>,
+  beforeCommit?: () => void,
 ): Promise<SshStateView> {
   const config = loadPersonalConfig(paths.personalPath)
+  if (config.revision !== expectedRevision) {
+    throw new RemoteAdmissionError('personal-config-conflict', 'the personal config revision changed; reload and retry')
+  }
   const next = await edit(config)
-  await savePersonalConfig(paths.personalPath, { ...next, revision: next.revision + 1 }, expectedRevision)
+  if (next === config) return await sshState(registry, paths, primary)
+  await savePersonalConfig(paths.personalPath, { ...next, revision: next.revision + 1 }, expectedRevision, beforeCommit)
   if (next.environments !== config.environments) renderSshConfig(loadPersonalConfig(paths.personalPath), paths.credentialRoot)
   await registry.refreshRemotePersonal().catch(() => {})
   return await sshState(registry, paths, primary)
@@ -89,6 +94,16 @@ function findEnvironment(config: PersonalConfig, environmentId: string): Persona
   const environment = config.environments.find(entry => entry.environmentId === environmentId)
   if (environment === undefined) throw new RemoteAdmissionError('environment-not-found', `unknown environment "${environmentId}"`)
   return environment
+}
+
+function sameMembers(left: readonly string[], right: readonly string[]): boolean {
+  const entries = new Set(left)
+  const other = new Set(right)
+  return entries.size === other.size && [...other].every(entry => entries.has(entry))
+}
+
+function transferKeys(transfers: import('./manifest.ts').RemoteBinding['transfers']): string[] {
+  return (transfers ?? []).map(({ direction, peer }) => JSON.stringify([direction, peer.environmentId, peer.rootId]))
 }
 
 /** Allocate within the same workspace and environment as the new binding. */
@@ -167,7 +182,16 @@ async function runPersonalEndpoint(
         throw new RemoteAdmissionError('remote-path-listing-failed', 'the remote path must be an absolute POSIX path')
       }
       const config = loadPersonalConfig(paths.personalPath)
-      return await listRemoteDirectories(findEnvironment(config, call.environmentId), paths.credentialRoot, call.path)
+      const environment = findEnvironment(config, call.environmentId)
+      if (environment.credential.kind === 'ssh-config') {
+        const { endpoint, fingerprint } = await sshConfigIdentity(exec, environment.credential.alias, join(paths.credentialRoot, 'known_hosts'))
+        if (endpoint.hostname !== environment.endpoint.hostname || endpoint.port !== environment.endpoint.port) {
+          throw new RemoteAdmissionError('host-identity-unverifiable', 'the resolved SSH hostname or port differs from the saved target')
+        }
+        if (endpoint.user !== environment.endpoint.user) throw new RemoteAdmissionError('account-mismatch', 'the SSH alias resolves a different account')
+        if (fingerprint !== environment.hostKey) throw new RemoteAdmissionError('host-key-mismatch', 'the SSH alias resolves a different host key')
+      }
+      return await listRemoteDirectories(environment, paths.credentialRoot, call.path)
     }
     case 'sshCredentialGenerate':
       await store.generate(call.label)
@@ -188,28 +212,41 @@ async function runPersonalEndpoint(
     case 'sshHostKeyScan': {
       if (call.alias !== undefined) {
         // Alias scan: the fingerprint lives in the user's own known_hosts,
-        // so no network probe and no token — save re-runs the same
-        // resolution and compares the confirmed fingerprint.
+        // so no network probe. The token pins both the resolved target
+        // and the saved known_hosts fingerprint through confirmation.
         const resolved = await sshConfigIdentity(exec, call.alias, join(paths.credentialRoot, 'known_hosts'))
-        return { token: '', keys: [{ type: 'known-hosts', fingerprint: resolved.fingerprint }], endpoint: resolved.endpoint }
+        return { token: activeScans.rememberAlias(call.alias, resolved.endpoint, resolved.fingerprint),
+          keys: [{ type: 'known-hosts', fingerprint: resolved.fingerprint }], endpoint: resolved.endpoint }
       }
       const { token, keys } = await activeScans.scan(call.hostname!, call.port)
       return { token, keys: keys.map(({ type, fingerprint }) => ({ type, fingerprint })) }
     }
     case 'sshEnvironmentSave': {
       const draft = { ...call.environment, endpoint: { ...call.environment.endpoint } }
-      const currentEnvironments = loadPersonalConfig(paths.personalPath).environments
+      const currentConfig = loadPersonalConfig(paths.personalPath)
+      const currentEnvironments = currentConfig.environments
       const previous = currentEnvironments.find(environment => environment.environmentId === draft.environmentId)
+      if (call.intent === 'create' && previous !== undefined) {
+        throw new RemoteAdmissionError('environment-id-conflict', 'an SSH connection with this ID already exists')
+      }
+      if (call.intent === 'update' && previous === undefined) {
+        throw new RemoteAdmissionError('environment-not-found', 'the SSH connection to edit no longer exists')
+      }
+      if (currentConfig.revision !== call.revision) {
+        throw new RemoteAdmissionError('personal-config-conflict', 'the personal config revision changed; reload and retry')
+      }
       // The recorded fingerprint may be reused for an update that changes only
       // connection metadata or capabilities: the target identity and the managed credential
       // must be untouched. A changed target still needs a fresh scan token.
-      const sameIdentity = previous !== undefined
+      const sameIdentity = (): boolean => previous !== undefined
+        && previous.platform === draft.platform
         && previous.endpoint.hostname === draft.endpoint.hostname
         && previous.endpoint.port === draft.endpoint.port
         && previous.endpoint.user === draft.endpoint.user
         && previous.credential.kind === draft.credential.kind
-        && (draft.credential.kind !== 'managed'
-          || (previous.credential.kind === 'managed' && previous.credential.credentialId === draft.credential.credentialId))
+        && (draft.credential.kind === 'managed'
+          ? previous.credential.kind === 'managed' && previous.credential.credentialId === draft.credential.credentialId
+          : previous.credential.kind === 'ssh-config' && previous.credential.alias === draft.credential.alias)
       const preservedHelper = (environments: readonly PersonalEnvironment[]): PersonalEnvironment['helper'] => {
         const found = environments.find(environment => environment.environmentId === draft.environmentId)
         if (found === undefined) return null
@@ -219,32 +256,30 @@ async function runPersonalEndpoint(
           && found.credential.kind === draft.credential.kind
         return sameTarget ? found.helper : null
       }
-      let hostKey: string
+      const hostKey = call.fingerprint
+      const mayReuse = sameIdentity() && previous?.hostKey === hostKey
+      let recordKey: (() => void) | undefined
+      if (draft.credential.kind === 'managed' && draft.exec !== undefined && preservedHelper(currentEnvironments) === null) {
+        throw new RemoteAdmissionError('exec-requires-helper', 'exec requires an installed remote helper; save without exec, install the helper, then enable it')
+      }
+      if (call.hostKeyToken === undefined && !mayReuse) {
+        throw new RemoteAdmissionError('host-key-token-required', 'confirm a new host key scan when the SSH identity changes')
+      }
       if (draft.credential.kind === 'ssh-config') {
-        // R4: never trust the draft's endpoint — resolve the user's own alias
-        // exactly as the scan did, then compare the confirmed fingerprint.
-        const resolved = await sshConfigIdentity(exec, draft.credential.alias, join(paths.credentialRoot, 'known_hosts'))
-        draft.endpoint = resolved.endpoint
-        if (resolved.fingerprint !== call.fingerprint) {
-          throw new RemoteAdmissionError('host-key-mismatch', 'the confirmed fingerprint does not match the user known_hosts')
+        const alias = draft.credential.alias
+        const { endpoint, fingerprint } = await sshConfigIdentity(exec, alias, join(paths.credentialRoot, 'known_hosts'))
+        if (fingerprint !== hostKey) {
+          throw new RemoteAdmissionError('host-key-mismatch', 'the confirmed fingerprint does not match the SSH alias')
         }
-        hostKey = call.fingerprint
-      } else {
-        if (draft.exec !== undefined && preservedHelper(currentEnvironments) === null) {
-          throw new RemoteAdmissionError('exec-requires-helper', 'exec requires an installed remote helper; save without exec, install the helper, then enable it')
+        if (call.hostKeyToken !== undefined) {
+          activeScans.resolve(call.hostKeyToken, fingerprint, endpoint.hostname, endpoint.port, alias, endpoint.user)
+        } else if (endpoint.hostname !== draft.endpoint.hostname || endpoint.port !== draft.endpoint.port || endpoint.user !== draft.endpoint.user) {
+          throw new RemoteAdmissionError('host-key-mismatch', 'the saved target no longer matches the SSH alias')
         }
-        if (call.hostKeyToken === undefined) {
-          // Workspace/capability edits reuse the already-recorded key only
-          // while the identity is unchanged; anything else must rescan.
-          if (!sameIdentity || previous === undefined || previous.hostKey !== call.fingerprint) {
-            throw new RemoteAdmissionError('host-key-token-required', 'a managed environment requires a host key scan token')
-          }
-          hostKey = call.fingerprint
-        } else {
-          const lines = activeScans.resolve(call.hostKeyToken, call.fingerprint)
-          recordKnownHost(paths.credentialRoot, draft.endpoint.hostname, draft.endpoint.port, lines)
-          hostKey = call.fingerprint
-        }
+        draft.endpoint = endpoint
+      } else if (call.hostKeyToken !== undefined) {
+        const lines = activeScans.resolve(call.hostKeyToken, hostKey, draft.endpoint.hostname, draft.endpoint.port)
+        recordKey = () => recordKnownHost(paths.credentialRoot, draft.endpoint.hostname, draft.endpoint.port, lines)
       }
       return await mutate(registry, primary, paths, call.revision, config => {
         const helper = preservedHelper(config.environments)
@@ -270,10 +305,13 @@ async function runPersonalEndpoint(
           ...config,
           environments: [
             ...config.environments.filter(environment => environment.environmentId !== draft.environmentId),
-            { ...draft, credential, environmentId: draft.environmentId, hostKey, helper } as PersonalEnvironment,
+            {
+              ...draft, credential, hostKey, helper,
+              identityId: sameIdentity() && previous?.hostKey === hostKey ? previous.identityId : randomUUID(),
+            },
           ],
         }
-      })
+      }, recordKey)
     }
     case 'sshEnvironmentRemove': {
       const removed = loadPersonalConfig(paths.personalPath).environments.find(environment => environment.environmentId === call.environmentId)
@@ -357,6 +395,9 @@ async function runPersonalEndpoint(
             throw new RemoteAdmissionError('personal-config-invalid', 'a personal binding can only add local transfer peers')
           }
         }
+        if (previous !== undefined && previous.path === binding.path
+          && sameMembers(previous.actions, binding.actions)
+          && sameMembers(transferKeys(previous.transfers), transferKeys(binding.transfers))) return config
         const rootId = binding.rootId ?? newBindingRootId(binding.path, new Set(siblings.map(entry => entry.rootId)))
         return {
           ...config,

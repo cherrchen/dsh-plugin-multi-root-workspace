@@ -50,6 +50,11 @@ const quotaSchema = z.object({
 const environmentSchema = z.object({
   environmentId: z.string().regex(/^[a-z0-9][a-z0-9-]{2,62}$/),
   displayName: z.string().max(120).optional(),
+  personalIdentity: z.object({
+    hostname: z.string().min(1),
+    port: z.number().int().min(1).max(65535),
+    credentialDigest: z.string().regex(/^[0-9a-f]{64}$/),
+  }).strict().optional(),
   platform: z.string().min(1),
   account: z.string().min(1).max(64),
   hostKey: z.string().regex(/^SHA256:[A-Za-z0-9+/]{43}$/),
@@ -123,7 +128,15 @@ export function manifestDigest(manifest: DeploymentManifest): string {
 
 /** sha256 of `{environment, binding}` canonical JSON — what a grant is pinned to. */
 export function bindingDigest(environment: RemoteEnvironment, binding: RemoteBinding): string {
-  return sha256hex(canonicalJson({ environment, binding }))
+  if (environment.personalIdentity === undefined) return sha256hex(canonicalJson({ environment, binding }))
+  const { displayName: _displayName, ...authority } = environment
+  return sha256hex(canonicalJson({ environment: authority, binding }))
+}
+
+/** Connection and capability changes invalidate cached transports. */
+export function environmentDigest(environment: RemoteEnvironment): string {
+  const { displayName: _displayName, ...authority } = environment
+  return sha256hex(canonicalJson(authority))
 }
 
 /** The remote-path rule: POSIX absolute, normalized, bounded. */
@@ -158,6 +171,9 @@ export function parseDeploymentManifest(text: string, manifestPath: string, opti
   const manifest = parsed.data
   const byId = new Map<string, RemoteEnvironment>()
   for (const environment of manifest.environments) {
+    if (environment.personalIdentity !== undefined && options?.personal !== true) {
+      throw new ManifestError('invalid-manifest', 'personalIdentity is reserved for personal SSH connections')
+    }
     if (environment.platform === 'win32' || environment.platform === 'windows') {
       throw new ManifestError('windows-target-unsupported', `environment "${environment.environmentId}": Windows targets are unsupported in this gate`)
     }

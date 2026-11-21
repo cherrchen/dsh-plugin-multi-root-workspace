@@ -28,6 +28,7 @@ const remoteGrant: DomainValueSchema<RemoteGrant> = z.strictObject({
   configVersion: z.string().min(1).max(128),
   bindingDigest: z.string().min(64).max(64),
   addedAt: z.string().min(1),
+  grantId: z.string().uuid().optional(),
 })
 
 const persistedRemoteGrants: DomainValueSchema<PersistedRemoteGrants> = z.strictObject({

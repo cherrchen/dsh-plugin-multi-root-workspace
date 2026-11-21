@@ -14,7 +14,7 @@ import { SandboxPolicyService } from '@deepseek-ai/dsh-sandbox-policy'
 import { classifyInstallation, classifySshCapability, sshPackageVersion, sshPrivateCopy, type SshCapability } from '../compat/dsh-version.ts'
 import { loadHostSshPackages } from '../compat/ssh-packages.ts'
 import { SftpClient, type SftpVersion } from './sftp.ts'
-import type { DeploymentManifest, RemoteEnvironment } from './manifest.ts'
+import { environmentDigest, type DeploymentManifest, type RemoteEnvironment } from './manifest.ts'
 
 export class SshEnvironmentError extends Error {
   constructor(readonly code: string, message: string) {
@@ -64,7 +64,7 @@ export interface SftpEnvironment {
 }
 
 export interface SshEnvironmentManagerOptions {
-  readonly manifest: DeploymentManifest
+  readonly manifest: DeploymentManifest | undefined
   readonly logger: { debug(message: string): void; warn(message: string): void }
   readonly gate?: SshCapability
   readonly allowUnattestedForTesting?: boolean
@@ -81,7 +81,7 @@ export interface SshEnvironmentManagerOptions {
 }
 
 const defaultExec = (file: string, args: readonly string[], input?: string) => new Promise<{ stdout: string; stderr: string }>((resolve, reject) => {
-  const child = execFile(file, [...args], { encoding: 'utf8' }, (error, stdout, stderr) => {
+  const child = execFile(file, [...args], { encoding: 'utf8', timeout: 10_000 }, (error, stdout, stderr) => {
     if (error !== null && stdout === '') reject(error)
     else resolve({ stdout: String(stdout), stderr: String(stderr) })
   })
@@ -158,8 +158,10 @@ export async function hostKeyFingerprint(
   return { keys: 1, fingerprint: match?.[0] }
 }
 
+const UNAVAILABLE_MANIFEST: DeploymentManifest = { schemaVersion: 1, configVersion: 'unavailable', environments: [], bindings: [] }
+
 export class SshEnvironmentManager {
-  private readonly manifest: DeploymentManifest
+  private manifest: DeploymentManifest
   private readonly logger: SshEnvironmentManagerOptions['logger']
   private readonly gate: SshCapability
   private readonly allowUnattested: boolean
@@ -174,7 +176,7 @@ export class SshEnvironmentManager {
   private readonly sftpResolved = new Map<string, SftpEnvironment>()
 
   constructor(options: SshEnvironmentManagerOptions) {
-    this.manifest = options.manifest
+    this.manifest = options.manifest ?? UNAVAILABLE_MANIFEST
     this.logger = options.logger
     this.gate = options.gate ?? classifySshCapability({
       platform: process.platform, local: classifyInstallation(),
@@ -188,7 +190,25 @@ export class SshEnvironmentManager {
     this.readFile = options.readFile ?? (path => readFileSync(path, 'utf8'))
   }
 
-  /** The verified deployment manifest this manager was built against. */
+  /** Rebind personal facts while retaining unchanged connections and Root helpers. */
+  rebind(manifest: DeploymentManifest | undefined): void {
+    const previous = this.manifest
+    const next = manifest ?? UNAVAILABLE_MANIFEST
+    if (previous === next) return
+    this.manifest = next
+    const identities = new Map(next.environments.map(environment => [environment.environmentId, environmentDigest(environment)]))
+    const changed = new Set(previous.environments
+      .filter(environment => identities.get(environment.environmentId) !== environmentDigest(environment))
+      .map(environment => environment.environmentId))
+    const scopes = new Set(next.bindings.map(binding => this.helperKey(binding.environmentId, binding.path)))
+    for (const key of this.openings.keys()) {
+      const [id] = JSON.parse(key) as [string, string]
+      if (changed.has(id) || !scopes.has(key)) void this.disposeHelper(key, true).catch(() => {})
+    }
+    for (const id of changed) this.markSftpStale(id)
+  }
+
+  /** The current verified deployment manifest. */
   get deployment(): DeploymentManifest { return this.manifest }
 
   get capability(): { readonly eligible: boolean; readonly reason?: string } {
@@ -206,18 +226,28 @@ export class SshEnvironmentManager {
     return this.resolved.get(this.helperKey(environmentId, workspace))?.generation ?? 'stale'
   }
 
+  private requireEnvironmentDigest(environmentId: string, expected: string | undefined): void {
+    if (expected === undefined) return
+    const environment = this.manifest.environments.find(entry => entry.environmentId === environmentId)
+    if (environment === undefined || environmentDigest(environment) !== expected) {
+      throw new SshEnvironmentError('binding-changed', 'the connection changed after admission')
+    }
+  }
+
   /** Open or reuse the Helper under its deployment or personal Root scope. */
-  async open(environmentId: string, workspace?: string): Promise<SshEnvironment> {
+  async open(environmentId: string, workspace?: string, expectedDigest?: string): Promise<SshEnvironment> {
+    this.requireEnvironmentDigest(environmentId, expectedDigest)
     const key = this.helperKey(environmentId, workspace)
     const existing = this.openings.get(key)
     if (existing !== undefined) {
       const env = await existing
+      if (this.openings.get(key) !== existing) throw new SshEnvironmentError('remote-unavailable', 'the Helper generation was superseded')
       try {
         env.assertAlive()
         return env
       } catch {
-        if (this.openings.get(key) !== existing) return await this.open(environmentId, workspace)
-        this.markStale(environmentId, workspace)
+        if (this.openings.get(key) !== existing) return await this.open(environmentId, workspace, expectedDigest)
+        this.markStale(environmentId, workspace, env.generation)
       }
     }
     const promise = this.openFresh(environmentId, workspace)
@@ -234,15 +264,21 @@ export class SshEnvironmentManager {
   }
 
   /** Mark only the affected Helper as lost. */
-  markStale(environmentId: string, workspace?: string): void {
+  markStale(environmentId: string, workspace?: string, generation?: string): void {
+    if (generation !== undefined && this.generationOf(environmentId, workspace) !== generation) return
     void this.disposeHelper(this.helperKey(environmentId, workspace)).catch(() => {})
   }
 
-  private async disposeHelper(key: string): Promise<void> {
+  private async disposeHelper(key: string, allowRevocation = false): Promise<void> {
     const opening = this.openings.get(key)
     this.openings.delete(key)
     this.resolved.delete(key)
-    if (opening !== undefined) await opening.then(env => env.dispose(), () => {})
+    if (opening !== undefined) await opening.then(async env => {
+      // The admission monitor can terminate work using the old handle before
+      // the transport closes. A new call cannot obtain this generation.
+      if (allowRevocation) await new Promise<void>(resolve => setTimeout(resolve, 1_000).unref())
+      await env.dispose()
+    }, () => {})
   }
 
   async dispose(environmentId: string, workspace?: string): Promise<void> {
@@ -260,16 +296,34 @@ export class SshEnvironmentManager {
   }
 
   /** Open (or join the in-flight open of) one environment's SFTP session. */
-  async openSftp(environmentId: string, signal?: AbortSignal): Promise<SftpEnvironment> {
-    const existing = this.sftpOpenings.get(environmentId)
-    if (existing !== undefined) return await existing
-    const promise = this.openSftpFresh(environmentId, signal)
-    this.sftpOpenings.set(environmentId, promise)
-    try {
-      const env = await promise
-      this.sftpResolved.set(environmentId, env)
-      return env
-    } catch (error) { this.sftpOpenings.delete(environmentId); throw error }
+  async openSftp(environmentId: string, signal?: AbortSignal, expectedDigest?: string): Promise<SftpEnvironment> {
+    signal?.throwIfAborted()
+    this.requireEnvironmentDigest(environmentId, expectedDigest)
+    let opening = this.sftpOpenings.get(environmentId)
+    if (opening === undefined) {
+      const ownsSlot = () => this.sftpOpenings.get(environmentId) === pending
+      const pending: Promise<SftpEnvironment> = this.openSftpFresh(environmentId, () => {
+        if (ownsSlot()) this.markSftpStale(environmentId)
+      }).then(async env => {
+        if (!ownsSlot()) {
+          await env.dispose()
+          throw new SshEnvironmentError('remote-unavailable', 'the SFTP opening was superseded')
+        }
+        this.sftpResolved.set(environmentId, env)
+        return env
+      }).catch(error => {
+        if (ownsSlot()) this.sftpOpenings.delete(environmentId)
+        throw error
+      })
+      opening = pending
+      this.sftpOpenings.set(environmentId, opening)
+    }
+    if (signal === undefined) return await opening
+    const aborted = Promise.withResolvers<never>()
+    const abort = () => aborted.reject(signal.reason)
+    signal.addEventListener('abort', abort, { once: true })
+    try { return await Promise.race([opening, aborted.promise]) }
+    finally { signal.removeEventListener('abort', abort) }
   }
 
   markSftpStale(environmentId: string): void {
@@ -287,7 +341,7 @@ export class SshEnvironmentManager {
   }
 
   /** Same ordered refusals as open(), then the SFTP handshake + publish extensions. */
-  private async openSftpFresh(environmentId: string, signal?: AbortSignal): Promise<SftpEnvironment> {
+  private async openSftpFresh(environmentId: string, onLoss: () => void): Promise<SftpEnvironment> {
     const environment = this.manifest.environments.find(entry => entry.environmentId === environmentId)
     if (environment === undefined) throw new SshEnvironmentError('unknown-environment', `no manifest environment "${environmentId}"`)
     if (this.gate.status !== 'eligible') {
@@ -301,10 +355,9 @@ export class SshEnvironmentManager {
     }
     if (environment.transfer === undefined) throw new SshEnvironmentError('transfer-unavailable', `environment "${environmentId}" declares no transfer block`)
     await this.verifyHostIdentity(environment)
-    signal?.throwIfAborted()
-    const client = SftpClient.connect(environment.connection.host, { onLoss: () => this.markSftpStale(environmentId) })
-    const abort = () => client.dispose()
-    signal?.addEventListener('abort', abort, { once: true })
+    const client = SftpClient.connect(environment.connection.host, { onLoss })
+    const timeout = setTimeout(() => client.dispose(), 15_000)
+    timeout.unref()
     try {
       const version = await client.init()
       if (version.extensions['hardlink@openssh.com'] === undefined || version.extensions['fsync@openssh.com'] === undefined) {
@@ -316,7 +369,7 @@ export class SshEnvironmentManager {
     } catch (error) {
       client.dispose()
       throw error
-    } finally { signal?.removeEventListener('abort', abort) }
+    } finally { clearTimeout(timeout) }
   }
 
   /** The full ordered admission: gate → transport → isolation → identity → load → mount. */
@@ -399,6 +452,10 @@ export class SshEnvironmentManager {
     // is absent (ADR-0049 §2): refuse with the actionable code.
     if (this.personalCustody && host.startsWith('dsh-') && identity.hostname === host) {
       throw new SshEnvironmentError('ssh-config-not-linked', `managed alias "${host}" is not linked into ~/.ssh/config`)
+    }
+    if (environment.personalIdentity !== undefined && (identity.hostname !== environment.personalIdentity.hostname
+      || Number(identity.port) !== environment.personalIdentity.port)) {
+      throw new SshEnvironmentError('host-identity-unverifiable', 'the resolved SSH hostname or port differs from the saved target')
     }
     if (identity.user !== environment.account) {
       throw new SshEnvironmentError('account-mismatch', `manifest account "${environment.account}" but ssh resolves user "${identity.user}"`)

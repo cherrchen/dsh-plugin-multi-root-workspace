@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState, type ReactNode } from 'react'
-import { IconWarningOutlineRegular, Toast } from '@deepseek-ai/dsh-client-ui-primitives'
+import { Toast } from '@deepseek-ai/dsh-client-ui-primitives'
+import { WarningOutlineIcon } from '../compat/client-icons.ts'
 import { errorHasDetail, errorKeyOf, type PanelError } from './panel-client.ts'
 import type { Translate } from './WorkspaceFoldersAction.tsx'
 
@@ -42,7 +43,7 @@ export function ErrorToast<E>(props: { readonly error: E | undefined; readonly f
     <Toast
       key={toast.seq}
       text={toast.text}
-      icon={<IconWarningOutlineRegular />}
+      icon={WarningOutlineIcon === undefined ? undefined : <WarningOutlineIcon />}
       holdMs={ERROR_TOAST_HOLD_MS}
       onDone={() => { setToast(null) }}
     />

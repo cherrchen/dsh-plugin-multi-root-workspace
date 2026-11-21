@@ -91,16 +91,20 @@ export function apply(ctx: Context, config: Config = {}): void {
     if (restoreGuard !== undefined) scope.effect(() => () => restoreGuard())
     void scope.effect(async function* () {
       const manifest = scope.multiRootRegistry.remoteManifest
-      if (manifest === undefined || scope.multiRootRegistry.remoteStatus.state !== 'ready') {
-        scope.logger.warn('multi-root remote tools: the remote control plane is not ready; remote tools stay unmounted')
-        return
-      }
       if (mode === 'personal') {
         const { SshEnvironmentManager } = await import('./ssh-environment.ts')
+        const registry = scope.multiRootRegistry
         const manager = new SshEnvironmentManager({ manifest, logger: scope.logger, custody: 'personal',
           managedKnownHostsFile: scope.multiRootRegistry.remoteCredentialRoot === undefined ? undefined : join(scope.multiRootRegistry.remoteCredentialRoot, 'known_hosts') })
         yield () => manager.disposeAll()
+        const rebind = () => manager.rebind(registry.remoteMode === 'personal' ? registry.remoteManifest : undefined)
+        scope.effect(() => registry.onRemoteChange(rebind))
+        rebind()
         mountRemoteTools(scope, manager)
+        return
+      }
+      if (manifest === undefined || scope.multiRootRegistry.remoteStatus.state !== 'ready') {
+        scope.logger.warn('multi-root remote tools: the remote control plane is not ready; remote tools stay unmounted')
         return
       }
       const presets = scope.permissionPresets
@@ -152,11 +156,13 @@ export function apply(ctx: Context, config: Config = {}): void {
         ...(mode === 'team' && team?.manifestPath !== undefined ? { manifestPath: team.manifestPath } : {}),
       })
       if (closed) return
-      const identity = subtreeIdentity(mode, team, ctx.multiRootRegistry.remoteManifestDigest, ctx.multiRootRegistry.remoteStatus.state)
+      const identity = mode === 'personal' ? mode
+        : subtreeIdentity(mode, team, ctx.multiRootRegistry.remoteManifestDigest, ctx.multiRootRegistry.remoteStatus.state)
       if (child !== undefined && mountedIdentity === identity) return
       const stale = child
       child = undefined
       if (stale !== undefined) { await stale.dispose(); await stale.await() }
+      if (mode === 'personal' && ctx.multiRootRegistry.remoteStatus.state !== 'ready') return
       try {
         child = ctx.plugin(childScope => mount(childScope, mode, team)).ctx.fiber
         mountedIdentity = identity
@@ -204,8 +210,8 @@ export function apply(ctx: Context, config: Config = {}): void {
     ...(config.team === undefined ? {} : { team: configValue(config.team) }),
   }), changed)
   const read = settings.read
-  // A manifest reload (mode switch, personal file change) remounts the
-  // subtree so the manager is rebuilt against the new digest.
+  // Personal changes update the manager in place. A custody change or a
+  // new attested deployment still needs a new subtree.
   const unsubscribe = ctx.multiRootRegistry.onRemoteChange(() => { changed() })
   ctx.effect(() => () => {
     closed = true

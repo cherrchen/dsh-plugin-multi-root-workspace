@@ -685,7 +685,7 @@ describe('the panel channel', () => {
       custodyMode: 'personal',
       endpoints: [{
         environmentId: 'dev-box',
-        target: 'deploy@dev.example:2222',
+        target: 'ssh://deploy@dev.example:2222',
         path: '/srv/app',
       }],
     })
@@ -694,12 +694,16 @@ describe('the panel channel', () => {
   it('formats the row target from the personal endpoint or the deployment manifest', () => {
     // Deployment manifests carry an account and an SSH host alias, no port.
     expect(CommandModule.remoteTargetOf({ account: 'builder', connection: { host: 'build-host' } }))
-      .toBe('builder@build-host')
+      .toBe('ssh://builder@build-host')
     // Personal environments resolve the exact user@host:port at scan time.
     expect(CommandModule.remoteTargetOf(
       { account: 'deploy', connection: { host: 'dsh-env' } },
       { endpoint: { user: 'deploy', hostname: 'prod.internal', port: 2222 } },
-    )).toBe('deploy@prod.internal:2222')
+    )).toBe('ssh://deploy@prod.internal:2222')
+    expect(CommandModule.remoteTargetOf(
+      { account: 'builder', connection: { host: 'build-host' } },
+      { endpoint: { user: 'deploy', hostname: '2001:db8::4', port: 2222 } },
+    )).toBe('ssh://deploy@[2001:db8::4]:2222')
   })
 
   it('rejects a panel call when the session disappears during the request', async () => {

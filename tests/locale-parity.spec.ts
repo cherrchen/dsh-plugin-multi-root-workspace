@@ -76,35 +76,25 @@ describe('panel dictionaries', () => {
     expect(identical).toEqual([])
   })
 
-  it('does not leave a language on the English copy', () => {
-    // A handful of entries are language-neutral by construction: the access
-    // caption and the field marker are pure format strings, "Experimental" is
-    // the ordinary Spanish and Portuguese word, the pinned permission/worktree
-    // tokens (`Full-access`, `Main checkout`) stay verbatim on purpose, and the
-    // remote/SSH surface contributes platform names (`Linux`, `macOS`), the
-    // `Helper` step, and one-word technical labels that are spelled the same in
-    // the language that chose them (`Team`, `Mode`, `Port`, `Hostname`).
-    // Everything else matching English means the translation never happened.
-    const neutral = new Set([
-      'panel.accessEffective',
-      'autoReview.experimental',
-      'ops.experimental',
-      'worktree.experimental',
-      'effective.full-access',
-      'worktree.kind.main-checkout',
-      'remote.experimental',
-      'remote.mode.team',
-      'ssh.errorField',
-      'ssh.field.hostname',
-      'ssh.field.port',
-      'ssh.platform.linux',
-      'ssh.platform.darwin',
-      'ssh.step.helper',
-      'ssh.tab.mode',
-    ])
+  it('allows identical English technical labels only in the languages that use them', () => {
+    const shared = ['ssh.platform.linux', 'ssh.platform.darwin', 'ssh.step.helper'] as const
+    const experimental = ['autoReview.experimental', 'ops.experimental', 'worktree.experimental', 'remote.experimental'] as const
+    const workspace = ['panel.accessEffective', 'ssh.errorField'] as const
+    const checkout = ['effective.full-access', 'worktree.kind.main-checkout'] as const
+    const neutral = {
+      zh: shared,
+      ja: shared,
+      es: [...shared, ...experimental, ...workspace],
+      fr: [...shared, 'panel.accessEffective', 'ssh.field.port', 'ssh.tab.mode'],
+      de: [...shared, ...workspace, ...checkout, 'remote.mode.team', 'ssh.field.hostname', 'ssh.field.port'],
+      ru: [...shared, ...workspace],
+      pt: [...shared, ...experimental, ...workspace, ...checkout],
+    } satisfies Record<Exclude<(typeof LOCALES)[number], 'en'>, readonly (keyof typeof en)[]>
     const keys = Object.keys(en) as (keyof typeof en)[]
-    for (const locale of LOCALES.filter((id): id is Exclude<(typeof LOCALES)[number], 'en'> => id !== 'en')) {
-      const identical = keys.filter(key => !neutral.has(key) && DICTIONARIES[locale][key] === en[key])
+    for (const locale of LOCALES) {
+      if (locale === 'en') continue
+      const allowed = new Set<keyof typeof en>(neutral[locale])
+      const identical = keys.filter(key => !allowed.has(key) && DICTIONARIES[locale][key] === en[key])
       expect(identical, `${locale} still copies English entries: ${identical.join(', ')}`).toHaveLength(0)
     }
   })

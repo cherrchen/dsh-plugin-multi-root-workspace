@@ -13,6 +13,7 @@ import Sessions from '@deepseek-ai/dsh-session'
 import Projections from '@deepseek-ai/dsh-session-projection'
 import Policy from '@deepseek-ai/dsh-sandbox-policy'
 import { RemoteControlPlane } from '../src/remote/plane.ts'
+import { SftpClient } from '../src/remote/sftp.ts'
 import { RemoteClient } from '../src/remote/protocol.ts'
 import { createFixtureWorkspace, type FixtureWorkspace } from './support/temp-workspace.ts'
 import { mountRemoteTools, type RemoteToolsWorld } from './support/remote-tools.ts'
@@ -168,6 +169,56 @@ describe.skipIf(process.platform === 'win32')('personal endpoint behaviours (R1/
     })).rejects.toMatchObject({ code: 'personal-config-invalid' })
   })
 
+  it('refuses a create over an existing connection ID and keeps its binding on the original host', async () => {
+    const { registry, personalPath, credentialRoot } = world()
+    const binding = { primary: '/w', environmentId: MANAGED.environmentId, rootId: 'app', path: '/srv/app', actions: ['read'] as ['read'] }
+    await savePersonalConfig(personalPath, { ...CONFIG(), bindings: [binding] }, 0)
+    const exec: ExecFile = async (file, args) => ({
+      stdout: file === 'ssh-keyscan' ? `${args.at(-1)} ssh-ed25519 AAAAKEY\n` : `256 ${FP_OK} (ED25519)\n`, stderr: '',
+    })
+    const target = { ...MANAGED.endpoint, hostname: 'other.internal' }
+    const scan = await handlePersonalEndpoint(undefined as never, registry, '/w',
+      { endpoint: 'sshHostKeyScan', sessionId: 's', hostname: target.hostname, port: target.port }, { exec }) as { token: string }
+    await expect(handlePersonalEndpoint(undefined as never, registry, '/w', {
+      endpoint: 'sshEnvironmentSave', sessionId: 's', intent: 'create', revision: 0,
+      environment: { ...MANAGED, endpoint: target }, fingerprint: FP_OK, hostKeyToken: scan.token,
+    }, { exec })).rejects.toMatchObject({ code: 'environment-id-conflict' })
+    expect(loadPersonalConfig(personalPath)).toMatchObject({ revision: 0, environments: [MANAGED], bindings: [binding] })
+    expect(existsSync(join(credentialRoot, 'known_hosts'))).toBe(false)
+  })
+
+  it.each([
+    ['host', 'host-identity-unverifiable'], ['port', 'host-identity-unverifiable'],
+    ['account', 'account-mismatch'], ['fingerprint', 'host-key-mismatch'],
+    ['unchanged', undefined],
+  ] as const)('verifies the saved alias identity before opening directory SFTP (%s)', async (changed, code) => {
+    const { registry, personalPath } = world()
+    writeConfig(personalPath, CONFIG([{ ...SSH_CONFIG_ENV, hostKey: FP_OK }]))
+    const open = vi.spyOn(SftpClient, 'connect').mockReturnValue({
+      init: async () => {}, realpath: async () => '/srv/app', readdir: async () => [], dispose() {},
+    } as never)
+    const host = changed === 'host' ? 'other.internal' : 'build.internal'
+    const port = changed === 'port' ? 2222 : 22
+    const user = changed === 'account' ? 'someone' : 'builder'
+    const fp = changed === 'fingerprint' ? MANAGED.hostKey : FP_OK
+    const exec: ExecFile = async (file, args) => {
+      if (file === 'ssh') return { stdout: `user ${user}\nhostname ${host}\nport ${port}\nuserknownhostsfile /u/.ssh/known_hosts\n`, stderr: '' }
+      if (args[0] === '-F') return { stdout: `${host} ssh-ed25519 AAAAKEY\n`, stderr: '' }
+      return { stdout: `256 ${fp} (ED25519)\n`, stderr: '' }
+    }
+    try {
+      const listing = handlePersonalEndpoint(undefined as never, registry, '/w',
+        { endpoint: 'sshListDirectories', sessionId: 's', environmentId: 'dev-box' }, { exec })
+      if (code === undefined) {
+        await expect(listing).resolves.toEqual({ path: '/srv/app', parent: '/srv', entries: [] })
+        expect(open).toHaveBeenCalledWith('devbox', {})
+      } else {
+        await expect(listing).rejects.toMatchObject({ code })
+        expect(open).not.toHaveBeenCalled()
+      }
+    } finally { open.mockRestore() }
+  })
+
   it('the wire contract refuses an environmentId the store would reject (3–63 chars)', async () => {
     const draft = {
       environmentId: 'ab', platform: 'linux',
@@ -175,7 +226,7 @@ describe.skipIf(process.platform === 'win32')('personal endpoint behaviours (R1/
       credential: { kind: 'ssh-config', alias: 'devbox' },
         }
     const save = (environmentId: string) => parseSshCall('sshEnvironmentSave', {
-      sessionId: 's', revision: 0, fingerprint: FP_OK,
+      sessionId: 's', revision: 0, intent: 'create', fingerprint: FP_OK,
       environment: { ...draft, environmentId },
     })
     for (const id of ['a', 'ab', 'UPPER', 'has space', '-lead', 'x'.repeat(64)]) {
@@ -204,15 +255,17 @@ describe.skipIf(process.platform === 'win32')('personal endpoint behaviours (R1/
       endpoint: { hostname: 'lie.example', port: 1, user: 'liar' },
       credential: { kind: 'ssh-config' as const, alias: 'devbox' },
         }
+    const scan = await handlePersonalEndpoint(undefined as never, registry, '/w',
+      { endpoint: 'sshHostKeyScan', sessionId: 's', alias: 'devbox', port: 22 }, { exec }) as { token: string }
     const state = await handlePersonalEndpoint(undefined as never as Context, registry, '/w',
-      { endpoint: 'sshEnvironmentSave', sessionId: 's', revision: 0, environment: draft, fingerprint: FP_OK },
+      { endpoint: 'sshEnvironmentSave', sessionId: 's', intent: 'create', revision: 0, environment: draft, fingerprint: FP_OK, hostKeyToken: scan.token },
       { exec }) as { environments: PersonalEnvironment[] }
     const saved = state.environments[0]!
     expect(saved.endpoint).toEqual({ hostname: 'real.internal', port: 2222, user: 'remoteuser' })
     expect(calls.some(args => args[1] === '-G' && args[2] === 'devbox')).toBe(true)
     // A fingerprint that does not match the resolved known_hosts is refused.
     await expect(handlePersonalEndpoint(undefined as never as Context, registry, '/w',
-      { endpoint: 'sshEnvironmentSave', sessionId: 's', revision: 1, environment: draft, fingerprint: 'SHA256:WRONG' },
+      { endpoint: 'sshEnvironmentSave', sessionId: 's', intent: 'update', revision: 1, environment: draft, fingerprint: 'SHA256:WRONG', hostKeyToken: scan.token },
       { exec })).rejects.toMatchObject({ code: 'host-key-mismatch' })
   })
 
@@ -252,9 +305,10 @@ describe.skipIf(process.platform === 'win32')('personal endpoint behaviours (R1/
     const fingerprint = change === 'host-key' ? MANAGED.hostKey : FP_OK
     const exec: ExecFile = async file => ({ stdout: file === 'ssh-keyscan' ? 'build.internal ssh-ed25519 AAAAKEY\n' : `256 ${fingerprint} (ED25519)\n`, stderr: '' })
     const scan = await handlePersonalEndpoint(undefined as never, registry, '/w',
-      { endpoint: 'sshHostKeyScan', sessionId: 's', hostname: 'build.internal', port: 22 }, { exec }) as { token: string }
+      { endpoint: 'sshHostKeyScan', sessionId: 's', hostname: change === 'host' ? 'other.internal' : original.endpoint.hostname,
+        port: change === 'port' ? 2222 : 22 }, { exec }) as { token: string }
     const state = await handlePersonalEndpoint(undefined as never, registry, '/w', {
-      endpoint: 'sshEnvironmentSave', sessionId: 's', revision: 0, fingerprint, hostKeyToken: scan.token,
+      endpoint: 'sshEnvironmentSave', sessionId: 's', intent: 'update', revision: 0, fingerprint, hostKeyToken: scan.token,
       environment: { environmentId: original.environmentId, platform: 'linux', displayName: 'renamed',
         endpoint: { hostname: change === 'host' ? 'other.internal' : original.endpoint.hostname,
           port: change === 'port' ? 2222 : 22, user: change === 'user' ? 'other' : original.endpoint.user },
@@ -277,19 +331,19 @@ describe.skipIf(process.platform === 'win32')('personal endpoint behaviours (R1/
       displayName: 'Updated connection',
     }
     const updated = await handlePersonalEndpoint(undefined as never as Context, registry, '/w',
-      { endpoint: 'sshEnvironmentSave', sessionId: 's', revision: 0, environment: draft, fingerprint: FP_OK }) as { environments: PersonalEnvironment[] }
+      { endpoint: 'sshEnvironmentSave', sessionId: 's', intent: 'update', revision: 0, environment: draft, fingerprint: FP_OK }) as { environments: PersonalEnvironment[] }
     expect(updated.environments[0]!.displayName).toBe('Updated connection')
     expect(updated.environments[0]!.helper).not.toBeNull()
 
     // A changed target still needs a fresh scan token even with the recorded fingerprint.
     await expect(handlePersonalEndpoint(undefined as never as Context, registry, '/w',
-      { endpoint: 'sshEnvironmentSave', sessionId: 's', revision: 1,
+      { endpoint: 'sshEnvironmentSave', sessionId: 's', intent: 'update', revision: 1,
         environment: { ...draft, endpoint: { ...draft.endpoint, hostname: 'other.internal' } }, fingerprint: FP_OK }))
       .rejects.toMatchObject({ code: 'host-key-token-required' })
 
     // A fingerprint that is not the recorded one is not a token substitute.
     await expect(handlePersonalEndpoint(undefined as never as Context, registry, '/w',
-      { endpoint: 'sshEnvironmentSave', sessionId: 's', revision: 1, environment: draft, fingerprint: `SHA256:${'C'.repeat(43)}` }))
+      { endpoint: 'sshEnvironmentSave', sessionId: 's', intent: 'update', revision: 1, environment: draft, fingerprint: `SHA256:${'C'.repeat(43)}` }))
       .rejects.toMatchObject({ code: 'host-key-token-required' })
   })
 
@@ -305,7 +359,7 @@ describe.skipIf(process.platform === 'win32')('personal endpoint behaviours (R1/
       { endpoint: 'sshHostKeyScan', sessionId: 's', hostname: 'other.internal', port: 22 }, { exec }) as { token: string }
     const draft = { ...MANAGED, credential: { kind: 'managed' as const, credentialId: 'aabbccddeeff' }, endpoint: { hostname: 'other.internal', port: 22, user: 'builder' } }
     const state = await handlePersonalEndpoint(undefined as never as Context, registry, '/w',
-      { endpoint: 'sshEnvironmentSave', sessionId: 's', revision: 0, environment: draft, fingerprint: FP_OK, hostKeyToken: scan.token },
+      { endpoint: 'sshEnvironmentSave', sessionId: 's', intent: 'update', revision: 0, environment: draft, fingerprint: FP_OK, hostKeyToken: scan.token },
       { exec }) as { environments: PersonalEnvironment[] }
     expect(state.environments[0]!.helper).toBeNull()
   })
@@ -325,13 +379,13 @@ describe.skipIf(process.platform === 'win32')('personal endpoint behaviours (R1/
       maxTimeoutMs: 600_000, stdoutLimit: 1_048_576, stderrLimit: 262_144, terminateGraceMs: 2_000,
     }
     await expect(handlePersonalEndpoint(undefined as never as Context, registry, '/w',
-      { endpoint: 'sshEnvironmentSave', sessionId: 's', revision: 0,
+      { endpoint: 'sshEnvironmentSave', sessionId: 's', intent: 'create', revision: 0,
         environment: { ...MANAGED, exec: execStanza }, fingerprint: FP_OK, hostKeyToken: scan.token },
       { exec })).rejects.toMatchObject({ code: 'exec-requires-helper' })
     expect(existsSync(join(credentialRoot, 'known_hosts'))).toBe(false)
     writeConfig(personalPath, CONFIG())
     const state = await handlePersonalEndpoint(undefined as never as Context, registry, '/w',
-      { endpoint: 'sshEnvironmentSave', sessionId: 's', revision: 0,
+      { endpoint: 'sshEnvironmentSave', sessionId: 's', intent: 'update', revision: 0,
         environment: { ...MANAGED, exec: execStanza }, fingerprint: FP_OK, hostKeyToken: scan.token },
       { exec }) as { environments: PersonalEnvironment[] }
     expect(state.environments[0]!.exec).toMatchObject(execStanza)
@@ -662,7 +716,7 @@ describe.skipIf(process.platform === 'win32')('the personal plane digest rebind 
   const planeOf = (stack: RegistryStack): RemoteControlPlane =>
     (stack.registry as unknown as { remotePlane: RemoteControlPlane }).remotePlane
 
-  it('re-listens the owner and reconnects the follower on a digest change', async () => {
+  it('keeps the owner store and follower IPC live across a digest change', async () => {
     const personalPath = join(fixture.base, 'remote-personal.json')
     const credentialRoot = join(fixture.base, 'cred')
     const base: PersonalConfig = { ...CONFIG(), environments: [{ ...MANAGED, helper: null }] }
@@ -707,19 +761,15 @@ describe.skipIf(process.platform === 'win32')('the personal plane digest rebind 
       ],
     })
 
-    // Owner-side refresh re-listens remote-1 under the new digest.
-    await owner.registry.refreshRemotePersonal()
-    expect(reopen).toHaveBeenCalledTimes(1)
-    expect(planeOf(owner).manifestDigest).not.toBe(digest1)
-
-    // Follower-side refresh drops and reconnects against the owner's new listener.
-    await follower.registry.refreshRemotePersonal()
-    expect(drop).toHaveBeenCalledTimes(1)
-    expect(connect).toHaveBeenCalledTimes(1)
-    expect(follower.registry.remoteStatus.state).toBe('ready')
-    expect(planeOf(follower).manifestDigest).toBe(planeOf(owner).manifestDigest)
-    // The reconnected channel really serves remote-1 requests.
+    // A follower request refreshes both Hosts even if the owner has not
+    // observed the edit yet. Neither side tears down its live resources.
     await expect(follower.registry.remoteList(fixture.workspace)).resolves.toMatchObject({ grants: expect.any(Array) })
+    expect(reopen).not.toHaveBeenCalled()
+    expect(drop).not.toHaveBeenCalled()
+    expect(connect).not.toHaveBeenCalled()
+    expect(follower.registry.remoteStatus.state).toBe('ready')
+    expect(planeOf(owner).manifestDigest).not.toBe(digest1)
+    expect(planeOf(follower).manifestDigest).toBe(planeOf(owner).manifestDigest)
   })
 })
 
@@ -735,7 +785,7 @@ describe.skipIf(process.platform === 'win32')('the personal plane fails closed o
   const planeOf = (stack: RegistryStack): RemoteControlPlane =>
     (stack.registry as unknown as { remotePlane: RemoteControlPlane }).remotePlane
 
-  it('a corrupted file closes the owner, refuses operations, and a repair remounts', async () => {
+  it('a corrupted file refuses operations and a repair restores the retained grants', async () => {
     const personalPath = join(fixture.base, 'remote-personal.json')
     const credentialRoot = join(fixture.base, 'cred')
     const config: PersonalConfig = {

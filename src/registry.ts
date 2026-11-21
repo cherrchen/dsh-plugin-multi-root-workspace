@@ -1658,8 +1658,8 @@ export class MultiRootRegistry extends Service {
   /**
    * The validated deployment manifest, once the remote experiment is enabled
    * and the manifest parsed. The tools row builds its connection manager and
-   * capability projection from this value; `undefined` means the remote plane
-   * is disabled or invalid and no remote tool may be mounted.
+   * capability projection from this value. A missing manifest closes
+   * admission, including when an existing tool mount is awaiting repair.
    */
   get remoteManifest(): import('./remote/manifest.ts').DeploymentManifest | undefined {
     return this.remotePlane.manifest
@@ -1736,7 +1736,7 @@ export class MultiRootRegistry extends Service {
         await this.remotePlane.connectFollower(this.medium!, this.authorityState.epoch)
       } else if (this.authorityState.kind === 'active') {
         await this.remotePlane.openOwner(this.authorityStorageContext, this.medium!, this.operationEpoch!,
-          (method, args) => this.dispatchRemote(method as RemoteMethod, args))
+          (method, args, digest) => this.dispatchRemote(method as RemoteMethod, args, digest))
       }
     })
     // Notify only on a real rebind — a no-op read must not re-queue the
@@ -1747,33 +1747,24 @@ export class MultiRootRegistry extends Service {
   /**
    * Personal mode (ADR-0049 §2): before every remote snapshot/list/admit/
    * add/remove on BOTH authority shapes, re-stat the personal config. A
-   * changed file reloads in place; a changed digest makes the owner close and
-   * re-listen remote-1 (the domain stays open) and makes the follower drop
-   * and reconnect — all inside this queue.
+   * changed file reloads in place, keeping the grant domain and live IPC
+   * channel. Each request proves the current digest independently.
    */
   async refreshRemotePersonal(): Promise<void> {
     if (this.remotePlane.mode !== 'personal' || !this.remotePlane.enabled) return
-    let reloaded = false
     await this.serializeAuthority(async () => {
       if (this.disposed) return
       const result = this.remotePlane.refreshPersonal()
-      if (result === 'invalid') {
-        reloaded = true
-        await this.remotePlane.severForInvalid(this.remotePlane.status.reason)
-        return
-      }
-      if (result !== 'reloaded') return
-      reloaded = true
-      if (this.authorityState.kind === 'follower') {
-        this.remotePlane.dropFollower()
+      let reloaded = result === 'reloaded' || result === 'invalid'
+      if (result === 'invalid') this.remotePlane.dropFollower()
+      if (this.authorityState.kind === 'follower' && this.remotePlane.client === undefined
+        && this.remotePlane.manifest !== undefined) {
+        const previous = this.remotePlane.status.state
         await this.remotePlane.connectFollower(this.medium!, this.authorityState.epoch)
-      } else if (this.authorityState.kind === 'active') {
-        // The domain and its records stay; only the listener re-binds the digest.
-        await this.remotePlane.openOwner(this.authorityStorageContext, this.medium!, this.operationEpoch!,
-          (method, args) => this.dispatchRemote(method as RemoteMethod, args))
+        reloaded ||= previous !== this.remotePlane.status.state
       }
+      if (reloaded) this.notifyRemoteChange()
     })
-    if (reloaded) this.notifyRemoteChange()
   }
 
   /** Owner-side injection point for endpoint verification (none ships in G1a). */
@@ -1887,7 +1878,7 @@ export class MultiRootRegistry extends Service {
     trace('admitted', 'decision=admit')
     const identity: RemoteOperationIdentity = Object.freeze({
       operationId, purpose: request.purpose, toolName: request.toolName, sessionId: request.session!.id,
-      primaryRoot: key, authorityEpoch: admission.epoch, revision: admission.revision, effectiveMode,
+      primaryRoot: key, authorityEpoch: admission.epoch, authorizationFingerprint: admission.authorizationFingerprint, effectiveMode,
     })
     let active = true
     const endpoints = Object.freeze([...admission.endpoints])
@@ -1960,13 +1951,17 @@ export class MultiRootRegistry extends Service {
   }
 
   /** The remote-1 listener's dispatch: same queue, same epoch as v1. */
-  private async dispatchRemote(method: RemoteMethod, values: unknown[]): Promise<unknown> {
+  private async dispatchRemote(method: RemoteMethod, values: unknown[], manifestDigest?: string): Promise<unknown> {
     const args = parseRemoteArguments(method, values)
     if (method === 'hello') return null
     const primary = String(args[0])
     if (!isAbsolute(primary)) throw new RemoteAdmissionError('invalid-arguments', 'remote primary must be absolute')
     // R7: follower-issued requests must see a changed personal file too.
     await this.refreshRemotePersonal()
+    this.requireRemote()
+    if (this.remotePlane.manifestDigest !== manifestDigest) {
+      throw new RemoteAdmissionError('config-digest-mismatch', 'the deployment manifest digest does not match the owner’s')
+    }
     const key = primaryKey(primary)
     switch (method) {
       case 'remote-snapshot': return await this.serialize(key, async () => this.remotePlane.snapshot(key, this.operationEpoch!))
@@ -2635,7 +2630,7 @@ export class MultiRootRegistry extends Service {
       // exactly what a remote-capable follower reports as
       // `owner-without-remote-protocol`. Remote failures degrade only remote.
       await this.remotePlane.openOwner(this.authorityStorageContext, this.medium, epoch,
-        (method, args) => this.dispatchRemote(method as RemoteMethod, args))
+        (method, args, digest) => this.dispatchRemote(method as RemoteMethod, args, digest))
       // 'ready' just landed: remote listeners (the gated tools subtree)
       // re-evaluate a mount that early-returned while the plane was unready.
       this.notifyRemoteChange()

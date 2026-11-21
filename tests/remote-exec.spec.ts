@@ -1,7 +1,7 @@
 /** G3: the remote_bash two-admission contract against a controllable backend. */
 import { chmodSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
-import { afterEach, beforeEach, describe, expect, it } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { Agent } from '@deepseek-ai/dsh-agent'
 import Sessions, { SessionId } from '@deepseek-ai/dsh-session'
 import Projections from '@deepseek-ai/dsh-session-projection'
@@ -10,6 +10,9 @@ import SystemPrompt from '@deepseek-ai/dsh-system-prompt'
 import Tools from '@deepseek-ai/dsh-tools'
 import { lazySshExecBackend, sshExecBackend, type SshExecManager } from '../src/remote/ssh-exec-backend.ts'
 import { fakeManifest } from './support/fake-remote.ts'
+import { RemoteAdmissionError } from '../src/remote/contract.ts'
+import { handlePersonalEndpoint } from '../src/remote/personal-endpoints.ts'
+import { loadPersonalConfig, savePersonalConfig, type PersonalConfig } from '../src/remote/personal/config.ts'
 import { remoteBashTool } from '../src/remote/exec-tool.ts'
 import { RemoteConnectionLost, runRemoteCommand, type RemoteExecutionBackend, type RemoteProcessHandle } from '../src/remote/exec.ts'
 import { executeTool, installToolExecutor } from './support/tool-executor.ts'
@@ -29,7 +32,11 @@ function manifestFile() {
   writeFileSync(path, JSON.stringify({
     schemaVersion: 1, configVersion: 'cfg-1',
     environments: [{ environmentId: 'build-01', platform: 'linux', account: 'ci', hostKey: `SHA256:${'A'.repeat(43)}`, namespace: 'ns', transport: 'sftp', helper: null, connection: { host: 'vps' }, credentialIsolation: 'unattested' }],
-    bindings: [{ primary: fixture.workspace, environmentId: 'build-01', rootId: 'app', path: '/work/app', actions: ['read', 'write', 'exec'] }],
+    bindings: [
+      { primary: fixture.workspace, environmentId: 'build-01', rootId: 'app', path: '/work/app', actions: ['read', 'write', 'exec'] },
+      { primary: fixture.workspace, environmentId: 'build-01', rootId: 'data', path: '/work/data', actions: ['read'] },
+      { primary: fixture.outside, environmentId: 'build-01', rootId: 'data', path: '/work/data', actions: ['read'] },
+    ],
   }))
   chmodSync(path, 0o600)
   return path
@@ -132,6 +139,120 @@ describe.skipIf(process.platform === 'win32')('the two-admission remote command 
     state.handles[1]!.finish(0)
     await expect(nested).resolves.toMatchObject({ status: 'scope-exited' })
     expect(state.spawnCalls[1]!.options).toMatchObject({ cwd: '/work/app/build/out' })
+  })
+
+  it.each(['same workspace', 'another workspace'])('keeps a running command when a grant is added in %s', async scope => {
+    const stack = await mount()
+    const { backend, state } = fakeBackend()
+    const pending = run(stack, backend)
+    await waitHandles(state)
+    const primary = scope === 'same workspace' ? fixture.workspace : fixture.outside
+    await stack.registry.addRemote(primary, { ...REF, rootId: 'data' })
+    await new Promise(resolve => setTimeout(resolve, 325)) // at least one polling re-admission
+    const handle = state.handles[0]!
+    expect(handle.terminateCalls).toBe(0)
+    handle.finish()
+    await expect(pending).resolves.toMatchObject({ status: 'scope-exited', exitCode: 0 })
+  })
+
+  it('does not resume the old command after remove and re-add under a blocked recheck', async () => {
+    const stack = await mount()
+    const { backend, state } = fakeBackend()
+    const pending = run(stack, backend)
+    await waitHandles(state)
+    const entered = Promise.withResolvers<void>()
+    const check = Promise.withResolvers<void>()
+    const admit = stack.registry.withRemoteOperation.bind(stack.registry)
+    const spy = vi.spyOn(stack.registry, 'withRemoteOperation').mockImplementation(async (...args) => {
+      entered.resolve()
+      await check.promise
+      return await admit(...args)
+    })
+    try {
+      await entered.promise
+      await stack.registry.removeRemote(fixture.workspace, REF)
+      await stack.registry.addRemote(fixture.workspace, REF)
+      check.resolve()
+      await expect(pending).resolves.toMatchObject({ termination: 'revoked' })
+      expect(state.handles[0]!.terminateCalls).toBe(1)
+    } finally { check.resolve(); spy.mockRestore() }
+  })
+
+  it('retries temporary IPC errors within the revocation budget', async () => {
+    const stack = await mount()
+    const { backend, state } = fakeBackend()
+    const pending = run(stack, backend)
+    await waitHandles(state)
+    const admit = stack.registry.withRemoteOperation.bind(stack.registry)
+    const recovered = Promise.withResolvers<void>()
+    const spy = vi.spyOn(stack.registry, 'withRemoteOperation')
+      .mockRejectedValueOnce(new RemoteAdmissionError('authority-disconnected', 'IPC disconnected'))
+      .mockImplementation(async (...args) => {
+        const result = await admit(...args)
+        recovered.resolve()
+        return result
+      })
+    try {
+      await recovered.promise
+      const handle = state.handles[0]!
+      expect(spy).toHaveBeenCalledTimes(2)
+      expect(handle.terminateCalls).toBe(0)
+      handle.finish()
+      await expect(pending).resolves.toMatchObject({ status: 'scope-exited', exitCode: 0 })
+    } finally { spy.mockRestore() }
+  })
+
+  it.each(['binding', 'credential', 'host key'] as const)('keeps a no-op save and revokes the command when its %s changes', async changed => {
+    const personalPath = join(fixture.base, 'personal.json')
+    const config: PersonalConfig = {
+      schemaVersion: 2, revision: 0,
+      environments: [{
+        environmentId: REF.environmentId, platform: 'linux', hostKey: `SHA256:${'A'.repeat(43)}`,
+        endpoint: { hostname: 'build.internal', port: 22, user: 'ci' },
+        credential: { kind: 'managed', credentialId: 'aabbccddeeff' },
+        helper: { nodePath: '/bin/node', helperPath: '/opt/helper.js', sha256: 'a'.repeat(64), protocol: 1 },
+      }],
+      bindings: [{ ...REF, primary: fixture.workspace, path: '/work/app', actions: ['read', 'exec'] }],
+    }
+    await savePersonalConfig(personalPath, config, 0)
+    const stack = await mountRegistryStack(join(fixture.base, 'store'), {
+      remoteEnvironments: { mode: 'personal', enabled: true, personalPath, credentialRoot: join(fixture.base, 'cred') },
+    }, {
+      beforeGate: async ctx => {
+        await ctx.plugin(Projections)
+        await ctx.plugin(Sessions)
+        await ctx.plugin(Policy, { mode: 'workspace-write', workspaceRoot: fixture.workspace })
+      },
+    })
+    stacks.push(stack)
+    stack.registry.setRemoteEndpointVerifier({ verify: async (_env, binding) => ({
+      platform: 'linux', target: { kind: 'path', value: binding.path },
+    }) })
+    await stack.registry.addRemote(fixture.workspace, REF)
+    const { backend, state } = fakeBackend()
+    const pending = run(stack, backend)
+    await waitHandles(state)
+    const { primary: _primary, ...binding } = config.bindings[0]!
+    const payload = { endpoint: 'sshBindingSave', sessionId: 's', revision: 0, binding } as const
+    await expect(handlePersonalEndpoint(stack.ctx, stack.registry, fixture.workspace, {
+      ...payload, binding: { ...binding, actions: ['exec', 'read'], transfers: [] },
+    })).resolves.toMatchObject({ revision: 0 })
+    await expect(stack.registry.remoteList(fixture.workspace)).resolves.toMatchObject({ grants: [{ state: 'registered' }] })
+    expect(state.handles[0]!.terminateCalls).toBe(0)
+
+    if (changed === 'binding') {
+      await handlePersonalEndpoint(stack.ctx, stack.registry, fixture.workspace, { ...payload, binding: { ...binding, path: '/work/moved' } })
+    } else {
+      const loaded = loadPersonalConfig(personalPath)
+      const original = loaded.environments[0]!
+      const environment = changed === 'credential'
+        ? { ...original, credential: { kind: 'managed' as const, credentialId: 'ffeeddccbbaa' } }
+        : { ...original, hostKey: `SHA256:${'B'.repeat(43)}` }
+      await savePersonalConfig(personalPath, { ...loaded, revision: 1, environments: [environment] }, 0)
+    }
+    await expect(pending).resolves.toMatchObject({ termination: 'revoked' })
+    expect(state.handles[0]!.terminateCalls).toBe(1)
+    await expect(stack.registry.remoteList(fixture.workspace)).resolves.toMatchObject({ grants: [{ state: 'withheld' }] })
   })
 
   it('denies a revoked grant between A and B without spawning', async () => {

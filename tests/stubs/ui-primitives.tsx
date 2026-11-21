@@ -55,6 +55,7 @@ export const IconChevronDownOutlineRegular = icon('chevron-down')
 export const IconRightUpOutlineRegular = icon('right-up')
 export const IconFolderOpenOutlineRegular = icon('folder-open')
 export const IconWarningOutlineRegular = icon('warning')
+export const IconWarningOutline16 = icon('warning-16')
 
 // The names the files-tree fork spells verbatim: the folder pair the tree
 // rows toggle between (Regular in 0.1.7+, pixel-sized before it) and the

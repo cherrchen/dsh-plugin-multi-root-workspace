@@ -90,7 +90,7 @@ nativeTest('owner exit → takeover → new epoch → remote re-hello and a stal
   }
   expect(await follower.request('authority')).toMatchObject({ kind: 'active' })
   expect(await follower.request('remote-status')).toMatchObject({ state: 'ready' })
-  const op = await follower.request<{ identity: { authorityEpoch: string; revision: number } }>('remote-op', ['read', [REF]])
+  const op = await follower.request<{ identity: { authorityEpoch: string; authorizationFingerprint: string } }>('remote-op', ['read', [REF]])
   expect(op.identity.authorityEpoch).not.toBe(oldEpoch)
   const probe = await follower.request<{ remote: { state: string } }>('probe')
   expect(probe.remote.state).toBe('ready')

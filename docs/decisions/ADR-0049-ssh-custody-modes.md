@@ -85,3 +85,10 @@
 ## 修订：插件详情提供独立的 SSH 管理入口
 
 插件详情的 SSH 管理与 Workspace Folders 共用对话框。插件级操作通过独立的 Host Connection 通道工作，免于依赖一个活动会话。Workspace 的绑定与登记仍由会话确定主根。入口和端点约束见 [SSH 远端环境参考](../reference/ssh-remote-environments.md)。
+
+
+## 2026-11-21 修订：按授权身份刷新个人配置
+
+个人配置的 CAS revision 用于写入排序。运行中操作以实际依赖的登记身份复核权限。采用独立的登记 UUID，可识别复核间隙内同一端点的移除和重加。连接与绑定各有身份，原样保存保留身份。这样可以在共享 Registry 上保留无关项目的在飞工作。
+
+有效的 personal 配置在 owner 和 follower 原位刷新，保留授权域和 IPC。工具子树在个人模式中保留，只废弃有身份变更的连接和失去绑定的目录 Helper。开关与托管档位切换仍执行子树生命周期。此修订取代 §2 关于摘要变化时 follower 重新 hello 的决定。撤权、传输清理及升级行为见 [SSH 远端环境参考](../reference/ssh-remote-environments.md)。

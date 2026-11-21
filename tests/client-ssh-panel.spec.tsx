@@ -123,7 +123,7 @@ function fakeSsh(initial: SshStateView): SshClient & {
           ? { endpoint: { hostname: 'resolved.internal', port: 22, user: 'root' } }
           : {}),
       }),
-    environmentSave: async (sessionId: string, revision: number, environment: unknown, fingerprint: string, hostKeyToken?: string) => {
+    environmentSave: async (sessionId: string, revision: number, environment: unknown, fingerprint: string, hostKeyToken: string | undefined, intent: 'create' | 'update') => {
       const draft = environment as Omit<SshEnvironmentView, 'hostKey' | 'helper'>
       const previous = state.environments.find(existing => existing.environmentId === draft.environmentId)
       const sameTarget = previous !== undefined
@@ -137,7 +137,7 @@ function fakeSsh(initial: SshStateView): SshClient & {
         environments: [...state.environments.filter(existing => existing.environmentId !== draft.environmentId),
           { ...draft, hostKey: fingerprint, helper: sameTarget ? previous.helper : null }],
       }
-      const answer = await record('environmentSave', [sessionId, revision, environment, fingerprint, hostKeyToken], next)
+      const answer = await record('environmentSave', [sessionId, revision, environment, fingerprint, hostKeyToken, intent], next)
       state = next
       return answer
     },
@@ -588,7 +588,7 @@ describe('the SSH management dialog', () => {
       platform: 'linux',
       endpoint: { hostname: 'build.internal', port: 22, user: 'ci' },
       credential: { kind: 'managed', credentialId: 'aabbccddeeff' },
-    }, 'SHA256:scanned', 'scan-token-1']])
+    }, 'SHA256:scanned', 'scan-token-1', 'create']])
     await waitFor(() => expect(screen.queryByRole('dialog', { name: 'ssh.tab.add' })).toBeNull())
     const management = screen.getByRole('dialog', { name: 'ssh.dialog.title' })
     expect(within(management).getByText('env-build')).toBeTruthy()
@@ -664,7 +664,7 @@ describe('the SSH management dialog', () => {
       platform: 'linux',
       endpoint: { hostname: 'resolved.internal', port: 22, user: 'root' },
       credential: { kind: 'ssh-config', alias: 'prod' },
-    }, 'SHA256:scanned', undefined]])
+    }, 'SHA256:scanned', 'scan-token-1', 'create']])
     await waitFor(() => expect(screen.queryByRole('dialog', { name: 'ssh.tab.add' })).toBeNull())
   })
 
@@ -704,6 +704,48 @@ describe('the SSH management dialog', () => {
     await waitFor(() => expect(screen.queryByRole('dialog', { name: 'ssh.tab.add' })).toBeNull())
   })
 
+
+  it('flags a generated connection ID that already exists before scanning', async () => {
+    const ssh = fakeSsh(sshState())
+    const dialog = await withDialog({ ssh }, 'add')
+    fillConnectStep(dialog, { displayName: 'Env Prod', hostname: 'other.internal', user: 'deploy' })
+    selectManagedCredential(dialog)
+    expect(within(dialog).getByText('error.environment-id-conflict')).toBeTruthy()
+    fireEvent.click(within(dialog).getByRole('button', { name: 'ssh.scan' }))
+    expect(ssh.calls.some(call => call.method === 'hostKeyScan' || call.method === 'environmentSave')).toBe(false)
+  })
+
+  it('saves a display-name edit with the recorded fingerprint and no scan', async () => {
+    const ssh = fakeSsh(sshState())
+    const dialog = await withDialog({ ssh }, 'manage')
+    await within(dialog).findByText('ssh.environments')
+    fireEvent.click(within(dialog).getByRole('button', { name: 'ssh.envEdit' }))
+    const editor = within(dialog.querySelector('.mrfw-sshEdit') as HTMLElement)
+    fireEvent.change(editor.getByLabelText('ssh.field.displayName'), { target: { value: 'Renamed production' } })
+    fireEvent.click(editor.getByRole('button', { name: 'ssh.envSave' }))
+    const [call] = await callsOf(ssh, 'environmentSave')
+    expect(call?.slice(2)).toEqual([
+      expect.objectContaining({ displayName: 'Renamed production' }), ENV_A.hostKey, undefined, 'update',
+    ])
+    expect(ssh.calls.some(entry => entry.method === 'hostKeyScan')).toBe(false)
+  })
+
+  it('requires a new scan after an identity field changes, including after a previous scan', async () => {
+    const ssh = fakeSsh(sshState())
+    const dialog = await withDialog({ ssh }, 'manage')
+    await within(dialog).findByText('ssh.environments')
+    fireEvent.click(within(dialog).getByRole('button', { name: 'ssh.envEdit' }))
+    const editor = within(dialog.querySelector('.mrfw-sshEdit') as HTMLElement)
+    const save = () => editor.getByRole('button', { name: 'ssh.envSave' }) as HTMLButtonElement
+    fireEvent.change(editor.getByLabelText('ssh.field.platform'), { target: { value: 'darwin' } })
+    expect(save().disabled).toBe(true)
+    fireEvent.click(editor.getByRole('button', { name: 'ssh.scan' }))
+    await editor.findByRole('radio', { name: /SHA256:scanned/ })
+    expect(save().disabled).toBe(false)
+    fireEvent.change(editor.getByLabelText('ssh.field.user'), { target: { value: 'other' } })
+    expect(save().disabled).toBe(true)
+    expect(ssh.calls.some(entry => entry.method === 'environmentSave')).toBe(false)
+  })
 
   it('keeps the saved-environment editor flat — one card, all sections', async () => {
     const ssh = fakeSsh(sshState())
@@ -848,10 +890,10 @@ describe('the SSH management dialog', () => {
     expect(row.getByText('ssh.binding.export archived')).toBeTruthy()
 
     const copy = row.getByRole('button', { name: 'panel.copyPath' })
-    expect(copy.textContent).toBe('deploy@prod.internal:2222/srv/app')
+    expect(copy.textContent).toBe('ssh://deploy@prod.internal:2222/srv/app')
     fireEvent.click(copy)
     await row.findByRole('button', { name: 'panel.copied' })
-    expect(writeText).toHaveBeenCalledWith('deploy@prod.internal:2222/srv/app')
+    expect(writeText).toHaveBeenCalledWith('ssh://deploy@prod.internal:2222/srv/app')
 
     const edit = row.getByRole('button', { name: 'ssh.binding.edit' })
     const remove = row.getByRole('button', { name: 'ssh.binding.remove' })
@@ -967,7 +1009,7 @@ describe('the SSH management dialog', () => {
       expect(within(dialog).getByText('error.workspace-invalid')).toBeTruthy()
       fireEvent.change(bindingPath, { target: { value: path } })
       fireEvent.click(save)
-      await within(dialog).findByText(`deploy@prod.internal:22${path}`)
+      await within(dialog).findByText(`ssh://deploy@prod.internal:22${path}`)
       if (path === '/srv/app') fireEvent.click(await within(dialog).findByRole('button', { name: 'ssh.bindingAdd' }))
     }
     const calls = await callsOf(ssh, 'bindingSave')
@@ -975,11 +1017,18 @@ describe('the SSH management dialog', () => {
       { environmentId: 'env-prod', path: '/srv/app', actions: ['read'] },
       { environmentId: 'env-prod', path: '/srv/logs', actions: ['read'] },
     ])
-    const row = within(dialog).getByText('deploy@prod.internal:22/srv/app').closest('.mrfw-row') as HTMLElement
+    const row = within(dialog).getByText('ssh://deploy@prod.internal:22/srv/app').closest('.mrfw-row') as HTMLElement
     fireEvent.click(within(row).getByRole('button', { name: 'ssh.binding.remove' }))
+    const confirmation = await screen.findByRole('dialog', { name: 'ssh.binding.remove' })
+    expect(ssh.calls.some(call => call.method === 'bindingRemove')).toBe(false)
+    fireEvent.click(within(confirmation).getByRole('button', { name: 'ssh.cancel' }))
+    expect(ssh.calls.some(call => call.method === 'bindingRemove')).toBe(false)
+    fireEvent.click(within(row).getByRole('button', { name: 'ssh.binding.remove' }))
+    const confirmed = await screen.findByRole('dialog', { name: 'ssh.binding.remove' })
+    fireEvent.click(within(confirmed).getByRole('button', { name: 'ssh.confirmDelete' }))
     expect((await callsOf(ssh, 'bindingRemove'))[0]?.slice(0, 4)).toEqual(['session-1', 9, 'env-prod', 'app'])
-    await waitFor(() => expect(within(dialog).queryByText('deploy@prod.internal:22/srv/app')).toBeNull())
-    expect(within(dialog).getByText('deploy@prod.internal:22/srv/logs')).toBeTruthy()
+    await waitFor(() => expect(within(dialog).queryByText('ssh://deploy@prod.internal:22/srv/app')).toBeNull())
+    expect(within(dialog).getByText('ssh://deploy@prod.internal:22/srv/logs')).toBeTruthy()
     expect(ssh.calls.some(call => call.method === 'environmentSave' || call.method === 'environmentRemove')).toBe(false)
   })
 
@@ -1056,7 +1105,7 @@ describe('the SSH management dialog', () => {
     }
     const endpoint = {
       environmentId: binding.environmentId, rootId: binding.rootId, path: binding.path,
-      displayName: 'Production', platform: 'linux', target: 'deploy@prod.internal:22',
+      displayName: 'Production', platform: 'linux', target: 'ssh://deploy@prod.internal:22',
       state: 'registered' as const, actions: [...binding.actions], transfers: [],
       capabilities: { read: true, write: false, exec: false, receive: false, send: true },
     }
@@ -1067,7 +1116,7 @@ describe('the SSH management dialog', () => {
     const remoteCalls: { method: string; args: unknown[] }[] = []
     let listCalls = 0
     renderDialog({ ssh, endpoints: [endpoint], remoteCalls, onList: () => { listCalls++ } })
-    const row = (await screen.findByText('deploy@prod.internal:22/srv/app')).closest('.mrfw-row') as HTMLElement
+    const row = (await screen.findByText('ssh://deploy@prod.internal:22/srv/app')).closest('.mrfw-row') as HTMLElement
     expect(within(row).getByText('app')).toBeTruthy()
     expect(within(row).getByText('Production').className).toBe('mrfw-cwdTag')
     fireEvent.click(within(row).getByRole('button', { name: 'panel.more' }))
@@ -1214,8 +1263,11 @@ describe('pending feedback on network-bound requests', () => {
       }))
       await saved.promise
     })
-    const row = (await within(dialog).findByText('deploy@prod.internal:22/srv/app')).closest('.mrfw-row') as HTMLElement
+    const row = (await within(dialog).findByText('ssh://deploy@prod.internal:22/srv/app')).closest('.mrfw-row') as HTMLElement
     fireEvent.click(within(row).getByRole('button', { name: 'ssh.binding.remove' }))
+    const confirmation = await screen.findByRole('dialog', { name: 'ssh.binding.remove' })
+    expect(ssh.calls.some(call => call.method === 'bindingRemove')).toBe(false)
+    fireEvent.click(within(confirmation).getByRole('button', { name: 'ssh.confirmDelete' }))
     await waitFor(() => expect(ssh.calls.some(call => call.method === 'bindingRemove')).toBe(true))
     const remove = within(row).getByRole('button', { name: 'ssh.binding.remove' })
     await within(row).findByText('ssh.pending.bindingRemove')
@@ -1270,7 +1322,7 @@ describe('pending feedback on network-bound requests', () => {
       rootId: 'web',
       path: '/srv/app',
       platform: 'linux',
-      target: 'deploy@prod.internal:22',
+      target: 'ssh://deploy@prod.internal:22',
       state: 'unregistered' as const,
       actions: ['read'],
       transfers: [],
@@ -1278,7 +1330,7 @@ describe('pending feedback on network-bound requests', () => {
     }
     const remoteCalls: { method: string; args: unknown[] }[] = []
     renderDialog({ ssh: fakeSsh(sshState()), endpoints: [endpoint], remoteCalls, remoteAddGate: gate.promise })
-    const row = (await screen.findByText('deploy@prod.internal:22/srv/app')).closest('.mrfw-row') as HTMLElement
+    const row = (await screen.findByText('ssh://deploy@prod.internal:22/srv/app')).closest('.mrfw-row') as HTMLElement
     fireEvent.click(within(row).getByRole('button', { name: 'panel.more' }))
     fireEvent.click(await screen.findByRole('button', { name: 'panel.remoteRegister' }))
     await waitFor(() => expect(remoteCalls.some(call => call.method === 'add')).toBe(true))
@@ -1299,7 +1351,7 @@ describe('pending feedback on network-bound requests', () => {
     }
     const endpoint = {
       environmentId: binding.environmentId, rootId: binding.rootId, path: binding.path,
-      displayName: 'Production', platform: 'linux', target: 'deploy@prod.internal:22',
+      displayName: 'Production', platform: 'linux', target: 'ssh://deploy@prod.internal:22',
       state: 'registered' as const, actions: [...binding.actions], transfers: [],
       capabilities: { read: true, write: false, exec: false, receive: false, send: true },
     }
@@ -1313,7 +1365,7 @@ describe('pending feedback on network-bound requests', () => {
       return await saved.promise
     }
     renderDialog({ ssh, endpoints: [endpoint] })
-    const row = (await screen.findByText('deploy@prod.internal:22/srv/app')).closest('.mrfw-row') as HTMLElement
+    const row = (await screen.findByText('ssh://deploy@prod.internal:22/srv/app')).closest('.mrfw-row') as HTMLElement
     fireEvent.click(within(row).getByRole('button', { name: 'panel.more' }))
     fireEvent.click(await screen.findByRole('button', { name: 'ssh.binding.editCapabilities' }))
     fireEvent.click(await screen.findByRole('button', { name: 'remote.capability.write' }))
