@@ -856,8 +856,8 @@ describe('the SSH management dialog', () => {
     const imports = within(dialog).getAllByRole('checkbox', { name: /ssh.binding.import/ })
     const exports = within(dialog).getAllByRole('checkbox', { name: /ssh.binding.export/ })
     expect(imports.map(input => (input as HTMLInputElement).parentElement?.textContent)).toEqual([
-      'ssh.binding.import panel.primary',
-      'ssh.binding.import payments',
+      'ssh.binding.import (panel.primary)',
+      'ssh.binding.import (payments)',
     ])
     expect(exports).toHaveLength(2)
     expect(within(dialog).getAllByRole('textbox')).toEqual([within(dialog).getByLabelText('ssh.binding.path')])
@@ -893,8 +893,8 @@ describe('the SSH management dialog', () => {
     expect(row.getByText('Production')).toBeTruthy()
     expect(row.queryByText('project-root')).toBeNull()
     expect(row.getByText('remote.capability.read, remote.capability.write, remote.capability.exec')).toBeTruthy()
-    expect(row.getByText('ssh.binding.import panel.primary')).toBeTruthy()
-    expect(row.getByText('ssh.binding.export archived')).toBeTruthy()
+    expect(row.getByText('ssh.binding.import (panel.primary)')).toBeTruthy()
+    expect(row.getByText('ssh.binding.export (archived)')).toBeTruthy()
 
     const copy = row.getByRole('button', { name: 'panel.copyPath' })
     expect(copy.textContent).toBe('ssh://deploy@prod.internal:2222/srv/app')

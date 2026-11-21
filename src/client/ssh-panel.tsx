@@ -1873,7 +1873,7 @@ export function SshWorkspaceBindingsDialog(props: SshWorkspaceBindingsDialogProp
                     const peers = transfers?.filter(transfer => transfer.direction === direction).map(({ peer }) =>
                       localPeers.find(entry => entry.id === peer.rootId)?.label ?? peer.rootId)
                     if (peers === undefined || peers.length === 0) return null
-                    return <span key={direction} className="mrfw-note">{t(`ssh.binding.${direction}`)} {peers.join(', ')}</span>
+                    return <span key={direction} className="mrfw-note">{t(`ssh.binding.${direction}`)} ({peers.join(', ')})</span>
                   })}
                   {pending?.kind === 'remove' && pending.key === key
                     ? <StatusLine state="ongoing">{t('ssh.pending.bindingRemove')}</StatusLine> : null}
@@ -1917,10 +1917,10 @@ export function SshWorkspaceBindingsDialog(props: SshWorkspaceBindingsDialogProp
             <div className="mrfw-sshTransferRow" role="group" aria-label={t('ssh.binding.transfers')}>
               {localPeers.map(peer => (
                 <div key={peer.id} className="mrfw-sshTransferPeer">
-                  <SshCheckbox checked={draft.imports.has(peer.id)} label={`${t('ssh.binding.import')} ${peer.label}`}
+                  <SshCheckbox checked={draft.imports.has(peer.id)} label={`${t('ssh.binding.import')} (${peer.label})`}
                     disabled={busy || (environment?.transfer === undefined && !draft.imports.has(peer.id))}
                     onChange={() => setDraft({ ...draft, imports: togglePeer(draft.imports, peer.id) })} />
-                  <SshCheckbox checked={draft.exports.has(peer.id)} label={`${t('ssh.binding.export')} ${peer.label}`}
+                  <SshCheckbox checked={draft.exports.has(peer.id)} label={`${t('ssh.binding.export')} (${peer.label})`}
                     disabled={busy || (environment?.transfer === undefined && !draft.exports.has(peer.id))}
                     onChange={() => setDraft({ ...draft, exports: togglePeer(draft.exports, peer.id) })} />
                 </div>
