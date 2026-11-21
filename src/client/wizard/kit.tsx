@@ -197,10 +197,12 @@ export function WizardField(props: {
   readonly label: string
   readonly hint?: ReactNode
   readonly invalid?: boolean | undefined
+  readonly className?: string | undefined
   readonly children: ReactNode
 }): ReactNode {
+  const className = props.className === undefined ? 'mrfw-wizField' : `mrfw-wizField ${props.className}`
   return (
-    <div className="mrfw-wizField" data-invalid={props.invalid === true ? 'true' : undefined}>
+    <div className={className} data-invalid={props.invalid === true ? 'true' : undefined}>
       <span className="mrfw-wizFieldLabel">{props.label}</span>
       {props.children}
       {props.hint === undefined ? null : <span className="mrfw-wizFieldHint">{props.hint}</span>}

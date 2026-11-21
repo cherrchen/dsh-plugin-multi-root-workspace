@@ -1878,6 +1878,39 @@ aside[data-mrfw-navigator] > [data-files-search-settings] {
   gap: 12px;
 }
 
+/* The endpoint line in ssh-target shape: a user field, the @ separator, the
+   hostname taking the spare width, then the : separator and a short port. */
+.mrfw-wizTargetRow {
+  display: flex;
+  align-items: flex-start;
+  gap: 6px;
+}
+
+.mrfw-wizTargetRow .mrfw-wizField {
+  min-width: 0;
+}
+
+.mrfw-wizTargetUser {
+  flex: 0 1 150px;
+}
+
+.mrfw-wizTargetHost {
+  flex: 1 1 auto;
+}
+
+.mrfw-wizTargetPort {
+  flex: 0 0 92px;
+}
+
+.mrfw-wizTargetSep {
+  flex: none;
+  /* 24px clears the field label so the separator lands on the input line. */
+  margin-top: 24px;
+  color: var(--dsw-alias-label-tertiary);
+  font-size: 13px;
+  line-height: 32px;
+}
+
 .mrfw-wizFieldLabel {
   font-size: 12px;
   font-weight: 500;

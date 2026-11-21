@@ -763,24 +763,28 @@ function ConnectForm(props: {
           </div>
         </WizardField>
       )}
-      <WizardField label={t('ssh.field.hostname')} invalid={invalid('hostname')}
-        hint={invalid('hostname') ? props.errorFor('hostname') : t('ssh.field.hostnameHint')}>
-        <Input className="mrfw-sshInput" aria-label={t('ssh.field.hostname')} placeholder="host.example.com"
-          value={draft.hostname} disabled={busy || draft.credentialSource === 'alias'}
-          onChange={event => update({ hostname: event.currentTarget.value })} />
-      </WizardField>
-      <div className="mrfw-wizFieldPair">
-        <WizardField label={t('ssh.field.port')} invalid={invalid('port')}
-          hint={invalid('port') ? props.errorFor('port') : undefined}>
-          <Input className="mrfw-sshInput" aria-label={t('ssh.field.port')} placeholder="22"
-            value={draft.port} disabled={busy || draft.credentialSource === 'alias'}
-            onChange={event => update({ port: event.currentTarget.value })} />
-        </WizardField>
-        <WizardField label={t('ssh.field.user')} invalid={invalid('user')}
-          hint={invalid('user') ? props.errorFor('user') : undefined}>
+      {/* The endpoint in its own ssh-target shape: user @ host : port on one
+          line, each input keeping its own label and validation. */}
+      <div className="mrfw-wizTargetRow">
+        <WizardField label={t('ssh.field.user')} className="mrfw-wizTargetUser"
+          invalid={invalid('user')} hint={invalid('user') ? props.errorFor('user') : undefined}>
           <Input className="mrfw-sshInput" aria-label={t('ssh.field.user')} placeholder="deploy"
             value={draft.user} disabled={busy || draft.credentialSource === 'alias'}
             onChange={event => update({ user: event.currentTarget.value })} />
+        </WizardField>
+        <span className="mrfw-wizTargetSep" aria-hidden>@</span>
+        <WizardField label={t('ssh.field.hostname')} className="mrfw-wizTargetHost"
+          invalid={invalid('hostname')} hint={invalid('hostname') ? props.errorFor('hostname') : t('ssh.field.hostnameHint')}>
+          <Input className="mrfw-sshInput" aria-label={t('ssh.field.hostname')} placeholder="host.example.com"
+            value={draft.hostname} disabled={busy || draft.credentialSource === 'alias'}
+            onChange={event => update({ hostname: event.currentTarget.value })} />
+        </WizardField>
+        <span className="mrfw-wizTargetSep" aria-hidden>:</span>
+        <WizardField label={t('ssh.field.port')} className="mrfw-wizTargetPort"
+          invalid={invalid('port')} hint={invalid('port') ? props.errorFor('port') : undefined}>
+          <Input className="mrfw-sshInput" aria-label={t('ssh.field.port')} placeholder="22"
+            value={draft.port} disabled={busy || draft.credentialSource === 'alias'}
+            onChange={event => update({ port: event.currentTarget.value })} />
         </WizardField>
       </div>
       <WizardField label={t('ssh.field.platform')} hint={t('ssh.field.platformHint')}>
