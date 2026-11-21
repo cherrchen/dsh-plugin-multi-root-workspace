@@ -11,3 +11,4 @@ User-facing how-to guides: each page covers one feature — what it solves, how 
 - [Auto Review with multiple roots](./auto-review.en.md)
 - [UI entries and the Files tab](./ui-entries.en.md)
 - [Model context](./model-context.en.md)
+- [SSH remote environments (Personal / Team / Hardened modes)](./ssh-remote-environments.en.md)
