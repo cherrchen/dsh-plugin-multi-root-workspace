@@ -61,7 +61,7 @@ Connections are plugin-global, while directory bindings belong to each workspace
    - Pick an existing SSH connection.
    - Enter a normalized absolute POSIX path (for example `/srv/work/app`), or click **Browse…** to pick a directory over read-only SFTP.
    - Check **Allowed actions**: `read`, `write`, `execute` (`execute` requires a connection with the helper installed and exec enabled).
-   - If using `remote_copy` between local and remote roots, check **Import from local root** / **Export to local root** for `primary` or any available additional root.
+   - If using `remote_copy` between local and remote roots, check **Allow copying files to the remote host** / **Allow copying files to the local machine** for `primary` or any available additional root.
    - Click **Save binding**.
 3. Back in the **Workspace folders** dialog under **Remote working directories**, open the row's **…** menu and click **Register**.
    - Registration connects to the remote host to verify the directory exists and is not redirected via symlinks. Once the status shows **Registered**, the endpoint is available to the model.
