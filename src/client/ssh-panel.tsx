@@ -3,7 +3,7 @@ import { Fragment, useCallback, useEffect, useMemo, useRef, useState, type Keybo
 import { Input, Modal, Tag } from '@deepseek-ai/dsh-client-ui-primitives'
 import type { RootsView } from '../contract.ts'
 import type { RemoteModeControl } from '../compat/skills-client.ts'
-import { IconAccessReadOnly, IconAccessReadWrite, IconDownload, IconEdit, IconLink, IconPlay, IconShield, IconTrash, maybeComponent } from '../compat/client-icons.ts'
+import { IconAccessReadOnly, IconAccessReadWrite, IconCopy, IconDownload, IconEdit, IconLink, IconPlay, IconShield, IconTrash, maybeComponent } from '../compat/client-icons.ts'
 import { IconButton, SshButton as Button } from './panel-buttons.tsx'
 import { PendingBar, StatusLine } from './pending.tsx'
 import { errorKeyOf, PanelError } from './panel-client.ts'
@@ -707,10 +707,9 @@ function CredentialsPanel(props: CredentialsPanelProps): ReactNode {
           {credential.fingerprint === undefined ? null : <span className="mrfw-rootPath">{credential.fingerprint}</span>}
         </div>
         {credential.kind === 'key' && credential.publicKey !== undefined ? (
-          <Button variant="ghost" size="sm" disabled={busy}
-            onClick={() => { void props.onCopy(credential) }}>
-            {props.copiedId === credential.id ? t('ssh.copied') : t('ssh.copyPublicKey')}
-          </Button>
+          <IconButton disabled={busy} icon={<IconCopy />}
+            label={props.copiedId === credential.id ? t('ssh.copied') : t('ssh.copyPublicKey')}
+            onClick={() => { void props.onCopy(credential) }} />
         ) : null}
         {confirmId === credential.id ? (
           <>
@@ -719,8 +718,8 @@ function CredentialsPanel(props: CredentialsPanelProps): ReactNode {
             <Button variant="ghost" size="sm" disabled={busy} onClick={() => setConfirmId(undefined)}>{t('ssh.cancel')}</Button>
           </>
         ) : (
-          <Button variant="ghost" size="sm" disabled={busy}
-            onClick={() => setConfirmId(credential.id)}>{t('ssh.delete')}</Button>
+          <IconButton disabled={busy} icon={<IconTrash />} label={t('ssh.delete')}
+            onClick={() => setConfirmId(credential.id)} />
         )}
       </div>
     ))}
