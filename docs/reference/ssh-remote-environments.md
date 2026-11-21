@@ -95,17 +95,20 @@ GUI 入口有两处：
 
 独立对话框 `SshManagementDialog`（`src/client/ssh-panel.tsx`）由 ui-primitives `Modal` 承载，经 `src/client/ssh-client.ts` 调 `ssh*` 端点；Tab 条优先使用 `SegmentedTabs`，旧运行时降级为同 DOM 契约的本地 tablist。
 
-**控件与布局。** 表单文本输入使用 primitives `Input`，动作按钮使用 `Button`，平台/helper/状态徽标使用 `Tag`（三者从 0.1.5 起可用）。SSH 管理、Root 绑定及其子对话框的单行输入框、原生下拉框和常规操作按钮统一为 32px 高。私钥文本区可调整高度；页签和关闭按钮沿用宿主尺寸，绑定行尾两个图标按钮均为 28px。`Checkbox` 与 `SegmentedControl` 自 `0.1.7-alpha.1` 起使用 primitives，旧版本回退为同语义的本地自绘控件（`.mrfw-sshCheckbox` / `.mrfw-sshRadioOption`）。字段使用 grid 和持续可见的标签。远端目录选择器空间不足时，「转到」和「上一级」一起换行。
+**控件与布局。** 表单文本输入使用 primitives `Input`，动作按钮使用 `Button`，平台/helper/状态徽标使用 `Tag`。添加连接、编辑连接和 Root 绑定的下拉选择使用宿主 primitives 的 `Menu` 和 `Button`。本机 SSH 别名可直接输入，也可从菜单选取。单行输入框、下拉触发器和常规操作按钮统一为 32px 高。私钥文本区可调整高度，页签和关闭按钮沿用宿主尺寸，绑定行尾两个图标按钮均为 28px。`Checkbox` 与 `SegmentedControl` 自 `0.1.7-alpha.1` 起使用 primitives，旧版本回退为同语义的本地控件（`.mrfw-sshCheckbox` / `.mrfw-sshRadioOption`）。字段使用 grid 和持续可见的标签。远端目录选择器空间不足时，「转到」和「上一级」一起换行。
 
 **请求反馈。** 测试连接、安装 Helper、安装访问密钥、链接 `~/.ssh/config`、获取主机密钥、保存/删除连接、更新 SSH Key、保存/解除绑定、读取远端目录，以及 Workspace Folders 中登记/移除远端目录，都是异步请求，界面不冻结。触发按钮原位显示转圈，保持原宽度和可访问名称，并标记 `aria-busy`。操作所在位置出现带说明的状态行（`role="status"`；宿主提供 `TextShimmer` 时文字带扫光），对话框顶部显示一条不占布局的进度条。状态行和进度条延迟约 120ms 淡入，瞬时完成的请求不会闪烁；`prefers-reduced-motion` 下改为静态指示。转圈优先使用宿主 `StateDot`（`ongoing`），旧运行时回退为本地 CSS 圆环。测试连接是只读请求，不锁定其他操作，多个连接可同时测试。会改写配置的请求仍按 `revision` 串行：进行期间其余变更入口禁用，正在运行的按钮本身不变暗。读取远端目录时保留上一层列表并降低不透明度，返回后再替换。
 
-三个 Tab，另有一个独立的“添加连接”Dialog：
+**添加连接 Dialog** 从「已有连接」打开。
 
-**添加连接 Dialog** 从「已有连接」打开。选择本机 ssh-config 条目或插件托管凭据，填写显示名、环境 ID、平台与目标。选择器和操作按钮均为 32px 高，字段保留标签和按需显示的校验反馈。已存在的环境 ID 在表单就地提示。主机钥扫描结果经弹窗确认后，保存连接并返回「已有连接」。本机来源可从 `sshConfigAliases` 选择，托管来源可从嵌套的凭据管理对话框添加凭据。
+1. **连接**。选择本机 ssh-config 条目或插件托管凭据，填写显示名、平台与目标。本机来源可从 `sshConfigAliases` 选择，托管来源可从嵌套的凭据管理对话框添加凭据。确认主机密钥后，面板按显示名生成环境 ID。显示名为空、生成的 ID 不符合命名规则或已被占用时，使用未被占用的 8 位十六进制短 UUID。保存连接后进入第二步。编辑连接时保留原 ID。
+2. **连接设置**。可以检测远端 Node、安装 Helper，并设置连接级的命令执行及文件传输能力。托管密码先安装访问密钥。托管连接若尚未链接 `~/.ssh/config`，此处提供链接入口。Helper 安装成功后即可勾选「允许命令执行」，点「完成」保存能力设置并回到「已有连接」。跳过此步或关闭对话框时，已保存的连接和已安装的 Helper 保留。工作区目录仍通过 Workspace Folders 的绑定对话框选择，执行权限需要在对应 Root 上单独勾选并登记。
+
+SSH 管理对话框包含三个页签。
 
 1. **已有连接** 的个人模式环境列表复用工作区目录行。环境名称、平台、地址和就绪状态在左侧，测试连接、编辑、删除和当前可用的设置操作在右侧横排为带悬停提示的图标。窄窗口中整组图标移到下一行并右对齐。安装 Helper 后，该环境的安装入口随即隐藏。连接行使用同一 SSH URI 的目标部分。连接编辑可设置命令执行和文件传输的可用性，每条绑定再单独选择权限。仅修改显示名等元数据可直接保存，修改连接身份需重新扫描。删除仍被绑定的连接会返回 `environment-in-use`。team/hardened 显示部署清单的只读列表。
 2. **SSH Key**：personal 显示凭据行（标签、类型、指纹、复制公钥、行内删除）和三个添加表单（生成密钥 / 导入私钥+可选口令 / 保存密码）。秘密输入**提交后立即清空**（无论成败），永不由状态回填；访问密钥（`purpose: 'access-key'`）不在 Key 列表重复出现，而显示在其所属环境下。team/hardened 说明凭据由部署 broker 托管，GUI 不读取、不创建。
-3. **模式设置**：复用 `src/client/remote-custody.tsx` 的三档单选、team 四个 broker 字段与降级风险确认，写入同一个 `multi-root-remote-tools` form 与 CAS revision，不另建写入路径；同时说明档位如何决定“添加连接”的引导方式（personal 图形化表单、team 部署清单 + broker、hardened 部署 profile + 全量证明），并提供切到“已有连接”的按钮——添加连接的入口在该 Tab，不在模式页。档位是 **Host 级**（决定凭据由谁持有与 remote-1 的来源）。
+3. **模式设置**：复用 `src/client/remote-custody.tsx` 的三档单选、team 四个 broker 字段与降级风险确认，写入同一个 `multi-root-remote-tools` form 与 CAS revision。档位是 **Host 级**（决定凭据由谁持有与 remote-1 的来源）。
 
 ### Workspace Root 绑定对话框
 

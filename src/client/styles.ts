@@ -1849,6 +1849,15 @@ aside[data-mrfw-navigator] > [data-files-search-settings] {
   border-radius: 8px;
 }
 
+.mrfw-sshWizardSteps {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
 .mrfw-sshEdit {
   display: flex;
   flex-direction: column;
@@ -1867,11 +1876,6 @@ aside[data-mrfw-navigator] > [data-files-search-settings] {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 10px 12px;
-}
-
-/* Step one keeps display name / environment ID / platform on one line. */
-.mrfw-sshGridThree {
-  grid-template-columns: repeat(3, minmax(0, 1fr));
 }
 
 /* Align the source, credential and manage controls along the bottom of the row. */
@@ -1907,9 +1911,12 @@ aside[data-mrfw-navigator] > [data-files-search-settings] {
   grid-column: 1 / -1;
 }
 
-.mrfw-sshFieldInvalid .mrfw-sshInput,
-.mrfw-sshFieldInvalid .mrfw-sshSelectControl {
+.mrfw-sshFieldInvalid .mrfw-sshInput {
   border-color: var(--dsw-alias-state-error-primary);
+}
+
+.mrfw-sshFieldInvalid .mrfw-sshPickerTrigger {
+  --dsh-button-outline-color: var(--dsw-alias-state-error-primary);
 }
 
 .mrfw-sshErrors {
@@ -1984,7 +1991,6 @@ aside[data-mrfw-navigator] > [data-files-search-settings] {
 .mrfw-sshInput,
 .mrfw-sshHelperInput,
 .mrfw-teamInput,
-.mrfw-sshSelectControl,
 button.mrfw-sshButton {
   box-sizing: border-box;
   height: 32px;
@@ -1995,27 +2001,36 @@ button.mrfw-sshButton {
   width: 100%;
 }
 
-.mrfw-sshSelect {
-  box-sizing: border-box;
+.mrfw-sshPicker,
+button.mrfw-sshPickerTrigger {
+  width: 100%;
+  min-width: 0;
+}
+
+button.mrfw-sshPickerTrigger {
+  justify-content: space-between;
+}
+
+.mrfw-sshPickerLabel {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.mrfw-sshPickerTrigger svg,
+.mrfw-sshPickerCompact {
+  flex: none;
+}
+
+.mrfw-sshAliasInput {
   display: flex;
-  width: 100%;
+  align-items: center;
+  gap: 6px;
 }
 
-.mrfw-sshSelectControl {
-  width: 100%;
-  padding: 0 8px;
-  border: 0.5px solid var(--dsw-alias-border-l4);
-  border-radius: var(--dsw-radius-md);
-  background: var(--dsw-alias-bg-layer-1);
-  color: var(--dsw-alias-label-primary);
-  font-family: inherit;
-  font-size: 14px;
-  line-height: 22px;
-  outline: none;
-}
-
-.mrfw-sshSelectControl:focus {
-  border-color: var(--dsw-alias-state-business-primary);
+.mrfw-sshAliasInput > .mrfw-sshInput {
+  min-width: 0;
 }
 
 .mrfw-sshTextarea {

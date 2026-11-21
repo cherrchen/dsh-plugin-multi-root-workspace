@@ -1,9 +1,9 @@
 /** SSH connection management and the Workspace's separate Root binding dialog. */
 import { Fragment, useCallback, useEffect, useMemo, useRef, useState, type KeyboardEvent as ReactKeyboardEvent, type ReactNode } from 'react'
-import { Input, Modal, Tag } from '@deepseek-ai/dsh-client-ui-primitives'
+import { Button as PrimitiveButton, Input, Menu, Modal, Tag } from '@deepseek-ai/dsh-client-ui-primitives'
 import type { RootsView } from '../contract.ts'
 import type { RemoteModeControl } from '../compat/skills-client.ts'
-import { IconAccessReadOnly, IconAccessReadWrite, IconCopy, IconDownload, IconEdit, IconLink, IconPlay, IconShield, IconTrash, maybeComponent } from '../compat/client-icons.ts'
+import { IconAccessReadOnly, IconAccessReadWrite, IconChevronDown, IconCopy, IconDownload, IconEdit, IconLink, IconPlay, IconShield, IconTrash, maybeComponent } from '../compat/client-icons.ts'
 import { IconButton, SshButton as Button } from './panel-buttons.tsx'
 import { PendingBar, StatusLine } from './pending.tsx'
 import { sshLocation, sshTarget } from '../remote/ssh-location.ts'
@@ -115,9 +115,86 @@ function Field(props: { readonly label: string; readonly wide?: boolean; readonl
   </div>
 }
 
+/** Single-choice fields use the same anchored menu as the host's settings. */
+function SshPicker<Value extends string>(props: {
+  readonly label: string
+  readonly value: Value
+  readonly items: readonly { id: Value; label: string }[]
+  readonly onChange: (value: Value) => void
+  readonly disabled?: boolean
+  readonly invalid?: boolean
+  readonly iconOnly?: boolean
+}): ReactNode {
+  const [open, setOpen] = useState(false)
+  const disabled = props.disabled === true || props.items.length === 0
+  const expanded = open && !disabled
+  const selectedLabel = props.items.find(item => item.id === props.value)?.label ?? props.label
+  return <Menu open={expanded} items={props.items} selectedId={props.value} portal autoFocus
+    align={props.iconOnly ? 'end' : 'start'}
+    className={props.iconOnly ? 'mrfw-sshPickerCompact' : 'mrfw-sshPicker'}
+    onClose={() => setOpen(false)}
+    onSelect={id => {
+      setOpen(false)
+      const choice = props.items.find(item => item.id === id)
+      if (choice !== undefined && choice.id !== props.value) props.onChange(choice.id)
+    }}
+    anchor={<PrimitiveButton type="button" size="sm" variant="outline"
+      className={props.iconOnly ? 'mrfw-sshButton' : 'mrfw-sshButton mrfw-sshPickerTrigger'}
+      disabled={disabled} aria-label={props.label}
+      aria-description={props.iconOnly || selectedLabel === props.label ? undefined : selectedLabel}
+      aria-invalid={props.invalid || undefined}
+      aria-haspopup="menu" aria-expanded={expanded}
+      title={props.iconOnly ? props.label : selectedLabel}
+      onClick={() => setOpen(!expanded)}
+      onKeyDown={event => {
+        if (expanded || (event.key !== 'ArrowDown' && event.key !== 'ArrowUp')) return
+        event.preventDefault()
+        setOpen(true)
+      }}>
+      {props.iconOnly ? null : <span className="mrfw-sshPickerLabel">{selectedLabel}</span>}
+      <IconChevronDown size={14} aria-hidden="true" />
+    </PrimitiveButton>}
+  />
+}
+
+function SshAliasInput(props: {
+  readonly value: string
+  readonly aliases: readonly string[]
+  readonly busy: boolean
+  readonly invalid?: boolean
+  readonly onChange: (value: string) => void
+  readonly t: Translate
+}): ReactNode {
+  const { t } = props
+  return <div className="mrfw-sshAliasInput">
+    <Input className="mrfw-sshInput" aria-label={t('ssh.field.alias')} placeholder={t('ssh.field.alias')}
+      value={props.value} disabled={props.busy} aria-invalid={props.invalid || undefined}
+      onChange={event => props.onChange(event.currentTarget.value)} />
+    {props.aliases.length === 0 ? null : (
+      <SshPicker iconOnly label={t('ssh.field.pickAlias')} value={props.value} disabled={props.busy}
+        items={props.aliases.map(alias => ({ id: alias, label: alias }))} onChange={props.onChange} />
+    )}
+  </div>
+}
+
+const credentialSources = (t: Translate): readonly { id: CredentialMode; label: string }[] => [
+  { id: 'alias', label: t('ssh.field.alias') },
+  { id: 'managed', label: t('ssh.field.managed') },
+]
+
+const platforms = (t: Translate): readonly { id: EditorDraft['platform']; label: string }[] => [
+  { id: 'linux', label: t('ssh.platform.linux') },
+  { id: 'darwin', label: t('ssh.platform.darwin') },
+]
+
+const managedCredentials = (credentials: readonly CredentialPublicView[], t: Translate): readonly { id: string; label: string }[] =>
+  credentials.length === 0 ? [] : [
+    { id: '', label: t('ssh.field.managed') },
+    ...credentials.map(credential => ({ id: credential.id, label: credential.label })),
+  ]
+
 interface EditorDraft {
   readonly existing?: SshEnvironmentView | undefined
-  environmentId: string
   displayName: string
   hostname: string
   port: string
@@ -142,7 +219,7 @@ interface BindingDraft {
 }
 
 const blankEditor = (): EditorDraft => ({
-  environmentId: '', displayName: '', hostname: '', port: '22', user: '', platform: 'linux',
+  displayName: '', hostname: '', port: '22', user: '', platform: 'linux',
   credentialSource: 'managed', alias: '', credentialId: '', allowExec: false, allowTransfer: false,
 })
 
@@ -171,12 +248,11 @@ const remotePath = (path: string): boolean =>
   && !path.split('/').slice(1).some(segment => segment === '' || segment === '.' || segment === '..')
 
 /** Fields validated when adding a connection. */
-type WizardField = 'environmentId' | 'hostname' | 'port' | 'user' | 'alias' | 'credentialId'
+type WizardField = 'hostname' | 'port' | 'user' | 'alias' | 'credentialId'
 
 /** The localized hint key for one invalid field, or undefined when it passes. */
 function draftFieldError(draft: EditorDraft, field: WizardField): Key | undefined {
   switch (field) {
-    case 'environmentId': return draft.existing !== undefined || ENVIRONMENT_ID.test(draft.environmentId.trim()) ? undefined : 'ssh.field.environmentIdHint'
     case 'hostname': return draft.credentialSource === 'managed' && !sshToken(draft.hostname, 253) ? 'ssh.field.hostnameHint' : undefined
     case 'port': return draft.credentialSource === 'managed' && !sshPort(draft.port) ? 'ssh.field.portHint' : undefined
     case 'user': return draft.credentialSource === 'managed' && !sshToken(draft.user, 64) ? 'ssh.field.userHint' : undefined
@@ -185,11 +261,10 @@ function draftFieldError(draft: EditorDraft, field: WizardField): Key | undefine
   }
 }
 
-const CONNECT_FIELDS: readonly WizardField[] = ['environmentId', 'user', 'hostname', 'port', 'alias', 'credentialId']
+const CONNECT_FIELDS: readonly WizardField[] = ['user', 'hostname', 'port', 'alias', 'credentialId']
 
 /** The label locale key for one wizard field, used by the summary strip. */
 const FIELD_LABELS: Record<WizardField, Key> = {
-  environmentId: 'ssh.field.environmentId',
   user: 'ssh.field.user',
   hostname: 'ssh.field.hostname',
   port: 'ssh.field.port',
@@ -211,7 +286,6 @@ function connectionReady(draft: EditorDraft): boolean {
 
 const editorOf = (environment: SshEnvironmentView): EditorDraft => ({
   existing: environment,
-  environmentId: environment.environmentId,
   displayName: environment.displayName ?? '',
   hostname: environment.endpoint.hostname,
   port: String(environment.endpoint.port),
@@ -343,6 +417,7 @@ interface EnvironmentFormProps {
   readonly draft: EditorDraft
   readonly onChange: (draft: EditorDraft) => void
   readonly credentials: readonly CredentialPublicView[]
+  readonly aliases: readonly string[]
   readonly scan: ScanState | undefined
   readonly fingerprint: string | undefined
   readonly onScan: () => void
@@ -370,7 +445,6 @@ function EnvironmentForm(props: EnvironmentFormProps): ReactNode {
   // the strict token/port checks even for an alias-sourced endpoint.
   const canSave = !busy
     && props.fingerprint !== undefined
-    && (draft.existing !== undefined || ENVIRONMENT_ID.test(draft.environmentId.trim()))
     && sshToken(draft.hostname, 253)
     && sshPort(draft.port)
     && sshToken(draft.user, 64)
@@ -379,24 +453,17 @@ function EnvironmentForm(props: EnvironmentFormProps): ReactNode {
     <section className="mrfw-sshStep">
       <span className="mrfw-sshStepTitle">{t('ssh.add.stepInfo')}</span>
       <Field label={t('ssh.field.credentialSource')} hint={t('ssh.field.credentialHint')}>
-        <span className="mrfw-sshSelect">
-          <select className="mrfw-sshSelectControl" aria-label={t('ssh.field.credentialSource')} value={draft.credentialSource}
-            onChange={event => update({ credentialSource: event.currentTarget.value as CredentialMode })}>
-            <option value="alias">{t('ssh.field.alias')}</option>
-            <option value="managed">{t('ssh.field.managed')}</option>
-          </select>
-        </span>
+        <SshPicker label={t('ssh.field.credentialSource')} value={draft.credentialSource} disabled={busy}
+          items={credentialSources(t)} onChange={credentialSource => update({ credentialSource })} />
       </Field>
       <div className="mrfw-sshGrid">
-        <Field label={t('ssh.field.environmentId')}
-          hint={draft.existing !== undefined || draft.environmentId.trim() === '' || ENVIRONMENT_ID.test(draft.environmentId.trim()) ? undefined : t('ssh.field.environmentIdHint')}>
-          <Input className="mrfw-sshInput" aria-label={t('ssh.field.environmentId')} placeholder={t('ssh.field.environmentId')}
-            value={draft.environmentId} disabled={draft.existing !== undefined}
-            onChange={event => update({ environmentId: event.currentTarget.value })} />
-        </Field>
         <Field label={t('ssh.field.displayName')}>
           <Input className="mrfw-sshInput" aria-label={t('ssh.field.displayName')} placeholder={t('ssh.field.displayName')}
             value={draft.displayName} onChange={event => update({ displayName: event.currentTarget.value })} />
+        </Field>
+        <Field label={t('ssh.field.platform')} hint={t('ssh.field.platformHint')}>
+          <SshPicker label={t('ssh.field.platform')} value={draft.platform} disabled={busy}
+            items={platforms(t)} onChange={platform => update({ platform })} />
         </Field>
         <div className="mrfw-sshTargetRow">
           <Field label={t('ssh.field.user')} className="mrfw-sshTargetUser">
@@ -414,15 +481,6 @@ function EnvironmentForm(props: EnvironmentFormProps): ReactNode {
               value={draft.port} onChange={event => update({ port: event.currentTarget.value })} />
           </Field>
         </div>
-        <Field label={t('ssh.field.platform')} hint={t('ssh.field.platformHint')}>
-          <span className="mrfw-sshSelect">
-            <select className="mrfw-sshSelectControl" aria-label={t('ssh.field.platform')} value={draft.platform}
-              onChange={event => update({ platform: event.currentTarget.value as 'linux' | 'darwin' })}>
-              <option value="linux">{t('ssh.platform.linux')}</option>
-              <option value="darwin">{t('ssh.platform.darwin')}</option>
-            </select>
-          </span>
-        </Field>
       </div>
       <div className="mrfw-sshCheckRow">
         <SshCheckbox checked={draft.allowExec} disabled={busy || !execHelperReady(draft)}
@@ -436,20 +494,16 @@ function EnvironmentForm(props: EnvironmentFormProps): ReactNode {
       <span className="mrfw-sshStepTitle">{t('ssh.add.stepKey')}</span>
       <div hidden={draft.credentialSource !== 'alias'}>
         <Field label={t('ssh.field.alias')}>
-          <Input className="mrfw-sshInput" aria-label={t('ssh.field.alias')} placeholder={t('ssh.field.alias')}
-            value={draft.alias} onChange={event => update({ alias: event.currentTarget.value })} />
+          <SshAliasInput value={draft.alias} aliases={props.aliases} busy={busy} t={t}
+            onChange={alias => update({ alias })} />
         </Field>
         <p className="mrfw-note">{t('ssh.add.aliasResolvedNote', { alias: draft.alias.trim() })}</p>
       </div>
       <div hidden={draft.credentialSource !== 'managed'}>
         <Field label={t('ssh.field.managed')}>
-          <span className="mrfw-sshSelect">
-            <select className="mrfw-sshSelectControl" aria-label={t('ssh.field.managed')} value={draft.credentialId}
-              onChange={event => update({ credentialId: event.currentTarget.value })}>
-              <option value="">{t('ssh.field.managed')}</option>
-              {props.credentials.map(credential => <option key={credential.id} value={credential.id}>{credential.label}</option>)}
-            </select>
-          </span>
+          <SshPicker label={t('ssh.field.managed')} value={draft.credentialId} disabled={busy}
+            items={managedCredentials(props.credentials, t)}
+            onChange={credentialId => update({ credentialId })} />
         </Field>
         {props.credentials.length === 0 ? (
           <div className="mrfw-sshInlineNote">
@@ -493,8 +547,6 @@ function EnvironmentForm(props: EnvironmentFormProps): ReactNode {
   </div>
 }
 
-const CONNECT_FORM_FIELDS: readonly WizardField[] = ['environmentId', 'hostname', 'port', 'user', 'alias', 'credentialId']
-
 const togglePeer = (set: ReadonlySet<string>, id: string): ReadonlySet<string> => {
   const next = new Set(set)
   if (next.has(id)) next.delete(id)
@@ -513,13 +565,21 @@ interface ConnectStepFormProps {
   readonly onManageCredentials: () => void
 }
 
-/** Turn a display name into the persisted environmentId shape. */
-const environmentIdFrom = (value: string): string => {
-  const slug = value.toLowerCase().normalize('NFKD')
+/** Allocate a new ID against the current connection inventory. */
+function newEnvironmentId(displayName: string, environments: readonly SshEnvironmentView[]): string {
+  const used = new Set(environments.map(environment => environment.environmentId))
+  const slug = displayName.toLowerCase().normalize('NFKD')
     .replace(/[^a-z0-9]+/g, '-')
     .replace(/^-+|-+$/g, '')
     .slice(0, 63)
-  return /^[a-z0-9]/.test(slug) ? slug : ''
+  if (ENVIRONMENT_ID.test(slug) && !used.has(slug)) return slug
+  // The first group of a v4 UUID is four random bytes. getRandomValues also works on HTTP.
+  let id: string
+  do {
+    const bytes = crypto.getRandomValues(new Uint8Array(4))
+    id = Array.from(bytes, byte => byte.toString(16).padStart(2, '0')).join('')
+  } while (used.has(id))
+  return id
 }
 
 /** Credential source, connection name, and remote target. */
@@ -530,7 +590,6 @@ function ConnectStepForm(props: ConnectStepFormProps): ReactNode {
   const fieldErrors = CONNECT_FIELDS
     .map(field => ({ field, message: props.errorFor(field) }))
     .filter((entry): entry is { readonly field: WizardField; readonly message: string } => entry.message !== undefined)
-  const aliasListId = 'mrfw-ssh-alias-options'
   return <>
     {fieldErrors.length === 0 ? null : (
       <div className="mrfw-sshErrors" role="alert">
@@ -546,33 +605,21 @@ function ConnectStepForm(props: ConnectStepFormProps): ReactNode {
       <span className="mrfw-sshStepTitle">{t('ssh.field.credential')}</span>
       <div className="mrfw-sshCredentialRow">
         <Field label={t('ssh.field.credentialSource')} className="mrfw-sshCredentialSource">
-          <span className="mrfw-sshSelect">
-            <select className="mrfw-sshSelectControl" aria-label={t('ssh.field.credentialSource')} value={draft.credentialSource}
-              onChange={event => update({ credentialSource: event.currentTarget.value as CredentialMode })}>
-              <option value="alias">{t('ssh.field.alias')}</option>
-              <option value="managed">{t('ssh.field.managed')}</option>
-            </select>
-          </span>
+          <SshPicker label={t('ssh.field.credentialSource')} value={draft.credentialSource} disabled={busy}
+            items={credentialSources(t)} onChange={credentialSource => update({ credentialSource })} />
         </Field>
         {draft.credentialSource === 'alias' ? (
           <Field label={t('ssh.field.alias')} invalid={invalid('alias')} className="mrfw-sshCredentialPicker">
-            <Input className="mrfw-sshInput" aria-label={t('ssh.field.alias')} placeholder={t('ssh.field.alias')}
-              list={aliasListId} value={draft.alias}
-              onChange={event => update({ alias: event.currentTarget.value })} />
-            <datalist id={aliasListId}>
-              {props.aliases.map(alias => <option key={alias} value={alias} />)}
-            </datalist>
+            <SshAliasInput value={draft.alias} aliases={props.aliases} busy={busy} invalid={invalid('alias')} t={t}
+              onChange={alias => update({ alias })} />
           </Field>
         ) : (
           <>
             <Field label={t('ssh.field.managed')} invalid={invalid('credentialId')} className="mrfw-sshCredentialPicker">
-              <span className="mrfw-sshSelect">
-                <select className="mrfw-sshSelectControl" aria-label={t('ssh.field.managed')} value={draft.credentialId}
-                  onChange={event => update({ credentialId: event.currentTarget.value })}>
-                  <option value="">{t('ssh.field.managed')}</option>
-                  {props.credentials.map(credential => <option key={credential.id} value={credential.id}>{credential.label}</option>)}
-                </select>
-              </span>
+              <SshPicker label={t('ssh.field.managed')} value={draft.credentialId}
+                disabled={busy} invalid={invalid('credentialId')}
+                items={managedCredentials(props.credentials, t)}
+                onChange={credentialId => update({ credentialId })} />
             </Field>
             <Button className="mrfw-sshCredentialManage" variant="outline" size="sm" disabled={busy} onClick={props.onManageCredentials}>
               {t('ssh.credentialManage')}
@@ -583,24 +630,14 @@ function ConnectStepForm(props: ConnectStepFormProps): ReactNode {
     </section>
     <section className="mrfw-sshStep">
       <span className="mrfw-sshStepTitle">{t('ssh.add.hostInfo')}</span>
-      <div className="mrfw-sshGrid mrfw-sshGridThree">
+      <div className="mrfw-sshGrid">
         <Field label={t('ssh.field.displayName')}>
           <Input className="mrfw-sshInput" aria-label={t('ssh.field.displayName')} placeholder={t('ssh.field.displayName')}
             value={draft.displayName} onChange={event => update({ displayName: event.currentTarget.value })} />
         </Field>
-        <Field label={t('ssh.field.environmentId')} invalid={invalid('environmentId')}>
-          <Input className="mrfw-sshInput" aria-label={t('ssh.field.environmentId')} placeholder={t('ssh.field.environmentId')}
-            value={draft.environmentId} disabled={draft.existing !== undefined}
-            onChange={event => update({ environmentId: event.currentTarget.value })} />
-        </Field>
         <Field label={t('ssh.field.platform')}>
-          <span className="mrfw-sshSelect">
-            <select className="mrfw-sshSelectControl" aria-label={t('ssh.field.platform')} value={draft.platform}
-              onChange={event => update({ platform: event.currentTarget.value as 'linux' | 'darwin' })}>
-              <option value="linux">{t('ssh.platform.linux')}</option>
-              <option value="darwin">{t('ssh.platform.darwin')}</option>
-            </select>
-          </span>
+          <SshPicker label={t('ssh.field.platform')} value={draft.platform} disabled={busy}
+            items={platforms(t)} onChange={platform => update({ platform })} />
         </Field>
         {draft.credentialSource === 'managed' ? (
           <div className="mrfw-sshTargetRow">
@@ -870,7 +907,6 @@ function RemotePathDialog(props: RemotePathDialogProps): ReactNode {
 }
 
 interface AddConnectionFormProps {
-  readonly environmentIds: readonly string[]
   readonly draft: EditorDraft
   readonly onChange: (draft: EditorDraft) => void
   readonly credentials: readonly CredentialPublicView[]
@@ -888,13 +924,9 @@ interface AddConnectionFormProps {
 function AddConnectionForm(props: AddConnectionFormProps): ReactNode {
   const { draft, t, busy, pending } = props
   const [attempted, setAttempted] = useState<ReadonlySet<WizardField>>(new Set())
-  const [idTouched, setIdTouched] = useState(false)
   const [scanDialog, setScanDialog] = useState<{ result: SshScanResult; draft: EditorDraft; fingerprint: string | undefined } | undefined>(undefined)
 
   const errorFor = (field: WizardField): string | undefined => {
-    if (field === 'environmentId' && props.environmentIds.includes(draft.environmentId.trim())) {
-      return t('error.environment-id-conflict')
-    }
     if (!attempted.has(field)) return undefined
     const key = draftFieldError(draft, field)
     return key === undefined ? undefined : t(key)
@@ -907,28 +939,17 @@ function AddConnectionForm(props: AddConnectionFormProps): ReactNode {
     })
   }
   const change = (next: EditorDraft): void => {
-    let updated = next
-    const manualId = next.environmentId !== draft.environmentId
-      && next.displayName === draft.displayName
-      && next.alias === draft.alias
-    if (manualId) setIdTouched(true)
-    if (!idTouched && !manualId && draft.existing === undefined) {
-      const source = updated.displayName.trim() !== '' ? updated.displayName : updated.alias
-      const generated = environmentIdFrom(source)
-      if (generated !== '') updated = { ...updated, environmentId: generated }
-      else if (updated.displayName !== draft.displayName || updated.alias !== draft.alias) updated = { ...updated, environmentId: '' }
-    }
     setAttempted(current => {
       const touched = new Set(current)
-      for (const field of CONNECT_FORM_FIELDS) if (updated[field] !== draft[field]) touched.add(field)
-      if (updated.credentialSource !== draft.credentialSource) { touched.add('alias'); touched.add('credentialId') }
+      for (const field of CONNECT_FIELDS) if (next[field] !== draft[field]) touched.add(field)
+      if (next.credentialSource !== draft.credentialSource) { touched.add('alias'); touched.add('credentialId') }
       return touched
     })
-    props.onChange(updated)
+    props.onChange(next)
   }
 
   const scan = async (): Promise<void> => {
-    if (!connectionReady(draft) || props.environmentIds.includes(draft.environmentId.trim())) {
+    if (!connectionReady(draft)) {
       reveal(CONNECT_FIELDS)
       return
     }
@@ -969,6 +990,86 @@ function AddConnectionForm(props: AddConnectionFormProps): ReactNode {
       fingerprint={scanDialog?.fingerprint} busy={busy} t={t}
       onFingerprint={fingerprint => setScanDialog(current => current === undefined ? current : { ...current, fingerprint })}
       onConfirm={() => { void confirmScan() }} onCancel={() => setScanDialog(undefined)} />
+  </div>
+}
+
+interface AddConnectionSetupProps {
+  readonly environment: SshEnvironmentView
+  readonly needsAccessKey: boolean
+  readonly needsLink: boolean
+  readonly testResult: string | undefined
+  readonly busy: boolean
+  readonly pending: ManageOp['kind'] | 'test' | undefined
+  readonly t: Translate
+  readonly onDetectNode: () => Promise<string | undefined>
+  readonly onInstallHelper: (nodePath: string | undefined) => void
+  readonly onInstallAccessKey: () => void
+  readonly onLink: () => void
+  readonly onFinish: (options: { allowExec: boolean; allowTransfer: boolean }) => void
+}
+
+function AddConnectionSetup(props: AddConnectionSetupProps): ReactNode {
+  const { environment, needsAccessKey, busy, pending, t } = props
+  const [nodePath, setNodePath] = useState('')
+  const [execChoice, setAllowExec] = useState<boolean | undefined>(undefined)
+  const [transferChoice, setAllowTransfer] = useState<boolean | undefined>(undefined)
+  const helperReady = environment.helper !== null
+  const allowExec = helperReady && (execChoice ?? (environment.exec !== undefined))
+  const allowTransfer = transferChoice ?? (environment.transfer !== undefined)
+  return <div className="mrfw-sshForm">
+    <section className="mrfw-sshStep">
+      <div className="mrfw-sshCheckRow">
+        <span className="mrfw-sshStepTitle">{environment.displayName ?? environment.environmentId}</span>
+        <Tag tone={helperReady ? 'success' : 'warning'} className="mrfw-sshTag">
+          {t(helperReady ? 'ssh.helperInstalled' : 'ssh.helperMissing')}
+        </Tag>
+      </div>
+      <p className="mrfw-note">{sshTarget(environment.endpoint.user, environment.endpoint.hostname, environment.endpoint.port)}</p>
+      {needsAccessKey ? (
+        <div className="mrfw-sshRowActions">
+          <Button variant="outline" size="sm" disabled={busy} loading={pending === 'accessKey'}
+            onClick={props.onInstallAccessKey}>{t('ssh.accessKeyInstall')}</Button>
+        </div>
+      ) : null}
+      {helperReady ? null : (
+        <>
+          <Field label={t('ssh.nodePath')}>
+            <Input className="mrfw-sshInput" aria-label={t('ssh.nodePath')} value={nodePath}
+              disabled={busy || needsAccessKey} onChange={event => setNodePath(event.currentTarget.value)} />
+          </Field>
+          <div className="mrfw-sshRowActions">
+            <Button variant="outline" size="sm" disabled={busy || needsAccessKey} loading={pending === 'test'}
+              onClick={async () => {
+                const detected = await props.onDetectNode()
+                if (detected !== undefined) setNodePath(detected)
+              }}>{t('ssh.add.detectNode')}</Button>
+            <Button variant="outline" size="sm" disabled={busy || needsAccessKey} loading={pending === 'helper'}
+              onClick={() => props.onInstallHelper(nodePath.trim() || undefined)}>{t('ssh.helperInstall')}</Button>
+          </div>
+          {props.testResult === undefined ? null : <StatusLine state="done">{props.testResult}</StatusLine>}
+        </>
+      )}
+      {props.needsLink ? (
+        <div className="mrfw-sshInlineNote">
+          <span className="mrfw-sshFieldHint">{t('ssh.linkBanner')}</span>
+          <Button variant="outline" size="sm" disabled={busy} loading={pending === 'link'}
+            onClick={props.onLink}>{t('ssh.linkNow')}</Button>
+        </div>
+      ) : null}
+    </section>
+    <section className="mrfw-sshStep">
+      <div className="mrfw-sshCheckRow">
+        <SshCheckbox checked={allowExec} disabled={busy || !helperReady}
+          onChange={setAllowExec} label={t('ssh.field.allowExec')} />
+        <SshCheckbox checked={allowTransfer} disabled={busy}
+          onChange={setAllowTransfer} label={t('ssh.field.allowTransfer')} />
+      </div>
+    </section>
+    {pending === undefined ? null : <StatusLine state="ongoing">{t(`ssh.pending.${pending}` as Key)}</StatusLine>}
+    <div className="mrfw-sshRowActions">
+      <Button variant="primary" size="sm" disabled={busy} loading={pending === 'save'}
+        onClick={() => props.onFinish({ allowExec, allowTransfer })}>{t('ssh.step.finish')}</Button>
+    </div>
   </div>
 }
 
@@ -1026,7 +1127,7 @@ export function SshManagementDialog(props: SshManagementDialogProps): ReactNode 
   const [helperNodePath, setHelperNodePath] = useState('')
   const [copiedId, setCopiedId] = useState<string | undefined>(undefined)
   const [credentialManagerOpen, setCredentialManagerOpen] = useState(false)
-  const [addOpen, setAddOpen] = useState(false)
+  const [addStep, setAddStep] = useState<'connect' | SshEnvironmentView | undefined>(undefined)
   const [aliases, setAliases] = useState<readonly string[]>([])
 
   useEffect(() => { mounted.current = true; return () => { mounted.current = false } }, [])
@@ -1052,7 +1153,7 @@ export function SshManagementDialog(props: SshManagementDialogProps): ReactNode 
     setFingerprint(undefined)
     setConfirm(undefined)
     setCredentialManagerOpen(false)
-    setAddOpen(false)
+    setAddStep(undefined)
     setAliases([])
     setSaved(false)
     setError(undefined)
@@ -1106,7 +1207,7 @@ export function SshManagementDialog(props: SshManagementDialogProps): ReactNode 
     setScan(undefined)
     setFingerprint(undefined)
     setCredentialManagerOpen(false)
-    setAddOpen(false)
+    setAddStep(undefined)
   }
 
   /** The Add connection dialog always starts from a blank draft. */
@@ -1116,16 +1217,15 @@ export function SshManagementDialog(props: SshManagementDialogProps): ReactNode 
     setFingerprint(undefined)
     setSaved(false)
     setError(undefined)
-    setAddOpen(true)
+    setAddStep('connect')
   }
 
   /** Closing the dialog discards the draft; a saved connection remains available. */
   const closeAdd = (): void => {
-    setAddOpen(false)
+    setAddStep(undefined)
     setAddDraft(blankEditor())
     setScan(undefined)
     setFingerprint(undefined)
-    setSaved(false)
     setCredentialManagerOpen(false)
   }
 
@@ -1149,7 +1249,7 @@ export function SshManagementDialog(props: SshManagementDialogProps): ReactNode 
       const failure = cause instanceof PanelError ? cause : new PanelError('unavailable', String(cause))
       if (current() && requestId === stateRequest.current) {
         setError(failure)
-        if (failure.code === 'personal-config-conflict') await load()
+        if (failure.code === 'personal-config-conflict' || failure.code === 'environment-id-conflict') await load()
       }
       return undefined
     } finally {
@@ -1205,8 +1305,8 @@ export function SshManagementDialog(props: SshManagementDialogProps): ReactNode 
     setConfirm(undefined)
     await submit({ kind: 'remove', id }, async () => await ssh.environmentRemove(sessionId, revision(), id))
   }
-  const testEnvironment = async (id: string): Promise<void> => {
-    if (ssh === undefined || !canRequest) return
+  const testEnvironment = async (id: string): Promise<string | undefined> => {
+    if (ssh === undefined || !canRequest) return undefined
     setTesting(current => new Set(current).add(id))
     try {
       const result = await ssh.environmentTest(sessionId, id)
@@ -1215,6 +1315,7 @@ export function SshManagementDialog(props: SshManagementDialogProps): ReactNode 
           ...previous,
           [id]: `${platformLabel(result.platform, t)}${result.nodeVersion === undefined ? '' : ` · node ${result.nodeVersion}`}`,
         }))
+        return result.nodePath
       }
     } catch (cause: unknown) {
       if (current()) setError(cause instanceof PanelError ? cause : new PanelError('unavailable', String(cause)))
@@ -1225,6 +1326,7 @@ export function SshManagementDialog(props: SshManagementDialogProps): ReactNode 
         return next
       })
     }
+    return undefined
   }
 
   const scanHost = async (draft: EditorDraft, applyPatch: (patch: Partial<EditorDraft>) => void): Promise<void> => {
@@ -1271,10 +1373,11 @@ export function SshManagementDialog(props: SshManagementDialogProps): ReactNode 
     }
   }
 
-  const saveEnvironment = async (draft: EditorDraft, hostKey: string | undefined, scanToken?: string): Promise<boolean> => {
-    if (ssh === undefined || !canRequest || hostKey === undefined || !sshPort(draft.port)) return false
+  const saveEnvironment = async (draft: EditorDraft, hostKey: string | undefined, scanToken?: string): Promise<SshEnvironmentView | undefined> => {
+    if (ssh === undefined || !canRequest || view === undefined || hostKey === undefined || !sshPort(draft.port)) return undefined
+    const environmentId = draft.existing?.environmentId ?? newEnvironmentId(draft.displayName, view.environments)
     const environment = {
-      environmentId: draft.environmentId.trim(),
+      environmentId,
       ...(draft.displayName.trim() === '' ? {} : { displayName: draft.displayName.trim() }),
       platform: draft.platform,
       endpoint: { hostname: draft.hostname.trim(), port: Number.parseInt(draft.port, 10), user: draft.user.trim() },
@@ -1285,17 +1388,20 @@ export function SshManagementDialog(props: SshManagementDialogProps): ReactNode 
       ...(draft.allowTransfer ? { transfer: draft.existing?.transfer ?? { ...TRANSFER_DEFAULTS } } : {}),
     }
     const intent = draft.existing === undefined ? 'create' : 'update'
-    const ok = await submit({ kind: 'save' }, async () => await ssh.environmentSave(sessionId, revision(), environment, hostKey, scanToken, intent))
-    if (!ok) return false
-    if (draft.existing === undefined) {
-      closeAdd()
-      setSaved(true)
-    } else {
-      setScan(undefined)
-      setFingerprint(undefined)
-      setEditDraft(undefined)
-    }
-    return true
+    const state = await submitState({ kind: 'save' }, async () => await ssh.environmentSave(sessionId, view.revision, environment, hostKey, scanToken, intent))
+    return state?.environments.find(entry => entry.environmentId === environmentId)
+  }
+
+  const installEnvironmentHelper = async (id: string, nodePath: string | undefined): Promise<void> => {
+    if (ssh === undefined || !canRequest) return
+    const state = await submitState({ kind: 'helper', id }, async () => await ssh.helperInstall(sessionId, revision(), id, nodePath))
+    const environment = state?.environments.find(entry => entry.environmentId === id)
+    if (environment === undefined) return
+    setEditDraft(draft => {
+      if (draft?.existing?.environmentId !== id || environment.hostKey !== draft.existing.hostKey
+        || editorIdentity(editorOf(environment)) !== editorIdentity(editorOf(draft.existing))) return draft
+      return { ...draft, existing: environment }
+    })
   }
 
   const copyPublicKey = async (credential: CredentialPublicView): Promise<void> => {
@@ -1433,11 +1539,10 @@ export function SshManagementDialog(props: SshManagementDialogProps): ReactNode 
                 <div className="mrfw-sshRowActions">
                   <Button variant="primary" size="sm" disabled={busy} loading={rowOp === 'helper'}
                     onClick={() => {
-                      if (ssh === undefined || !canRequest) return
                       const nodePath = helperNodePath.trim()
                       setHelperFor(undefined)
                       setHelperNodePath('')
-                      void submit({ kind: 'helper', id }, async () => await ssh.helperInstall(sessionId, revision(), id, nodePath === '' ? undefined : nodePath))
+                      void installEnvironmentHelper(id, nodePath || undefined)
                     }}>{t('ssh.helperInstall')}</Button>
                   <Button variant="ghost" size="sm" disabled={busy}
                     onClick={() => { setHelperFor(undefined); setHelperNodePath('') }}>{t('ssh.cancel')}</Button>
@@ -1469,11 +1574,18 @@ export function SshManagementDialog(props: SshManagementDialogProps): ReactNode 
               setEditDraft(next)
             }}
             credentials={userCredentials}
+            aliases={aliases}
             scan={scan}
             fingerprint={fingerprint ?? recordedFingerprint(editDraft)}
             onScan={() => { void scanHost(editDraft, patch => { setEditDraft(current => current === undefined ? current : { ...current, ...patch }) }) }}
             onFingerprint={setFingerprint}
-            onSave={async () => await saveEnvironment(editDraft, fingerprint ?? recordedFingerprint(editDraft), scan?.token)}
+            onSave={async () => {
+              if (await saveEnvironment(editDraft, fingerprint ?? recordedFingerprint(editDraft), scan?.token) === undefined) return false
+              setScan(undefined)
+              setFingerprint(undefined)
+              setEditDraft(undefined)
+              return true
+            }}
             onCancel={() => { setEditDraft(undefined); setScan(undefined); setFingerprint(undefined) }}
             onOpenKeys={() => changeTab('keys')}
             saveLabel={t('ssh.envSave')}
@@ -1524,7 +1636,7 @@ export function SshManagementDialog(props: SshManagementDialogProps): ReactNode 
     </section>
   </div>
 
-  const renderAdd = (): ReactNode => {
+  const renderAdd = (step: 'connect' | SshEnvironmentView): ReactNode => {
     if (props.overviewError !== undefined) return <><PanelErrorToast error={props.overviewError} t={t} /><p className="mrfw-note">{t('ssh.loadFailed')}</p></>
     if (status === undefined) return <p className="mrfw-note">{t('ssh.add.loading')}</p>
     if (status.state !== 'ready') return renderUnavailable()
@@ -1540,22 +1652,64 @@ export function SshManagementDialog(props: SshManagementDialogProps): ReactNode 
     if (ssh === undefined) return <p className="mrfw-note">{t('ssh.add.noClient')}</p>
     if (!canRequest) return <p className="mrfw-note">{t('ssh.dialog.noSession')}</p>
     if (view === undefined) return renderLoadState()
-    return <div className="mrfw-sshArea">
-      <p className="mrfw-note">{t('ssh.add.personalGuide')}</p>
-      <AddConnectionForm
-        draft={addDraft}
-        environmentIds={view.environments.map(environment => environment.environmentId)}
-        onChange={setAddDraft}
-        credentials={userCredentials}
-        aliases={aliases}
-        busy={busy}
-        pending={formPending}
+    const renderSetup = (created: SshEnvironmentView): ReactNode => {
+      const id = created.environmentId
+      const environment = view.environments.find(entry => entry.environmentId === id)
+      if (environment === undefined || environment.hostKey !== created.hostKey
+        || editorIdentity(editorOf(environment)) !== editorIdentity(editorOf(created))) {
+        return <p className="mrfw-note">{t('error.personal-config-conflict')}</p>
+      }
+      const managed = environment.credential.kind === 'managed' ? environment.credential : undefined
+      const detectingNode = testing.has(id)
+      return <AddConnectionSetup
+        environment={environment}
+        needsAccessKey={managed !== undefined && managed.accessKeyId === undefined && credentialOf(managed.credentialId)?.kind === 'password'}
+        needsLink={managed !== undefined && !view.linked}
+        testResult={testResults[id]}
+        busy={busy || detectingNode}
+        pending={detectingNode ? 'test' : pending?.kind}
         t={t}
-        onManageCredentials={() => setCredentialManagerOpen(true)}
-        onScanHost={scanAddHost}
-        onSave={async (draft, result, hostKey) => { await saveEnvironment(draft, hostKey, result.token) }}
-        onCancel={closeAdd}
+        onDetectNode={async () => await testEnvironment(id)}
+        onInstallHelper={nodePath => { void installEnvironmentHelper(id, nodePath) }}
+        onInstallAccessKey={() => { void submit({ kind: 'accessKey', id }, async () => await ssh.accessKeyInstall(sessionId, revision(), id)) }}
+        onLink={() => { void submit({ kind: 'link', id }, async () => await ssh.configLink(sessionId)) }}
+        onFinish={async options => {
+          const draft = editorOf(environment)
+          const changed = options.allowExec !== draft.allowExec || options.allowTransfer !== draft.allowTransfer
+          if (!changed || await saveEnvironment({ ...draft, ...options }, environment.hostKey) !== undefined) closeAdd()
+        }}
       />
+    }
+    return <div className="mrfw-sshArea">
+      <ol className="mrfw-sshWizardSteps" role="list" aria-label={t('ssh.step.listLabel')}>
+        <li aria-current={step === 'connect' ? 'step' : undefined}>
+          <Tag tone={step === 'connect' ? 'neutral' : 'success'}>{t('ssh.add.stepInfo')}</Tag>
+        </li>
+        <li aria-current={step === 'connect' ? undefined : 'step'}>
+          <Tag tone={step === 'connect' ? 'outline' : 'neutral'}>{t('ssh.add.stepSetup')}</Tag>
+        </li>
+      </ol>
+      {step === 'connect' ? (
+        <>
+          <p className="mrfw-note">{t('ssh.add.personalGuide')}</p>
+          <AddConnectionForm
+            draft={addDraft}
+            onChange={setAddDraft}
+            credentials={userCredentials}
+            aliases={aliases}
+            busy={busy}
+            pending={formPending}
+            t={t}
+            onManageCredentials={() => setCredentialManagerOpen(true)}
+            onScanHost={scanAddHost}
+            onSave={async (draft, result, hostKey) => {
+              const environment = await saveEnvironment(draft, hostKey, result.token)
+              if (environment !== undefined) setAddStep(step => step === 'connect' ? environment : step)
+            }}
+            onCancel={closeAdd}
+          />
+        </>
+      ) : renderSetup(step)}
     </div>
   }
 
@@ -1620,7 +1774,7 @@ export function SshManagementDialog(props: SshManagementDialogProps): ReactNode 
         {panel()}
       </div>
     </Modal>
-    {addOpen ? (
+    {addStep !== undefined ? (
       <Modal
         open
         onClose={closeAdd}
@@ -1629,8 +1783,8 @@ export function SshManagementDialog(props: SshManagementDialogProps): ReactNode 
         className="mrfw-sshAddDialog"
         contentClassName="mrfw-sshDialogContent"
       >
-        <PendingBar active={formPending !== undefined} />
-        {renderAdd()}
+        <PendingBar active={busy || (addStep !== 'connect' && testing.has(addStep.environmentId))} />
+        {renderAdd(addStep)}
       </Modal>
     ) : null}
     {credentialManagerOpen ? (
@@ -1836,12 +1990,9 @@ export function SshWorkspaceBindingsDialog(props: SshWorkspaceBindingsDialogProp
         ) : (
           <div className="mrfw-sshForm">
             <Field label={t('ssh.binding.environment')}>
-              <span className="mrfw-sshSelect">
-                <select className="mrfw-sshSelectControl" aria-label={t('ssh.binding.environment')} value={draft.environmentId} disabled={busy || editing}
-                  onChange={event => setDraft(blankBinding(event.currentTarget.value))}>
-                  {view.environments.map(entry => <option key={entry.environmentId} value={entry.environmentId}>{entry.displayName ?? entry.environmentId}</option>)}
-                </select>
-              </span>
+              <SshPicker label={t('ssh.binding.environment')} value={draft.environmentId} disabled={busy || editing}
+                items={view.environments.map(entry => ({ id: entry.environmentId, label: entry.displayName ?? entry.environmentId }))}
+                onChange={environmentId => setDraft(blankBinding(environmentId))} />
             </Field>
             <Field label={t('ssh.binding.path')} invalid={draft.path !== '' && !validPath}
               hint={draft.path !== '' && !validPath ? t('error.workspace-invalid') : undefined}>

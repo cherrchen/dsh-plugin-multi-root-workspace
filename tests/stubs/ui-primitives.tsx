@@ -324,7 +324,7 @@ export function Menu(props: {
       ? createPortal(
           createElement(
             'div',
-            { 'data-menu': 'true' },
+            { role: 'menu', 'data-menu': 'true' },
             props.items.map(entry),
             (props.footer ?? []).map(entry),
           ),

@@ -296,7 +296,7 @@ Issue #32 的多执行环境能力以实验性开关形式随默认组合发货�
 
 开关开启时向更低隔离档位切换会再次经过风险确认。Registry 按档位读取配置（personal → `remoteEnvironments.personalPath`；team/hardened → `remoteEnvironments.manifestPath`，默认 `/etc/dsh-ssh-broker/manifest.json`）并建立远端控制面。Workspace Folders 提供「管理 SSH 远端」和「管理远端 Root 绑定」两个入口。也可在插件详情设置卡首行点「SSH 远端 → 管理」。
 
-**个人模式**。先打开「管理 SSH 远端」→「添加连接」，填写主机和凭据，确认主机密钥后保存。连接测试和 Helper 安装在「已有连接」里完成。回到 Workspace Folders，打开「管理远端 Root 绑定」，选一个已有连接，选择远端目录并设置权限，再从「远端工作目录」中该行的「…」菜单登记。同一个连接可以绑定多个目录。
+**个人模式**。先打开「管理 SSH 远端」→「添加连接」，填写主机和凭据，确认主机密钥后保存。第二步可检测 Node、安装 Helper，勾选「允许命令执行」后点「完成」保存。回到 Workspace Folders，打开「管理远端 Root 绑定」，选一个已有连接，选择远端目录并设置权限，再从「远端工作目录」中该行的「…」菜单登记。同一个连接可以绑定多个目录。
 
 模型侧的 `remote_copy` / `remote_bash` 与能力投影在 team/hardened 下还要通过 broker 凭据隔离证明：broker 块由部署方在专用 profile（hardened）或“模式设置”字段（team）提供，任何一步失败（SSH 兼容门禁、控制面未就绪、`danger-full-access` 会话仅对 hardened 拒绝、证明失败）都不安装工具。每次远端调用仍由 Registry 排序准入。关闭开关即卸载全部远端子树并把控制面恢复为 `disabled`（无 `remote-1` 监听、无远端域）。各档保护边界、文件布局、RPC 拒绝码见 [SSH 远端环境参考](./docs/reference/ssh-remote-environments.md)；team/hardened 的部署步骤与回滚见[控制面参考](./docs/reference/multi-environment-control-plane.md)。
 
