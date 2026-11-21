@@ -774,7 +774,7 @@ function ConnectForm(props: {
         </WizardField>
         <span className="mrfw-wizTargetSep" aria-hidden>@</span>
         <WizardField label={t('ssh.field.hostname')} className="mrfw-wizTargetHost"
-          invalid={invalid('hostname')} hint={invalid('hostname') ? props.errorFor('hostname') : t('ssh.field.hostnameHint')}>
+          invalid={invalid('hostname')} hint={invalid('hostname') ? props.errorFor('hostname') : undefined}>
           <Input className="mrfw-sshInput" aria-label={t('ssh.field.hostname')} placeholder="host.example.com"
             value={draft.hostname} disabled={busy || draft.credentialSource === 'alias'}
             onChange={event => update({ hostname: event.currentTarget.value })} />
