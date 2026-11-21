@@ -30,7 +30,7 @@ export default defineConfig({
       enabled: true,
       headless: true,
       provider: playwright(),
-      instances: [{ browser: 'chromium', viewport: { width: 320, height: 300 } }],
+      instances: [{ browser: 'chromium' }],
       commands: { wheelOverRootList },
       screenshotFailures: false,
     },
