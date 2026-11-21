@@ -1616,7 +1616,23 @@ aside[data-mrfw-navigator] > [data-files-search-settings] {
 /* The access dropdown's capsule trigger: the Menu anchor wrapper is the flex
    item, the button inside keeps the control row's 32px capsule recipe. */
 .mrfw-accessTrigger {
+  box-sizing: border-box;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 32px;
   padding: 0 12px;
+  border: 0.5px solid var(--dsw-alias-border-l2);
+  border-radius: var(--dsw-radius-md);
+  background: var(--dsw-alias-bg-layer-1, var(--dsw-alias-bg-base));
+  color: var(--dsw-alias-label-primary);
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.mrfw-accessTrigger:disabled {
+  opacity: 0.5;
+  cursor: default;
 }
 
 .mrfw-cwdTag {
@@ -2124,11 +2140,13 @@ button.mrfw-choice:hover:not(:disabled) {
 }
 
 .mrfw-wizPickerBtn {
+  box-sizing: border-box;
   display: inline-flex;
   align-items: center;
   gap: 6px;
   min-width: 0;
-  padding: 5px 10px;
+  height: 32px;
+  padding: 0 10px;
   border: 0.5px solid var(--dsw-alias-border-l2);
   border-radius: var(--dsw-radius-md);
   background: var(--dsw-alias-bg-layer-1, var(--dsw-alias-bg-base));
