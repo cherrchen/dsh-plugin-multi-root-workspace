@@ -1830,18 +1830,20 @@ aside[data-mrfw-navigator] > [data-files-search-settings] {
   min-height: 0;
 }
 
-.mrfw-wizClose {
-  position: absolute;
-  top: 12px;
-  inset-inline-end: 12px;
-  z-index: 1;
+/* A fixed header strip owns the close control so it never overlaps the
+   scrollable step content underneath it. */
+.mrfw-wizHead {
+  flex: none;
+  display: flex;
+  justify-content: flex-end;
+  padding: 10px 12px 0;
 }
 
 .mrfw-wizBody {
   flex: 1 1 auto;
   min-height: 0;
   overflow-y: auto;
-  padding: 22px 20px 12px;
+  padding: 10px 20px 12px;
 }
 
 .mrfw-wizFoot {

@@ -155,8 +155,10 @@ export function WizardShell(props: {
             {steps}
           </aside>
           <div className="mrfw-wizMain">
-            <IconButton className="mrfw-wizClose" label={props.closeLabel} onClick={props.onClose}
-              icon={IconClose === undefined ? <span aria-hidden="true">✕</span> : <IconClose size={12} />} />
+            <div className="mrfw-wizHead">
+              <IconButton className="mrfw-wizClose" label={props.closeLabel} onClick={props.onClose}
+                icon={IconClose === undefined ? <span aria-hidden="true">✕</span> : <IconClose size={12} />} />
+            </div>
             <div className="mrfw-wizBody">{props.children}</div>
             {props.footer === undefined ? null : <div className="mrfw-wizFoot">{props.footer}</div>}
           </div>
