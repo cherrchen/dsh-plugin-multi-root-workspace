@@ -445,6 +445,32 @@ describe('the New Session hero entry', () => {
 })
 
 describe('the panel dialog', () => {
+  it('keeps the primary row and add controls out of the scrolling row list', async () => {
+    const harness = mount()
+    const roots = Array.from({ length: 16 }, (_, index) => ({
+      ...ROOT_A,
+      ordinal: index + 1,
+      id: `root-${index + 1}`,
+      path: `/repos/root-${index + 1}`,
+      alias: `root-${index + 1}`,
+    }))
+    harness.setView({ primaryRoot: '/repos/primary', roots, limit: 16, count: 16 })
+    renderPanel(harness)
+    fireEvent.click(screen.getByRole('button', { name: /action.label/ }))
+    await waitFor(() => { expect(screen.getByText('/repos/root-16')).toBeTruthy() })
+
+    const list = document.querySelector('.mrfw-rootList')
+    expect(list).toBeTruthy()
+    // Every secondary row scrolls; the primary row, both section titles and
+    // the add row stay in the fixed part of the dialog.
+    expect(list!.querySelectorAll('.mrfw-row')).toHaveLength(16)
+    expect(list!.querySelector('.mrfw-rowBare')).toBeNull()
+    expect(document.querySelector('.mrfw-rowBare')?.closest('.mrfw-rootList')).toBeNull()
+    expect(document.querySelector('.mrfw-actions')?.closest('.mrfw-rootList')).toBeNull()
+    expect(list!.closest('.mrfw-sectionAdditional')).toBeTruthy()
+    expect(document.querySelectorAll('.mrfw-sectionTitle')[1]?.closest('.mrfw-rootList')).toBeNull()
+  })
+
   it('toggles read-only Root Skills and edits its independent namespace over the channel', async () => {
     const harness = mount()
     harness.setView({ primaryRoot: '/repos/primary', roots: [{ ...ROOT_B, aliasId: 'website', skillsEnabled: false }], limit: 16, count: 1 })

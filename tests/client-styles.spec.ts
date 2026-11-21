@@ -714,6 +714,50 @@ describe('the workspace folder add row', () => {
   })
 })
 
+describe('the workspace dialog scrolling rules', () => {
+  /** The sheet with comments stripped: every match below is a rule. */
+  const CSS = STYLES.replace(/\/\*[\s\S]*?\*\//g, '')
+  const rule = (selector: string): string => {
+    const escaped = selector.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+    const match = CSS.match(new RegExp(`${escaped}\\s*\\{([^}]*)\\}`))
+    return match?.[1]?.replace(/\s+/g, ' ').trim() ?? ''
+  }
+
+  it('caps the panel against the window, not only against the padded overlay', () => {
+    const dialog = rule('.mrfw-dialog')
+    // The first declaration keeps the overlay's 24px air on a viewport shorter
+    // than the fixed rows; the second is the window-relative cap. Neither is px.
+    expect(dialog).toContain('max-height: 100%')
+    expect(dialog).toContain('max-height: min(80vh, 100%)')
+    expect(dialog.match(/max-height:[^;]*;/g)?.join(' ') ?? '').not.toMatch(/\d+px/)
+    // Elevated surfaces rebind the host scrollbar skin (host Modal/Menu recipe).
+    expect(dialog).toContain('--dsh-scrollbar-thumb: var(--dsw-alias-scrollbar-bg-l2)')
+  })
+
+  it('keeps the body scroll only as the short-viewport fallback', () => {
+    const body = rule('.mrfw-body')
+    expect(body).toContain('min-height: 0')
+    expect(body).toContain('overflow-y: auto')
+  })
+
+  it('gives the secondary-root rows a window-relative scroll region', () => {
+    const additional = rule('.mrfw-sectionAdditional')
+    expect(additional).toContain('flex: 1 1 auto')
+    expect(additional).toContain('min-height: 0')
+    const list = rule('.mrfw-rootList')
+    expect(list).toContain('flex: 1 1 auto')
+    expect(list).toContain('min-height: 0')
+    expect(list).toContain('max-height: 60vh')
+    expect(list).toContain('overflow-y: auto')
+    expect(list).toContain('overscroll-behavior: contain')
+    expect(list).not.toMatch(/max-height:[^;]*\d+px/)
+  })
+
+  it('pins the add controls below the scrolling list', () => {
+    expect(rule('.mrfw-actions')).toContain('flex: none')
+  })
+})
+
 describe('the additional-section batch action', () => {
   it('right-aligns the action on the title row and wraps instead of overflowing', () => {
     // The modifier is what lets a narrow dialog put the action on its own line;

@@ -1159,12 +1159,20 @@ aside[data-mrfw-navigator] > [data-files-search-settings] {
 }
 
 .mrfw-dialog {
+  /* The dialog caps against the window, not only against the padded overlay:
+     a long additional-root list must stop at 80% of the viewport, while the
+     100% floor keeps the overlay's 24px air on a viewport shorter than the
+     fixed header, primary row and add row. An elevated surface rebinds the
+     host scrollbar skin to its l2 tokens (host Modal/Menu recipe). */
+  --dsh-scrollbar-thumb: var(--dsw-alias-scrollbar-bg-l2);
+  --dsh-scrollbar-thumb-hover: var(--dsw-alias-scrollbar-hover-l2);
   position: relative;
   z-index: 1;
   display: flex;
   flex-direction: column;
   width: min(640px, 100%);
   max-height: 100%;
+  max-height: min(80vh, 100%);
   overflow: hidden;
   border: none;
   border-radius: 24px;
@@ -1211,6 +1219,9 @@ aside[data-mrfw-navigator] > [data-files-search-settings] {
   background: var(--dsw-alias-interactive-bg-hover);
 }
 
+/* The scroll region is the additional-root list; this body scroll is only the
+   fallback for a viewport too short to hold the header, the primary row and
+   the add row, so those controls are never clipped. */
 .mrfw-body {
   display: flex;
   flex-direction: column;
@@ -1229,10 +1240,32 @@ aside[data-mrfw-navigator] > [data-files-search-settings] {
 .mrfw-section {
   display: flex;
   flex-direction: column;
+  flex: none;
 }
 
 .mrfw-section + .mrfw-section {
   margin-top: 8px;
+}
+
+/* The additional-root section yields height first when the dialog reaches its
+   cap; its title row and batch action stay outside the scrolling row list. */
+.mrfw-sectionAdditional {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow: hidden;
+}
+
+/* The panel's only normal scroll region. The rows are the variable part, so
+   they take the space left below the fixed sections, capped relative to the
+   window (never a pixel height), and scroll in place. Contain keeps a wheel
+   gesture at either end from moving the page behind the dialog. */
+.mrfw-rootList {
+  flex: 1 1 auto;
+  min-height: 0;
+  max-height: 60vh;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  scrollbar-gutter: stable;
 }
 
 .mrfw-sectionTitleRow {
@@ -1651,6 +1684,7 @@ aside[data-mrfw-navigator] > [data-files-search-settings] {
 
 .mrfw-actions {
   display: flex;
+  flex: none;
   /* One control row by default: the manual path field is the only flexible
      item and absorbs the spare width first. Wrapping is kept because the
      root-limit hint claims a line of its own, and because the ≤560px dialog
