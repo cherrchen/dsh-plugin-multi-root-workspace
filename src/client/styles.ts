@@ -1630,6 +1630,10 @@ aside[data-mrfw-navigator] > [data-files-search-settings] {
   cursor: pointer;
 }
 
+.mrfw-accessTrigger:hover:not(:disabled) {
+  background: var(--dsw-alias-interactive-bg-hover);
+}
+
 .mrfw-accessTrigger:disabled {
   opacity: 0.5;
   cursor: default;
