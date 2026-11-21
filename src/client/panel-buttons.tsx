@@ -1,9 +1,28 @@
 import type { ComponentPropsWithoutRef, ReactNode } from 'react'
 import { Button } from '@deepseek-ai/dsh-client-ui-primitives'
+import { PendingSpinner } from './pending.tsx'
 
 /** SSH actions share the height of the host's single-line Input. */
-export function SshButton({ className, ...props }: ComponentPropsWithoutRef<typeof Button>): ReactNode {
-  return <Button {...props} className={className === undefined ? 'mrfw-sshButton' : `mrfw-sshButton ${className}`} />
+export function SshButton(props: ComponentPropsWithoutRef<typeof Button> & { readonly loading?: boolean }): ReactNode {
+  const { loading, className, children, onClick, disabled, ...rest } = props
+  const busy = loading === true
+  const classes = ['mrfw-sshButton', className, busy ? 'mrfw-btnLoading' : undefined]
+    .filter((value): value is string => value !== undefined && value !== '')
+    .join(' ')
+  return (
+    <Button
+      {...rest}
+      {...(busy ? { 'aria-busy': true, 'aria-disabled': true } : {})}
+      className={classes}
+      disabled={busy ? false : disabled}
+      onClick={busy ? undefined : onClick}
+    >
+      {/* The label stays in the DOM at opacity 0 while loading: the accessible
+          name and the button width do not change under the spinner. */}
+      <span className="mrfw-btnLabel">{children}</span>
+      {busy ? <span className="mrfw-loadingSpinner"><PendingSpinner /></span> : null}
+    </Button>
+  )
 }
 
 /** The visual family of one capsule button, mirroring the host Button kit. */
@@ -45,6 +64,8 @@ export function Action(props: {
 /**
  * One icon-only button (a host "iconButton"): a fixed square of the capsule
  * family whose meaning travels in `title`/`aria-label` instead of text.
+ * `loading` swaps the glyph for a spinner while the request it fired runs;
+ * the button stays undimmed and unclickable through aria attributes.
  */
 export function IconButton(props: {
   onClick: () => void
@@ -52,11 +73,13 @@ export function IconButton(props: {
   label: string
   disabled?: boolean
   pending?: boolean
+  loading?: boolean
   pressed?: boolean
   hint?: string
   variant?: ActionVariant
 }): ReactNode {
   const variant = props.variant ?? 'ghost'
+  const loading = props.loading === true
   return (
     <button
       type="button"
@@ -64,12 +87,12 @@ export function IconButton(props: {
       title={props.hint ?? props.label}
       aria-label={props.label}
       aria-pressed={props.pressed}
-      onClick={props.pending === true ? undefined : props.onClick}
-      disabled={props.disabled === true}
-      aria-disabled={props.disabled === true || props.pending === true || undefined}
-      aria-busy={props.pending === true || undefined}
+      onClick={props.pending === true || loading ? undefined : props.onClick}
+      disabled={loading ? false : props.disabled === true}
+      aria-disabled={props.disabled === true || props.pending === true || loading || undefined}
+      aria-busy={props.pending === true || loading || undefined}
     >
-      {props.icon}
+      {loading ? <PendingSpinner size={16} /> : props.icon}
     </button>
   )
 }

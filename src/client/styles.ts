@@ -2519,4 +2519,154 @@ button.mrfw-sshButton {
   text-overflow: ellipsis;
   white-space: nowrap;
 }
+
+/* Pending feedback: spinner, status line, and the dialog progress bar. */
+.mrfw-pendingSpinner {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  justify-content: center;
+}
+
+.mrfw-spinnerRing {
+  box-sizing: border-box;
+  border: 1.5px solid currentColor;
+  border-right-color: transparent;
+  border-radius: 50%;
+  animation: mrfw-spin 0.9s linear infinite;
+}
+
+@keyframes mrfw-spin {
+  to { transform: rotate(360deg); }
+}
+
+.mrfw-doneDot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--dsw-alias-state-business-primary);
+}
+
+button.mrfw-sshButton {
+  position: relative;
+}
+
+.mrfw-btnLabel {
+  display: inline-flex;
+  align-items: center;
+  gap: inherit;
+  transition: opacity 120ms var(--ds-ease-in-out);
+}
+
+.mrfw-btnLoading .mrfw-btnLabel {
+  opacity: 0;
+}
+
+.mrfw-loadingSpinner {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  animation: mrfw-fade-in 120ms var(--ds-ease-in-out) both;
+}
+
+.mrfw-loadingSpinner > * {
+  color: inherit;
+}
+
+.mrfw-sshButton[aria-busy='true'] {
+  cursor: progress;
+}
+
+.mrfw-statusLine {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin: 0;
+  font-size: 12px;
+  line-height: 18px;
+  color: var(--dsw-alias-label-tertiary);
+  animation: mrfw-status-in 180ms var(--ds-ease-in-out) 120ms both;
+}
+
+.mrfw-statusLine[data-state='done'] {
+  animation-delay: 0s;
+}
+
+@keyframes mrfw-status-in {
+  from { opacity: 0; transform: translateY(-2px); }
+  to { opacity: 1; transform: none; }
+}
+
+@keyframes mrfw-fade-in {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+.mrfw-pendingBar {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  height: 2px;
+  margin-bottom: -2px;
+  overflow: hidden;
+  pointer-events: none;
+  opacity: 0;
+  transition: opacity 160ms var(--ds-ease-in-out);
+}
+
+.mrfw-pendingBar[data-active='true'] {
+  opacity: 1;
+  transition-delay: 120ms;
+}
+
+.mrfw-pendingBar::before {
+  content: '';
+  position: absolute;
+  inset-block: 0;
+  left: 0;
+  width: 40%;
+  border-radius: 1px;
+  background: var(--dsw-alias-brand-primary);
+  transform: translateX(-100%);
+}
+
+.mrfw-pendingBar[data-active='true']::before {
+  animation: mrfw-pending-slide 1.2s var(--ds-ease-in-out) infinite;
+}
+
+@keyframes mrfw-pending-slide {
+  from { transform: translateX(-100%); }
+  to { transform: translateX(250%); }
+}
+
+.mrfw-sshDirList {
+  transition: opacity 160ms var(--ds-ease-in-out);
+}
+
+.mrfw-sshDirList[aria-busy='true'] {
+  opacity: 0.55;
+  pointer-events: none;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .mrfw-spinnerRing,
+  .mrfw-statusLine,
+  .mrfw-loadingSpinner,
+  .mrfw-pendingBar[data-active='true']::before {
+    animation: none;
+  }
+
+  .mrfw-pendingBar::before {
+    width: 100%;
+    transform: none;
+    opacity: 0.6;
+  }
+
+  .mrfw-btnLabel,
+  .mrfw-pendingBar {
+    transition: none;
+  }
+}
 `

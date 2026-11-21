@@ -51,6 +51,7 @@ import type { SshClient } from './ssh-client.ts'
 import { SshManagementDialog, SshWorkspaceBindingsDialog, type SshDialogTab } from './ssh-panel.tsx'
 import { RemoteRootMenu } from './remote-root-menu.tsx'
 import { Action, IconButton } from './panel-buttons.tsx'
+import { StatusLine } from './pending.tsx'
 import { WorkspaceRow } from './workspace-row.tsx'
 import { requestWorktreePrompt } from './worktree-prompt-bus.ts'
 import type { Key } from './locales.ts'
@@ -363,6 +364,8 @@ export function WorkspaceFoldersDialog(props: WorkspaceFoldersActionProps & { on
   /** The standalone SSH management dialog's requested tab; undefined when closed. */
   const [sshDialog, setSshDialog] = useState<SshDialogTab | undefined>(undefined)
   const [sshBindingsOpen, setSshBindingsOpen] = useState(false)
+  /** The remote row whose register/remove request is in flight, keyed like `copyKey`. */
+  const [remoteOp, setRemoteOp] = useState<{ key: string; action: 'register' | 'remove' } | undefined>(undefined)
   /** Why the last cleanup request failed; it belongs to the confirmation only. */
   const [cleanupError, setCleanupError] = useState<PanelError | undefined>(undefined)
   /**
@@ -500,6 +503,7 @@ export function WorkspaceFoldersDialog(props: WorkspaceFoldersActionProps & { on
     const base = requestBase()
     if (base === undefined) return
     const epoch = ++remoteEpoch.current
+    setRemoteOp({ key: `remote:${endpoint.environmentId}/${endpoint.rootId}`, action })
     setState(previous => ({ ...previous, busy: true }))
     try {
       const view = action === 'register'
@@ -511,7 +515,10 @@ export function WorkspaceFoldersDialog(props: WorkspaceFoldersActionProps & { on
       if (!mounted.current || epoch !== remoteEpoch.current) return
       setRemoteState(previous => ({ ...previous, error: asPanelError(error) }))
     } finally {
-      if (mounted.current) setState(previous => ({ ...previous, busy: false }))
+      if (mounted.current) {
+        setRemoteOp(undefined)
+        setState(previous => ({ ...previous, busy: false }))
+      }
     }
   }, [props.remotes, requestBase, props.sessionId])
 
@@ -1054,6 +1061,11 @@ export function WorkspaceFoldersDialog(props: WorkspaceFoldersActionProps & { on
                     path={location}
                     copied={copiedId === copyKey}
                     onCopy={() => { void copyPath(copyKey, location) }}
+                    details={remoteOp?.key === copyKey ? (
+                      <StatusLine state="ongoing">
+                        {t(remoteOp.action === 'register' ? 'panel.remoteRegistering' : 'panel.remoteRemoving')}
+                      </StatusLine>
+                    ) : undefined}
                     trailing={<RemoteRootMenu
                       key={sessionId + '/' + endpoint.path}
                       endpoint={endpoint}
@@ -1070,6 +1082,7 @@ export function WorkspaceFoldersDialog(props: WorkspaceFoldersActionProps & { on
                       }}
                       onChanged={refreshRemoteSection}
                       anchor={<IconButton pending={state.busy}
+                        loading={remoteOp?.key === copyKey}
                         onClick={() => setMenuFor(current => current === copyKey ? undefined : copyKey)}
                         icon={<IconEllipsis />} label={t('panel.more')} />}
                     />}

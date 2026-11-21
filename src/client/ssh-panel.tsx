@@ -5,6 +5,7 @@ import type { RootsView } from '../contract.ts'
 import type { RemoteModeControl } from '../compat/skills-client.ts'
 import { IconAccessReadOnly, IconAccessReadWrite, IconDownload, IconEdit, IconLink, IconPlay, IconShield, IconTrash, maybeComponent } from '../compat/client-icons.ts'
 import { IconButton, SshButton as Button } from './panel-buttons.tsx'
+import { PendingBar, StatusLine } from './pending.tsx'
 import { errorHasDetail, errorKeyOf, PanelError } from './panel-client.ts'
 import type { CredentialPublicView, RemoteDirectoryListing, SshBindingDraft, SshBindingView, SshClient, SshManagementClient, SshSettingsView, SshEnvironmentView, SshScanResult, SshStateView } from './ssh-client.ts'
 import { SshCustodySection, type RemoteCustodyMode } from './remote-custody.tsx'
@@ -47,6 +48,36 @@ type ScanState = SshScanResult
 
 /** The two credential sources a personal environment can use. */
 type CredentialMode = 'alias' | 'managed'
+
+/**
+ * The network-bound operation currently in flight. Row-scoped kinds carry the
+ * environment id so exactly one control reports progress; the global kinds
+ * cover the dialogs' own scan/save/credential flows.
+ */
+type ManageOp =
+  | { readonly kind: 'scan' | 'save' | 'credential' }
+  | { readonly kind: 'remove' | 'helper' | 'accessKey' | 'link'; readonly id?: string }
+
+/** Whether the pending op is the row-scoped kind targeting this environment. */
+function pendingRowKind(op: ManageOp | undefined, id: string): 'remove' | 'helper' | 'accessKey' | 'link' | undefined {
+  if (op === undefined) return undefined
+  switch (op.kind) {
+    case 'remove':
+    case 'helper':
+    case 'accessKey':
+    case 'link':
+      return op.id === id ? op.kind : undefined
+    default:
+      return undefined
+  }
+}
+
+/** The scan target label: the alias for ssh-config sources, host:port otherwise. */
+function scanTargetOf(draft: EditorDraft): string {
+  return draft.credentialSource === 'alias'
+    ? draft.alias.trim()
+    : `${draft.hostname.trim()}:${draft.port.trim()}`
+}
 
 interface CheckboxControlProps {
   readonly checked: boolean
@@ -316,12 +347,14 @@ interface EnvironmentFormProps {
   readonly saveLabel: string
   readonly cancelLabel: string
   readonly busy: boolean
+  /** Which of this form's own requests is in flight, for the spinner and status line. */
+  readonly pending: 'scan' | 'save' | undefined
   readonly t: Translate
 }
 
 /** Edit one saved SSH connection. */
 function EnvironmentForm(props: EnvironmentFormProps): ReactNode {
-  const { draft, t, busy } = props
+  const { draft, t, busy, pending } = props
   const update = (partial: Partial<EditorDraft>): void => {
     const next = { ...draft, ...partial }
     if (next.allowExec && !execHelperReady(next)) next.allowExec = false
@@ -423,7 +456,7 @@ function EnvironmentForm(props: EnvironmentFormProps): ReactNode {
         <span className="mrfw-note">{draft.user.trim()}@{draft.hostname.trim()}:{draft.port.trim()}</span>
       ) : null}
       <div className="mrfw-sshScanRow">
-        <Button variant="outline" size="sm" disabled={busy || !scanReady(draft)} onClick={props.onScan}>
+        <Button variant="outline" size="sm" disabled={busy || !scanReady(draft)} loading={pending === 'scan'} onClick={props.onScan}>
           {t('ssh.scan')}
         </Button>
         {draft.credentialSource === 'alias' && draft.hostname.trim() === '' && props.scan !== undefined ? (
@@ -442,8 +475,13 @@ function EnvironmentForm(props: EnvironmentFormProps): ReactNode {
         )}
       </div>
     </section>
+    {pending === undefined ? null : (
+      <StatusLine state="ongoing">
+        {pending === 'scan' ? t('ssh.pending.scan', { target: scanTargetOf(draft) }) : t('ssh.pending.save')}
+      </StatusLine>
+    )}
     <div className="mrfw-sshRowActions">
-      <Button variant="primary" disabled={!canSave} onClick={() => { void props.onSave() }}>{props.saveLabel}</Button>
+      <Button variant="primary" disabled={!canSave} loading={pending === 'save'} onClick={() => { void props.onSave() }}>{props.saveLabel}</Button>
       <Button variant="ghost" disabled={busy} onClick={props.onCancel}>{props.cancelLabel}</Button>
     </div>
   </div>
@@ -625,6 +663,8 @@ type CredentialCreateKind = 'generate' | 'import' | 'password'
 interface CredentialsPanelProps {
   readonly credentials: readonly CredentialPublicView[]
   readonly busy: boolean
+  /** A credential request (generate/import/password/remove) is in flight. */
+  readonly pending: boolean
   readonly t: Translate
   readonly copiedId: string | undefined
   readonly showTitle?: boolean | undefined
@@ -698,6 +738,7 @@ function CredentialsPanel(props: CredentialsPanelProps): ReactNode {
       <Button variant="outline" size="sm" disabled={busy}
         onClick={() => setAddKind(addKind === 'password' ? undefined : 'password')}>{t('ssh.credentialPassword')}</Button>
     </div>
+    {props.pending ? <StatusLine state="ongoing">{t('ssh.pending.credential')}</StatusLine> : null}
     {addKind === undefined ? null : (
       <div className="mrfw-sshForm">
         <Field label={t('ssh.label')}>
@@ -793,6 +834,7 @@ function RemotePathDialog(props: RemotePathDialogProps): ReactNode {
   </div>
   return <Modal open={props.open} onClose={props.onClose} title={t('ssh.pathPickerTitle')}
     description={t('ssh.pathPickerHint')} closeLabel={t('panel.close')} className="mrfw-sshPathDialog" footer={footer}>
+    <PendingBar active={loading} />
     <div className="mrfw-sshArea">
       <div className="mrfw-sshPathBar">
         <Input className="mrfw-sshInput" aria-label={t('ssh.binding.path')} placeholder="/" value={path}
@@ -805,10 +847,11 @@ function RemotePathDialog(props: RemotePathDialogProps): ReactNode {
         </div>
       </div>
       {error === undefined ? null : <p className="mrfw-note" role="alert">{t('ssh.pathPickerFailed', { message: error })}</p>}
-      {loading ? <p className="mrfw-note">{t('panel.loading')}</p> : listing === undefined ? null : listing.entries.length === 0 ? (
-        <p className="mrfw-note">{t('ssh.pathPickerEmpty')}</p>
+      {loading ? <StatusLine state="ongoing">{t('ssh.pending.list')}</StatusLine> : null}
+      {listing === undefined ? null : listing.entries.length === 0 ? (
+        loading ? null : <p className="mrfw-note">{t('ssh.pathPickerEmpty')}</p>
       ) : (
-        <div className="mrfw-sshDirList">
+        <div className="mrfw-sshDirList" aria-busy={loading ? 'true' : undefined}>
           {listing.entries.map(entry => (
             <button key={entry.path} type="button" className="mrfw-sshDirRow" onClick={() => { void load(entry.path) }}>
               <span className="mrfw-sshDirName">{entry.name}</span>
@@ -827,6 +870,8 @@ interface AddConnectionFormProps {
   readonly credentials: readonly CredentialPublicView[]
   readonly aliases: readonly string[]
   readonly busy: boolean
+  /** Which of this dialog's own requests is in flight, for the spinner and status line. */
+  readonly pending: 'scan' | 'save' | undefined
   readonly t: Translate
   readonly onManageCredentials: () => void
   readonly onScanHost: (draft: EditorDraft) => Promise<SshScanResult | undefined>
@@ -835,7 +880,7 @@ interface AddConnectionFormProps {
 }
 
 function AddConnectionForm(props: AddConnectionFormProps): ReactNode {
-  const { draft, t, busy } = props
+  const { draft, t, busy, pending } = props
   const [attempted, setAttempted] = useState<ReadonlySet<WizardField>>(new Set())
   const [idTouched, setIdTouched] = useState(false)
   const [scanDialog, setScanDialog] = useState<{ result: SshScanResult; draft: EditorDraft; fingerprint: string | undefined } | undefined>(undefined)
@@ -899,9 +944,14 @@ function AddConnectionForm(props: AddConnectionFormProps): ReactNode {
   return <div className="mrfw-sshForm">
     <ConnectStepForm draft={draft} credentials={props.credentials} aliases={props.aliases} busy={busy} t={t}
       errorFor={errorFor} onChange={change} onManageCredentials={props.onManageCredentials} />
+    {pending === undefined ? null : (
+      <StatusLine state="ongoing">
+        {pending === 'scan' ? t('ssh.pending.scan', { target: scanTargetOf(draft) }) : t('ssh.pending.save')}
+      </StatusLine>
+    )}
     <div className="mrfw-sshRowActions">
       <Button variant="ghost" size="sm" disabled={busy} onClick={props.onCancel}>{t('ssh.cancel')}</Button>
-      <Button variant="primary" size="sm" disabled={busy} onClick={() => { void scan() }}>{t('ssh.scan')}</Button>
+      <Button variant="primary" size="sm" disabled={busy} loading={pending !== undefined} onClick={() => { void scan() }}>{t('ssh.scan')}</Button>
     </div>
     <HostKeyConfirmDialog open={scanDialog !== undefined} target={target} keys={scanDialog?.result.keys ?? []}
       fingerprint={scanDialog?.fingerprint} busy={busy} t={t}
@@ -946,7 +996,11 @@ export function SshManagementDialog(props: SshManagementDialogProps): ReactNode 
   const [tab, setTab] = useState<SshDialogTab>(props.initialTab)
   const [view, setView] = useState<SshStateView | undefined>(undefined)
   const [error, setError] = useState<PanelError | undefined>(undefined)
-  const [busy, setBusy] = useState(false)
+  const [pending, setPending] = useState<ManageOp | undefined>(undefined)
+  const [testing, setTesting] = useState<ReadonlySet<string>>(new Set())
+  const busy = pending !== undefined
+  const formPending = pending !== undefined && (pending.kind === 'scan' || pending.kind === 'save') ? pending.kind : undefined
+  const credentialPending = pending?.kind === 'credential'
   const [saved, setSaved] = useState(false)
   const mounted = useRef(true)
 
@@ -975,7 +1029,7 @@ export function SshManagementDialog(props: SshManagementDialogProps): ReactNode 
   currentScope.current = scope
   const current = useCallback(() => mounted.current && currentScope.current === scope, [scope])
   const stateRequest = useRef(0)
-  useEffect(() => { setBusy(false) }, [scope])
+  useEffect(() => { setPending(undefined); setTesting(new Set()) }, [scope])
 
   // A session or custody change is a different management scope: drop drafts,
   // secret inputs, and per-connection results instead of carrying them across.
@@ -1065,10 +1119,10 @@ export function SshManagementDialog(props: SshManagementDialogProps): ReactNode 
 
 
   /** Every mutation answers the refreshed state; a CAS conflict reloads first. */
-  const submitState = useCallback(async (call: () => Promise<SshStateView>): Promise<SshStateView | undefined> => {
+  const submitState = useCallback(async (op: ManageOp, call: () => Promise<SshStateView>): Promise<SshStateView | undefined> => {
     if (!current()) return undefined
     const requestId = ++stateRequest.current
-    setBusy(true)
+    setPending(op)
     try {
       const state = await call()
       if (!current() || requestId !== stateRequest.current) return undefined
@@ -1087,12 +1141,12 @@ export function SshManagementDialog(props: SshManagementDialogProps): ReactNode 
       }
       return undefined
     } finally {
-      if (current()) setBusy(false)
+      if (current()) setPending(undefined)
     }
   }, [load, props.onChanged, current])
 
-  const submit = useCallback(async (call: () => Promise<SshStateView>): Promise<boolean> => {
-    return (await submitState(call)) !== undefined
+  const submit = useCallback(async (op: ManageOp, call: () => Promise<SshStateView>): Promise<boolean> => {
+    return (await submitState(op, call)) !== undefined
   }, [submitState])
 
   const revision = (): number => view?.revision ?? 0
@@ -1112,7 +1166,7 @@ export function SshManagementDialog(props: SshManagementDialogProps): ReactNode 
 
   const deleteCredential = async (id: string): Promise<boolean> => {
     if (ssh === undefined || !canRequest) return false
-    return await submit(async () => await ssh.credentialRemove(sessionId, id))
+    return await submit({ kind: 'credential' }, async () => await ssh.credentialRemove(sessionId, id))
   }
 
   const createCredential = async (
@@ -1120,7 +1174,7 @@ export function SshManagementDialog(props: SshManagementDialogProps): ReactNode 
   ): Promise<boolean> => {
     if (ssh === undefined || !canRequest) return false
     const known = new Set((view?.credentials ?? []).map(credential => credential.id))
-    const state = await submitState(async () => kind === 'generate'
+    const state = await submitState({ kind: 'credential' }, async () => kind === 'generate'
       ? await ssh.credentialGenerate(sessionId, label)
       : kind === 'import'
         ? await ssh.credentialImport(sessionId, label, secret, passphrase)
@@ -1137,11 +1191,11 @@ export function SshManagementDialog(props: SshManagementDialogProps): ReactNode 
   const deleteEnvironment = async (id: string): Promise<void> => {
     if (ssh === undefined || !canRequest) return
     setConfirm(undefined)
-    await submit(async () => await ssh.environmentRemove(sessionId, revision(), id))
+    await submit({ kind: 'remove', id }, async () => await ssh.environmentRemove(sessionId, revision(), id))
   }
   const testEnvironment = async (id: string): Promise<void> => {
     if (ssh === undefined || !canRequest) return
-    setBusy(true)
+    setTesting(current => new Set(current).add(id))
     try {
       const result = await ssh.environmentTest(sessionId, id)
       if (current()) {
@@ -1153,14 +1207,18 @@ export function SshManagementDialog(props: SshManagementDialogProps): ReactNode 
     } catch (cause: unknown) {
       if (current()) setError(cause instanceof PanelError ? cause : new PanelError('unavailable', String(cause)))
     } finally {
-      if (current()) setBusy(false)
+      if (current()) setTesting(current => {
+        const next = new Set(current)
+        next.delete(id)
+        return next
+      })
     }
   }
 
   const scanHost = async (draft: EditorDraft, applyPatch: (patch: Partial<EditorDraft>) => void): Promise<void> => {
     if (ssh === undefined || !canRequest || !scanReady(draft)) return
     const alias = draft.credentialSource === 'alias' ? draft.alias.trim() : undefined
-    setBusy(true)
+    setPending({ kind: 'scan' })
     try {
       const result = await ssh.hostKeyScan(sessionId, {
         port: Number.parseInt(draft.port, 10),
@@ -1179,14 +1237,14 @@ export function SshManagementDialog(props: SshManagementDialogProps): ReactNode 
     } catch (cause: unknown) {
       if (current()) setError(cause instanceof PanelError ? cause : new PanelError('unavailable', String(cause)))
     } finally {
-      if (current()) setBusy(false)
+      if (current()) setPending(undefined)
     }
   }
 
   const scanAddHost = async (draft: EditorDraft): Promise<SshScanResult | undefined> => {
     if (ssh === undefined || !canRequest || !scanReady(draft)) return undefined
     const alias = draft.credentialSource === 'alias' ? draft.alias.trim() : undefined
-    setBusy(true)
+    setPending({ kind: 'scan' })
     try {
       const result = await ssh.hostKeyScan(sessionId, {
         port: Number.parseInt(draft.port, 10),
@@ -1197,7 +1255,7 @@ export function SshManagementDialog(props: SshManagementDialogProps): ReactNode 
       if (current()) setError(cause instanceof PanelError ? cause : new PanelError('unavailable', String(cause)))
       return undefined
     } finally {
-      if (current()) setBusy(false)
+      if (current()) setPending(undefined)
     }
   }
 
@@ -1215,7 +1273,7 @@ export function SshManagementDialog(props: SshManagementDialogProps): ReactNode 
       ...(draft.allowTransfer ? { transfer: draft.existing?.transfer ?? { ...TRANSFER_DEFAULTS } } : {}),
     }
     const token = draft.credentialSource === 'managed' ? scanToken : undefined
-    const ok = await submit(async () => await ssh.environmentSave(sessionId, revision(), environment, hostKey, token))
+    const ok = await submit({ kind: 'save' }, async () => await ssh.environmentSave(sessionId, revision(), environment, hostKey, token))
     if (!ok) return false
     if (draft.existing === undefined) {
       closeAdd()
@@ -1264,7 +1322,7 @@ export function SshManagementDialog(props: SshManagementDialogProps): ReactNode 
    */
   const renderLoadState = (): ReactNode =>
     error === undefined
-      ? <p className="mrfw-note">{t('ssh.add.loading')}</p>
+      ? <StatusLine state="ongoing">{t('ssh.add.loading')}</StatusLine>
       : <div className="mrfw-sshArea">
           <p className="mrfw-note">{t('ssh.loadFailed')}</p>
           <Button variant="outline" size="sm" disabled={busy} onClick={() => { void load() }}>{t('panel.retry')}</Button>
@@ -1273,6 +1331,7 @@ export function SshManagementDialog(props: SshManagementDialogProps): ReactNode 
   const renderCredentials = (): ReactNode => <CredentialsPanel
     credentials={userCredentials}
     busy={busy}
+    pending={pending?.kind === 'credential'}
     t={t}
     copiedId={copiedId}
     onCopy={copyPublicKey}
@@ -1285,8 +1344,11 @@ export function SshManagementDialog(props: SshManagementDialogProps): ReactNode 
     {view !== undefined && !view.linked && view.environments.some(environment => environment.credential.kind === 'managed') ? (
       <div className="mrfw-alert" role="note">
         <p className="mrfw-note">{t('ssh.linkBanner')}</p>
+        {pending !== undefined && pending.kind === 'link' && pending.id === undefined
+          ? <StatusLine state="ongoing">{t('ssh.pending.link')}</StatusLine> : null}
         <Button variant="outline" size="sm" disabled={busy}
-          onClick={() => { if (ssh !== undefined && canRequest) void submit(async () => await ssh.configLink(sessionId)) }}>
+          loading={pending !== undefined && pending.kind === 'link' && pending.id === undefined}
+          onClick={() => { if (ssh !== undefined && canRequest) void submit({ kind: 'link' }, async () => await ssh.configLink(sessionId)) }}>
           {t('ssh.linkNow')}
         </Button>
       </div>
@@ -1301,6 +1363,7 @@ export function SshManagementDialog(props: SshManagementDialogProps): ReactNode 
         const next = envNextStep(environment)
         const installingHelper = next === 'helper' && helperFor === id
         const confirmingDelete = confirm?.kind === 'environment' && confirm.id === id
+        const rowOp = pendingRowKind(pending, id)
         return (
           <WorkspaceRow
             key={id}
@@ -1329,26 +1392,33 @@ export function SshManagementDialog(props: SshManagementDialogProps): ReactNode 
               {envAccessKeys.map(credential => (
                 <span key={credential.id} className="mrfw-note">{t('ssh.accessKey')} · {credential.label}{credential.fingerprint === undefined ? '' : ` · ${credential.fingerprint}`}</span>
               ))}
-              {testResults[id] === undefined ? null : <span className="mrfw-note" role="status">{testResults[id]}</span>}
+              {testing.has(id) ? (
+                <StatusLine state="ongoing">{t('ssh.pending.test')}</StatusLine>
+              ) : testResults[id] === undefined ? null : (
+                <StatusLine state="done">{testResults[id]}</StatusLine>
+              )}
+              {rowOp === undefined ? null : (
+                <StatusLine state="ongoing">{t(`ssh.pending.${rowOp}` as Key)}</StatusLine>
+              )}
             </>}
             trailing={<div className="mrfw-sshRowActions mrfw-sshEnvActions" role="group" aria-label={name}>
-              <IconButton disabled={busy} icon={<IconPlay />} label={t('ssh.envTest')}
+              <IconButton disabled={rowOp !== undefined} loading={testing.has(id)} icon={<IconPlay />} label={t('ssh.envTest')}
                 onClick={() => { void testEnvironment(id) }} />
               {next === 'helper' && !installingHelper ? (
-                <IconButton variant="outline" disabled={busy} icon={<IconDownload />} label={t('ssh.helperInstall')}
+                <IconButton variant="outline" disabled={busy} loading={rowOp === 'helper'} icon={<IconDownload />} label={t('ssh.helperInstall')}
                   onClick={() => { setHelperNodePath(''); setHelperFor(id) }} />
               ) : null}
               {next === 'link' ? (
-                <IconButton variant="outline" disabled={busy} icon={<IconLink />} label={t('ssh.linkNow')}
-                  onClick={() => { if (ssh !== undefined && canRequest) void submit(async () => await ssh.configLink(sessionId)) }} />
+                <IconButton variant="outline" disabled={busy} loading={rowOp === 'link'} icon={<IconLink />} label={t('ssh.linkNow')}
+                  onClick={() => { if (ssh !== undefined && canRequest) void submit({ kind: 'link', id }, async () => await ssh.configLink(sessionId)) }} />
               ) : null}
               {environment.credential.kind === 'managed' && credentialOf(environment.credential.credentialId)?.kind === 'password' ? (
-                <IconButton disabled={busy} icon={<IconShield />} label={t('ssh.accessKeyInstall')}
-                  onClick={() => { if (ssh !== undefined && canRequest) void submit(async () => await ssh.accessKeyInstall(sessionId, revision(), id)) }} />
+                <IconButton disabled={busy} loading={rowOp === 'accessKey'} icon={<IconShield />} label={t('ssh.accessKeyInstall')}
+                  onClick={() => { if (ssh !== undefined && canRequest) void submit({ kind: 'accessKey', id }, async () => await ssh.accessKeyInstall(sessionId, revision(), id)) }} />
               ) : null}
               <IconButton disabled={busy} icon={<IconEdit />} label={t('ssh.envEdit')}
                 onClick={() => { setEditDraft(editorOf(environment)); setScan(undefined); setFingerprint(undefined) }} />
-              <IconButton disabled={busy || confirmingDelete} icon={<IconTrash />} label={t('ssh.envDelete')}
+              <IconButton disabled={busy || confirmingDelete} loading={rowOp === 'remove'} icon={<IconTrash />} label={t('ssh.envDelete')}
                 onClick={() => setConfirm({ kind: 'environment', id })} />
             </div>}
           >
@@ -1357,13 +1427,13 @@ export function SshManagementDialog(props: SshManagementDialogProps): ReactNode 
                 <Input className="mrfw-sshHelperInput" aria-label={t('ssh.nodePath')} placeholder={t('ssh.nodePath')}
                   value={helperNodePath} onChange={event => setHelperNodePath(event.currentTarget.value)} />
                 <div className="mrfw-sshRowActions">
-                  <Button variant="primary" size="sm" disabled={busy}
+                  <Button variant="primary" size="sm" disabled={busy} loading={rowOp === 'helper'}
                     onClick={() => {
                       if (ssh === undefined || !canRequest) return
                       const nodePath = helperNodePath.trim()
                       setHelperFor(undefined)
                       setHelperNodePath('')
-                      void submit(async () => await ssh.helperInstall(sessionId, revision(), id, nodePath === '' ? undefined : nodePath))
+                      void submit({ kind: 'helper', id }, async () => await ssh.helperInstall(sessionId, revision(), id, nodePath === '' ? undefined : nodePath))
                     }}>{t('ssh.helperInstall')}</Button>
                   <Button variant="ghost" size="sm" disabled={busy}
                     onClick={() => { setHelperFor(undefined); setHelperNodePath('') }}>{t('ssh.cancel')}</Button>
@@ -1399,6 +1469,7 @@ export function SshManagementDialog(props: SshManagementDialogProps): ReactNode 
             saveLabel={t('ssh.envSave')}
             cancelLabel={t('ssh.cancel')}
             busy={busy}
+            pending={formPending}
             t={t}
           />
         </div>
@@ -1468,6 +1539,7 @@ export function SshManagementDialog(props: SshManagementDialogProps): ReactNode 
         credentials={userCredentials}
         aliases={aliases}
         busy={busy}
+        pending={formPending}
         t={t}
         onManageCredentials={() => setCredentialManagerOpen(true)}
         onScanHost={scanAddHost}
@@ -1536,6 +1608,7 @@ export function SshManagementDialog(props: SshManagementDialogProps): ReactNode 
       className="mrfw-sshDialog"
       contentClassName="mrfw-sshDialogContent"
     >
+      <PendingBar active={busy || testing.size > 0} />
       <SshTabStrip value={tab} onChange={changeTab} t={t} />
       {addOpen ? null : renderError()}
       <div id={panelId} role="tabpanel" aria-labelledby={tabId} className="mrfw-sshDialogPanel">
@@ -1551,6 +1624,7 @@ export function SshManagementDialog(props: SshManagementDialogProps): ReactNode 
         className="mrfw-sshAddDialog"
         contentClassName="mrfw-sshDialogContent"
       >
+        <PendingBar active={formPending !== undefined} />
         {renderAdd()}
       </Modal>
     ) : null}
@@ -1564,9 +1638,11 @@ export function SshManagementDialog(props: SshManagementDialogProps): ReactNode 
         className="mrfw-sshCredentialDialog"
         contentClassName="mrfw-sshDialogContent"
       >
+        <PendingBar active={credentialPending} />
         <CredentialsPanel
           credentials={userCredentials}
           busy={busy}
+          pending={credentialPending}
           t={t}
           copiedId={copiedId}
           showTitle={false}
@@ -1594,7 +1670,8 @@ export function SshWorkspaceBindingsDialog(props: SshWorkspaceBindingsDialogProp
   const [view, setView] = useState<SshStateView | undefined>()
   const [draft, setDraft] = useState<BindingDraft>()
   const [pathOpen, setPathOpen] = useState(false)
-  const [busy, setBusy] = useState(false)
+  const [pending, setPending] = useState<{ kind: 'save' } | { kind: 'remove'; key: string } | undefined>(undefined)
+  const busy = pending !== undefined
   const [error, setError] = useState<PanelError>()
   const [copiedId, setCopiedId] = useState<string>()
   const lifetime = useRef<AbortController | undefined>(undefined)
@@ -1635,10 +1712,10 @@ export function SshWorkspaceBindingsDialog(props: SshWorkspaceBindingsDialogProp
     }
   }
 
-  const mutate = async (call: (revision: number, signal: AbortSignal) => Promise<SshStateView>): Promise<boolean> => {
+  const mutate = async (op: { kind: 'save' } | { kind: 'remove'; key: string }, call: (revision: number, signal: AbortSignal) => Promise<SshStateView>): Promise<boolean> => {
     const signal = lifetime.current?.signal
     if (view === undefined || signal === undefined || signal.aborted) return false
-    setBusy(true)
+    setPending(op)
     setError(undefined)
     try {
       const next = await call(view.revision, signal)
@@ -1654,7 +1731,7 @@ export function SshWorkspaceBindingsDialog(props: SshWorkspaceBindingsDialogProp
       }
       return false
     } finally {
-      if (!signal.aborted) setBusy(false)
+      if (!signal.aborted) setPending(undefined)
     }
   }
 
@@ -1680,16 +1757,17 @@ export function SshWorkspaceBindingsDialog(props: SshWorkspaceBindingsDialogProp
       ...(value.rootId === undefined ? {} : { rootId: value.rootId }),
       ...(transfers.length === 0 ? {} : { transfers }),
     }
-    if (await mutate(async (revision, signal) => await ssh.bindingSave(sessionId, revision, binding, signal))) setDraft(undefined)
+    if (await mutate({ kind: 'save' }, async (revision, signal) => await ssh.bindingSave(sessionId, revision, binding, signal))) setDraft(undefined)
   }
   const validPath = draft !== undefined && remotePath(draft.path.trim())
   return <Modal open title={t('ssh.bindings')} closeLabel={t('panel.close')} onClose={props.onClose}
     className="mrfw-sshDialog" contentClassName="mrfw-sshDialogContent">
+    <PendingBar active={busy} />
     <div className="mrfw-sshArea">
       {error === undefined ? null : <p role="alert" className="mrfw-alert">
         {t(errorKeyOf(error.code))}{errorHasDetail(error.code) ? ` (${error.message})` : ''}
       </p>}
-      {view === undefined ? error === undefined ? <p className="mrfw-note">{t('panel.loading')}</p> : (
+      {view === undefined ? error === undefined ? <StatusLine state="ongoing">{t('panel.loading')}</StatusLine> : (
         <Button variant="outline" size="sm" onClick={() => {
           const signal = lifetime.current?.signal
           if (signal !== undefined) { setError(undefined); void load(signal) }
@@ -1725,18 +1803,24 @@ export function SshWorkspaceBindingsDialog(props: SshWorkspaceBindingsDialogProp
                 path={location}
                 copied={copiedId === key}
                 onCopy={() => { void copyLocation(key, location) }}
-                details={(['import', 'export'] as const).map(direction => {
-                  const peers = transfers?.filter(transfer => transfer.direction === direction).map(({ peer }) =>
-                    localPeers.find(entry => entry.id === peer.rootId)?.label ?? peer.rootId)
-                  if (peers === undefined || peers.length === 0) return null
-                  return <span key={direction} className="mrfw-note">{t(`ssh.binding.${direction}`)} {peers.join(', ')}</span>
-                })}
+                details={<>
+                  {(['import', 'export'] as const).map(direction => {
+                    const peers = transfers?.filter(transfer => transfer.direction === direction).map(({ peer }) =>
+                      localPeers.find(entry => entry.id === peer.rootId)?.label ?? peer.rootId)
+                    if (peers === undefined || peers.length === 0) return null
+                    return <span key={direction} className="mrfw-note">{t(`ssh.binding.${direction}`)} {peers.join(', ')}</span>
+                  })}
+                  {pending?.kind === 'remove' && pending.key === key
+                    ? <StatusLine state="ongoing">{t('ssh.pending.bindingRemove')}</StatusLine> : null}
+                </>}
                 trailing={<div className="mrfw-sshRowActions">
                   <IconButton disabled={busy || draft !== undefined} onClick={() => edit(binding)}
                     icon={<IconEdit />} label={t('ssh.binding.edit')} />
-                  <IconButton disabled={busy || draft !== undefined} onClick={() => {
-                    void mutate(async (revision, signal) => await ssh.bindingRemove(sessionId, revision, environmentId, rootId, signal))
-                  }} icon={<IconTrash />} label={t('ssh.binding.remove')} />
+                  <IconButton disabled={busy || draft !== undefined}
+                    loading={pending?.kind === 'remove' && pending.key === key}
+                    onClick={() => {
+                      void mutate({ kind: 'remove', key }, async (revision, signal) => await ssh.bindingRemove(sessionId, revision, environmentId, rootId, signal))
+                    }} icon={<IconTrash />} label={t('ssh.binding.remove')} />
                 </div>}
               />
             })}
@@ -1782,8 +1866,10 @@ export function SshWorkspaceBindingsDialog(props: SshWorkspaceBindingsDialogProp
                 </div>
               ))}
             </div>
+            {pending?.kind === 'save' ? <StatusLine state="ongoing">{t('ssh.pending.bindingSave')}</StatusLine> : null}
             <div className="mrfw-sshRowActions">
               <Button variant="primary" disabled={busy || environment === undefined || !validPath || !(draft.read || draft.write || draft.exec)}
+                loading={pending?.kind === 'save'}
                 onClick={() => { void save(draft) }}>{t('ssh.binding.save')}</Button>
               <Button variant="ghost" disabled={busy} onClick={() => setDraft(undefined)}>{t('ssh.cancel')}</Button>
             </div>

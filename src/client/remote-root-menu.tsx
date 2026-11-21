@@ -4,6 +4,7 @@ import { IconEdit, IconTrash } from '../compat/client-icons.ts'
 import type { RootsView } from '../contract.ts'
 import type { RemoteAction, RemoteEndpointView } from '../remote/panel-contract.ts'
 import { errorHasDetail, errorKeyOf, PanelError } from './panel-client.ts'
+import { PendingSpinner } from './pending.tsx'
 import type { SshBindingView, SshClient } from './ssh-client.ts'
 import type { Translate } from './WorkspaceFoldersAction.tsx'
 
@@ -160,7 +161,12 @@ export function RemoteRootMenu(props: RemoteRootMenuProps): ReactNode {
       if (endpoint.state === 'registered' && changed) {
         items.push({ id: 're-register', type: 'label', text: t('ssh.binding.editCapabilitiesReregister') })
       }
-      items.push({ id: 'save', label: t('ssh.binding.save'), disabled: saving || !changed })
+      items.push({
+        id: 'save',
+        label: t('ssh.binding.save'),
+        icon: saving ? <PendingSpinner size={14} /> : undefined,
+        disabled: !changed,
+      })
     }
   }
 
