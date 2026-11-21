@@ -173,7 +173,6 @@ export function RemoteWizard(props: RemoteWizardProps): ReactNode {
   const [attempted, setAttempted] = useState<ReadonlySet<ConnectField>>(new Set())
   const [scan, setScan] = useState<SshScanResult | undefined>(undefined)
   const [fingerprint, setFingerprint] = useState<string | undefined>(undefined)
-  const [nodePath, setNodePath] = useState('')
   const [capExec, setCapExec] = useState(false)
   const [capTransfer, setCapTransfer] = useState(false)
   const [testResult, setTestResult] = useState<string | undefined>(undefined)
@@ -248,7 +247,6 @@ export function RemoteWizard(props: RemoteWizardProps): ReactNode {
   const select = (id: string): void => {
     setSelectedId(id)
     setTestResult(undefined)
-    setNodePath('')
     const environment = view?.environments.find(entry => entry.environmentId === id)
     setCapExec(environment?.exec !== undefined)
     setCapTransfer(environment?.transfer !== undefined)
@@ -312,7 +310,7 @@ export function RemoteWizard(props: RemoteWizardProps): ReactNode {
 
   const installHelper = async (): Promise<void> => {
     if (selected === undefined || view === undefined) return
-    await submitState('helper', signal => ssh!.helperInstall(sessionId, view.revision, selected.environmentId, nodePath.trim() === '' ? undefined : nodePath.trim(), signal))
+    await submitState('helper', signal => ssh!.helperInstall(sessionId, view.revision, selected.environmentId, undefined, signal))
   }
 
   const installAccessKey = async (): Promise<void> => {
@@ -333,7 +331,6 @@ export function RemoteWizard(props: RemoteWizardProps): ReactNode {
       const result = await ssh.environmentTest(sessionId, selected.environmentId, signal)
       if (signal.aborted) return
       setTestResult(result.nodePath ?? 'ok')
-      if (result.nodePath !== undefined) setNodePath(result.nodePath)
     } catch (cause) {
       if (!signal.aborted) {
         setTestResult(undefined)
@@ -540,17 +537,6 @@ export function RemoteWizard(props: RemoteWizardProps): ReactNode {
                 <Button variant="primary" size="sm" disabled={busy} loading={pending === 'helper'}
                   onClick={() => { void installHelper() }}>{t('ssh.helperInstall')}</Button>
               ) : undefined} />
-            {/* The optional node path is a helper prerequisite, so it sits as
-                its own input bar under the helper row — next to the detect
-                action that fills it in — instead of crowding the checklist. */}
-            {selected.helper === null ? (
-              <div className="mrfw-wizNodeBar">
-                <Input className="mrfw-sshInput" aria-label={t('ssh.nodePath')} placeholder={t('ssh.nodePath')}
-                  value={nodePath} disabled={busy} onChange={event => setNodePath(event.currentTarget.value)} />
-                <Button variant="outline" size="sm" disabled={busy}
-                  onClick={() => { void testConnection() }}>{t('ssh.add.detectNode')}</Button>
-              </div>
-            ) : null}
             {needsAccessKey === true ? (
               <ChecklistRow
                 state={pending === 'accessKey' ? 'ongoing' : 'warning'}
