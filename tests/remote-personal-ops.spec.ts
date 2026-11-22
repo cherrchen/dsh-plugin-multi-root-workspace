@@ -6,7 +6,7 @@
  * Every external command goes through the injected ExecFile seam.
  */
 import { createHash as hashServerKey } from 'node:crypto'
-import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdtempSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
@@ -694,7 +694,10 @@ describe.skipIf(process.platform === 'win32')('team attestation shape and plane 
     expect(plane.manifestDigest).toMatch(/^[0-9a-f]{64}$/)
     const before = plane.manifestDigest!
     expect(plane.refreshPersonal()).toBe('unchanged')
-    writeConfig(path, { ...CONFIG(), revision: 1 })
+    // Match the store's atomic replacement. Same-size in-place writes can share an mtime.
+    const replacement = join(dir, 'next.json')
+    writeConfig(replacement, { ...CONFIG(), revision: 1 })
+    renameSync(replacement, path)
     const result = plane.refreshPersonal()
     expect(result).toBe('reloaded')
     expect(plane.manifestDigest).not.toBe(before)

@@ -233,6 +233,8 @@ dsh --profile web --dump-config     # 应看到两行 disabled + 十行 insert
 
 `smoke:auto-review` 在启动脚本中静态导入开发树的 `dsh-app-boot`，使 DSH 热重载把它识别为宿主模块。源码链接安装会把 checkout 纳入热重载范围，其中也包含开发依赖。若引导模块被重新求值，新实例就找不到旧实例记录的根 Include，插件开关会报 `profile reload requires the root Include entry`。
 
+SSH Helper 的真实进程握手与安装文件篡改断言在 Linux 和 macOS 的 SSH 支持版本上运行，并要求 Helper 包与当前 Host 同版。其余车道仍检查启动入口的摘要校验。个人 SSH 配置重载用例按生产写入方式原子替换配置文件，确保文件身份变化可被检测。
+
 [Upgrade workflow](../../.github/workflows/upgrade.yml) 仍按周或手动验证一个候选版本。它重指并安装候选，运行该车道原有的完整验证，保留 `DSH_MULTI_ROOT_COMPAT=warn`，不运行 `compat:check`。权限为 `contents: read`，成功仅记录提升指引。手动版本输入经 step 环境变量传递，写入输出前验证为单行精确版本。工作流约束由 [workflows.spec.ts](../../tests/workflows.spec.ts) 验证。
 
 ### Windows 验证腿

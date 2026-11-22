@@ -1,7 +1,7 @@
 /**
  * Real launch proof for the helper integrity entry — no mocks. The spec
  * materializes a real `node_modules` (the resolved `@deepseek-ai/dsh-ssh`
- * package plus its runtime dependency closure, dereferenced to regular
+ * package plus its pnpm runtime dependencies, dereferenced to regular
  * files), renders `helper-entry.mjs` through the production
  * `renderHelperEntry`, then speaks the upstream stdio handshake framing
  * (4-byte BE length + JSON frame, `lib/protocol.js`):
@@ -15,18 +15,15 @@
 import { spawn } from 'node:child_process'
 import { createHash } from 'node:crypto'
 import { appendFileSync, cpSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, readlinkSync, realpathSync, rmSync, symlinkSync, writeFileSync } from 'node:fs'
-import { createRequire } from 'node:module'
 import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
+import { readInstalledVersion, sshPackageRoot, sshPackageVersion, SUPPORTED_SSH_RELEASES } from '../src/compat/dsh-version.ts'
 import { renderHelperEntry, treeDigestSource, verifyHelperEntry } from '../src/remote/personal/operations.ts'
 
-const require = createRequire(import.meta.url)
-const packageDir = dirname(require.resolve('@deepseek-ai/dsh-ssh/package.json'))
-// The directory that holds the package AND its dependency symlinks — pnpm's
-// virtual-store node_modules for this package (or the flat root elsewhere).
-const vendorModules = dirname(dirname(packageDir))
-const hostHelperHash = createHash('sha256').update(readFileSync(join(packageDir, 'lib', 'helper.js'))).digest('hex')
+const hostRelease = readInstalledVersion('@deepseek-ai/dsh')
+const supportsSsh = SUPPORTED_SSH_RELEASES.some(release => release === hostRelease)
+const sshPlatform = process.platform === 'linux' || process.platform === 'darwin'
 
 // The same digest function the remote probe and the entry embed.
 const treeDigest = new Function(
@@ -38,14 +35,20 @@ const dirs: string[] = []
 const tmp = (): string => { const dir = mkdtempSync(join(tmpdir(), 'helper-entry-')); dirs.push(dir); return dir }
 afterEach(() => { for (const dir of dirs.splice(0)) rmSync(dir, { recursive: true, force: true }) })
 
-describe.skipIf(process.platform === 'win32')('helper-entry.mjs real launch', () => {
+describe.skipIf(!sshPlatform || !supportsSsh)('helper-entry.mjs real launch', () => {
   it('handshakes with the helper.js digest and exits 78 on file-set drift', { timeout: 60_000 }, async () => {
+    const packageName = '@deepseek-ai/dsh-ssh'
+    expect(sshPackageVersion(packageName)).toBe(hostRelease)
+    const packageDir = sshPackageRoot(packageName)!
+    // pnpm's virtual-store node_modules holds this package and its dependency links.
+    const vendorModules = dirname(dirname(packageDir))
+    const hostHelperHash = createHash('sha256').update(readFileSync(join(packageDir, 'lib', 'helper.js'))).digest('hex')
     const root = tmp()
     const workspace = join(root, 'workspace')
     mkdirSync(workspace)
     // Real files, no symlinks left dangling: cpSync dereferences the pnpm
     // virtual-store links so every package lands as regular files.
-    cpSync(vendorModules, join(root, 'node_modules'), { recursive: true, verbatimSymlinks: false })
+    cpSync(vendorModules, join(root, 'node_modules'), { recursive: true, dereference: true })
     // npm's realistic non-regular dirent: a .bin symlink, pinned by target.
     mkdirSync(join(root, 'node_modules', '.bin'))
     symlinkSync(join('..', '@deepseek-ai', 'dsh-ssh', 'lib', 'helper.js'), join(root, 'node_modules', '.bin', 'dsh-ssh'))
