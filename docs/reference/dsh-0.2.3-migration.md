@@ -78,6 +78,24 @@ CI 的 alpha.1 lane 另有 typert `ctx[Context.root].reflect` 未定义等 125 �
 - **不要静态 import 新客户端子路径** `@deepseek-ai/dsh-api-session-controller/client/directories`：旧宿主没有该导出，整个 client bundle 会加载失败；需要有效目录时读 `RootsView.effectiveCwd` 或结构化投影。
 - **release-age 不是可选清单**：`alpha.2` 引入 17 个新传递包与新的 cordis 生态版本，漏一行会在启用发布年龄门禁的 frozen install 里被拒绝；`node-addon-system` / `schemastery` 等既有 pin 走各自条目，不重复添加。
 - **tag 存在不等于可支持**：`0.2.3-alpha.1` 的源码与发布元数据不一致，`dsh --version` 直接失败。最小判别是在空目录 `npm install @deepseek-ai/dsh@<release>` 后运行 `dsh --version`；失败即只能作源码对照。
+- **profileContext 必须同时携带两代 overlay 字段**：0.2.3 前的 `readProfilePatches()` 展开 `context.overlays`，0.2.3 之后展开 `context.overlayPaths`；in-process boot 夹具只给一个会让另一代在 `listPlugins()` / journey 中抛 `TypeError`。用 `scripts/lib/profile-context.mjs` 的共享 helper，并由 `tests/profile-context-fixtures.spec.ts` 守卫。
+- **PTC 程序格式随版本变化**：0.2.3 默认不再是 function-body，顶层 `return` 被 TypeScript 擦除拒绝；按 `runtime.programFormat` 分支（function-body 用 `return`，其余用最终表达式完成值），smoke/冒烟不要写死。
+- **Windows ACL 的交叉校验参数是 policy root**：`widenWindowsProfile` 的第四个参数必须传上游 profile 的实际 workspace（有效 policy root）；Session 身份与附加根授权仍来自原始主根。传原始主根会在 Session 移动后抛 `Windows ACL profile workspace does not match the policy root`。
+
+## 外部复核补齐的接缝（2026-11-22）
+
+外部 Code Review 复核确认并补齐了六个同源缺口，全部围绕「有效目录不是身份」与「两代夹具」：
+
+| 缺口 | 修复 | 回归 |
+|---|---|---|
+| 不可用 authority 的进程 clamp 用有效目录 | `src/sandbox.ts` 的 `clampedExecution()` 用 `policyOriginRoot()`（无 live Session 时与 fs 一样回退 policy root）；Windows 交叉校验仍用 policy root | `tests/authority-boundaries.spec.ts`「clamps a moved Session to its origin」 |
+| Windows ACL widen 用原始主根做交叉校验 | `widenForScope` 的期望 workspace 改传 `canonicalPath(policy.workspaceRoot)`，graft 根仍来自 scope | `tests/sandbox-multi-root.spec.ts`（Windows skip guard）+ CI windows lane |
+| cold Session Files 按有效 wire root 查 Registry | `workspace-files.ts` 的 origin 优先读 `sessionPersistence.stat(id).header.cwd`，按请求缓存 | `tests/workspace-routing.spec.ts`「keys a stored Session…」 |
+| `list` 回退分支漏 withheld 检查 | 回退 upstream 前独立执行 `underWithheldRoot` | `tests/workspace-routing.spec.ts`「refuses a list fallback…」 |
+| 恢复后重复重放新活动 | 每个 Session 只重放一次、且只重放恢复前缀 | `tests/instructions.spec.ts`「does not replay post-resume activity…」 |
+| schemastery peer 缺 alpha.2 宿主版本 | peer 显式追加 `3.20.0-alpha.1`；`compat:check` 新增单例 peer 覆盖断言 | `scripts/check-dsh-compat.mjs` 的 `singleton peer ranges` 输出 |
+
+另外修复了两类 CI 夹具问题：旧车道 `profileContext` 缺 `overlays`（P1），以及 alpha.2 车道的 PTC 冒烟仍用函数体 `return`（额外发现）。详见路线账本的同名小节。
 
 ## 证据边界
 

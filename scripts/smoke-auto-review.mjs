@@ -8,6 +8,7 @@ import { packTarball, readTarGz } from './check-pack.mjs'
 import { autoReviewBattery } from './lib/auto-review-battery.mjs'
 import { AUTO_REVIEW_CONTRACT_DATA } from './lib/auto-review-development.mjs'
 import { bootProfile, composeProfile } from './lib/profile-boot.mjs'
+import { profileContextOverlays } from './lib/profile-context.mjs'
 import { removeBehaviorHome, removeScratchTree } from './lib/smoke-cleanup.mjs'
 import { loadAppBoot, loadRuntimeModule, resolveScratchHome, installPluginProfile, ensureProfileCopyImport, runtimeRequire } from './lib/dsh-runtime.mjs'
 const installedRelease = JSON.parse(readFileSync(runtimeRequire().resolve('@deepseek-ai/dsh/package.json'),'utf8')).version
@@ -43,7 +44,7 @@ try {
       host.provide('profileContext', {
         name, dir, home, patchPath:patch, installAnchor, cwd:process.cwd(),
         startedBundles:app.readProfileManifest('probe',dir).dsh.profile.bundles,
-        overlayPaths:[], telemetryDisabledEnv:undefined,
+        ...profileContextOverlays(), telemetryDisabledEnv:undefined,
       })
       const {provideCmdline} = await loadRuntimeModule('@deepseek-ai/dsh-cmdline')
       provideCmdline(host,{args:template === 'web' ? ['--no-open','--port','0'] : [],exit:()=>{}})

@@ -2287,6 +2287,25 @@ macOS arm64、DSH `0.2.2-rc.5` 验证：全量测试 2509 通过、133 跳过。
 
 **工具链**：`pnpm-workspace.yaml` 重指 release-age 并新增 17 个新传递包，更新 `libreoffice-kit` `0.2.3`、`cordis-plugin-*` `1.2.0-alpha.1` / `1.3.0-alpha.1`、`cosmokit` `1.10.0-alpha.1` 与 schemastery 排除范围；CI 分桶为 Node 22.19（0.1.*/0.2.0/0.2.1）、24.9（0.2.2）、24.22.3（0.2.3+），`releases` / `upgrade` / `release` / `diag` 车道同步 24.22.3。
 
-**验证（本机 macOS arm64，Node 24.22.3，已合并 `3c3ddb1` 的 alpha.2 树）**：`compat:check`（allowlist / 全部 DSH peer / 核心与 SSH 开发 pin / 安装树一致；27 个精确版本、SSH floor `0.2.2-rc.1`–`0.2.3-alpha.2`、Auto Review 12 个联合发布）、`pnpm peers check` 输出 `No peer dependency issues found`、lockfile 中旧 `0.2.2-rc.5` 包副本为 0、oxlint 0 警告 0 错误、双端 typecheck 与 Auto Review 实现类型检查通过、`build` 通过、`docs:check` 0 错误、`licenses:check` current、`pack:check` 通过、`auto-review:fork`（含新增第 9 项）通过、`kernel:probe` 报告本进程内无可用内核 runner（Seatbelt `sandbox_apply: Operation not permitted`，内核断言按设计跳过）、`test:panel-browser` 3/3。完整 vitest **2475 通过 / 213 跳过 / 23 失败**：全部是本会话「Host 自身被沙箱化」环境类（16 个 `expected 'contended' to be 'follower'`、2 个 `owner-without-remote-protocol`，其余同根因），分布 12 个文件（8 个既有 Registry 文件 + 4 个 SSH 的 `remote-*` 文件），不是本次适配的回归。本机冒烟：compose **58/58**、behavior **96 通过 / 8 跳过**、journey **91 通过 / 2 跳过**、packed **95 通过 / 8 跳过**、Auto Review 四种组合全部通过，0 失败；跳过项是无内核 runner 与共享 IPC。三 OS 矩阵与 Windows ACL 原生结果由 PR 的 CI 给出。
+**验证（本机 macOS arm64，Node 24.22.3，已合并 `3c3ddb1` 的 alpha.2 树）**：`compat:check`（allowlist / 全部 DSH peer / 核心与 SSH 开发 pin / 安装树一致；27 个精确版本、SSH floor `0.2.2-rc.1`–`0.2.3-alpha.2`、Auto Review 12 个联合发布）、`pnpm peers check` 输出 `No peer dependency issues found`、lockfile 中旧 `0.2.2-rc.5` 包副本为 0、oxlint 0 警告 0 错误、双端 typecheck 与 Auto Review 实现类型检查通过、`build` 通过、`docs:check` 0 错误、`licenses:check` current、`pack:check` 通过、`auto-review:fork`（含新增第 9 项）通过、`kernel:probe` 报告本进程内无可用内核 runner（Seatbelt `sandbox_apply: Operation not permitted`，内核断言按设计跳过）、`test:panel-browser` 3/3。完整 vitest **2481 通过 / 214 跳过 / 23 失败**（新增 6 个通过 + 1 个 Windows-only 跳过）：全部是本会话「Host 自身被沙箱化」环境类（16 个 `expected 'contended' to be 'follower'`、2 个 `owner-without-remote-protocol`，其余同根因），分布 12 个文件（8 个既有 Registry 文件 + 4 个 SSH 的 `remote-*` 文件），不是本次适配的回归。本机冒烟：compose **58/58**、behavior **96 通过 / 8 跳过**、journey **91 通过 / 2 跳过**、packed **95 通过 / 8 跳过**、Auto Review 四种组合全部通过，0 失败；跳过项是无内核 runner 与共享 IPC。三 OS 矩阵与 Windows ACL 原生结果由 PR 的 CI 给出。
+
+### 外部 Code Review 复核与修复（2026-11-22）
+
+外部 Agent 的 review 在 `21a9e15` 基线上给出 3 项 P1 + 4 项 P2。逐条复核与修复：
+
+| 审查项 | 复核结论 | 修复与证据 |
+|---|---|---|
+| P1-1 不可用 authority 的进程 clamp 授权有效目录 | 成立（代码级；fs 早已只授原始主根） | `clampedExecution()` 改用 `policyOriginRoot()`（无 live Session 时与 fs 一样回退 policy root）；`tests/authority-boundaries.spec.ts` 新增 moved-session clamp 回归；Windows 交叉校验仍用 policy root |
+| P1-2 Windows ACL 会话移动后拒绝正常执行 | 成立（CI 实锤：Windows alpha.2 lane 的 Worktree 用例报 `Windows ACL profile workspace does not match the policy root`） | `widenForScope` 的交叉校验参数改为 `canonicalPath(policy.workspaceRoot)`；新增 Windows-only 单测（非 Windows skip） |
+| P1-3 旧版 Auto Review / 共享 boot 冒烟 `context.overlays` | 成立（CI 旧车道 journey + 本地 rc.5 Auto Review 冒烟双重复现） | 新增 `scripts/lib/profile-context.mjs`；三个 in-process 夹具同时提供 `overlays`/`overlayPaths`；`tests/profile-context-fixtures.spec.ts` 守卫；本地模拟 rc.5 车道 Auto Review 冒烟 8 个场景全部通过 |
+| P2-1 Files 冷会话按有效 wire root 查 Registry | 成立 | `requestOrigin` 优先读 `sessionPersistence.stat().header.cwd`，按请求缓存；`tests/workspace-routing.spec.ts` 新增 stored-session 回归 |
+| P2-2 `list` 回退漏 withheld 检查 | 成立（`changes` 回退已有检查，`list` 缺） | 回退 upstream 前独立执行 `underWithheldRoot`；新增 moved-effective-root 列表拒绝测试 |
+| P2-3 schemastery peer 缺 alpha.2 宿主版本 | 成立（semver 实测默认不匹配，需显式 prerelease 条目） | peer 显式追加 `3.20.0-alpha.1`；`compat:check` 新增单例 peer 覆盖断言 |
+| P2-4 恢复后重放归错活动 | 部分成立：live 监听本身按有效目录解析正确，缺陷是 snapshot 每次用全量 log 重放 | 重放仍跑全量（保证 OPS 历史校验），但只让恢复前缀贡献 touched 路径；新增 `tests/instructions.spec.ts` 回归（未修复时会发现 `repoB/sub/AGENTS.md`） |
+| 审查未列：alpha.2 车道 PTC 冒烟仍用函数体 `return` | CI 实锤（额外发现，7 项 behavior 失败） | `scripts/smoke-behavior.mjs` 按 `runtime.programFormat` 分支（function-body 用 `return`，其余用最终表达式完成值）；`verify-ops-*` 手动探针同步去掉顶层 `return` |
+| 审查说 HEAD 仍声明 alpha.1 | 过时 | `9788acb` 已移除 alpha.1（27 版本 / 联合 12） |
+| 审查说另有 1 个 unhandled rejection | 环境失败连带 | 来自 23 个沙箱环境失败中的 `remote-follower-add-timeout`，非独立回归 |
+
+CI 现场（run `45035571607`，`9788acb`）：`releases`/`windows` 通过；20 个 verify lane 失败归因于上述 P1-3（旧车道 journey/auto-review 冒烟）、P1-2（Windows alpha.2 Worktree 用例）与 PTC 冒烟（alpha.2 lane behavior）。修复后的完整徽标由新 CI run 附在 PR #74。
 
 **边界**：本分支不创建版本号或 tag，`CHANGELOG` 条目随实际发版的发布流程写入。上游 `engine` 的 Node 下限不由插件 `engines` 写死（运行下限由宿主决定）。

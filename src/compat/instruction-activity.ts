@@ -93,7 +93,7 @@ const OPS_PUBLISH: Record<string, true> = { ops_discover_tools: true, ops_load_s
 export function replayedInstructionTargets(events: readonly unknown[], origin: string | undefined,
   liveOpsEvidence?: ReadonlyMap<string, OpsActivityEvidence>,
   pendingExec?: { readonly callId: string; readonly name: string; readonly arguments: unknown; readonly parent?: unknown },
-  options?: { readonly opsCompatibility?: boolean }): readonly string[] {
+  options?: { readonly opsCompatibility?: boolean; readonly touchBoundary?: number }): readonly string[] {
   const opsOn = options?.opsCompatibility === true
   let cwd = origin
   // A log written before the rename may carry the deprecated
@@ -124,8 +124,14 @@ export function replayedInstructionTargets(events: readonly unknown[], origin: s
     if (entry.complete !== true) throw new Error('review-context: incomplete OPS file activity evidence')
     return entry
   }
-  for (const raw of events) {
+  for (const [eventIndex, raw] of events.entries()) {
     const event = raw as DurableActivity
+    // Events at or after the boundary were delivered live since this row saw the
+    // Session; they still have to be VALIDATED here (OPS history may not lack
+    // evidence), but their relative paths were already resolved by the live
+    // listener against the Host's effective directory and must not be re-derived
+    // from a superseded legacy `working-directory/change` chain.
+    const record = options?.touchBoundary === undefined || eventIndex < options.touchBoundary
     if ((event.type === 'workspace-root/change' || (event.type === 'working-directory/change' && !movedByWorkspaceRoot))
       && typeof event.data.cwd === 'string') {
       if (event.type === 'workspace-root/change') movedByWorkspaceRoot = true
@@ -183,13 +189,16 @@ export function replayedInstructionTargets(events: readonly unknown[], origin: s
       if (failed && entry.targets.length > 0) {
         throw new Error('review-context: OPS activity contradicts its durable failure')
       }
-      for (const target of entry.targets) paths.add(target.path)
-      if (paths.size > 512) throw new Error('review-context: durable work index exceeded')
+      if (record) {
+        for (const target of entry.targets) paths.add(target.path)
+        if (paths.size > 512) throw new Error('review-context: durable work index exceeded')
+      }
       continue
     }
     if (failed) continue
     const path = touchedPathOfToolCall(call.name, call.arguments)
     if (path === undefined) continue
+    if (!record) continue
     if (isAbsolute(path)) paths.add(path)
     else {
       if (call.directories.size === 0) throw new Error('review-context: durable file activity has no cwd')

@@ -228,6 +228,30 @@ describe('the Windows ACL rung', () => {
     expect({ ...result, argv: expected.argv }).toEqual(expected)
   })
 
+  // The real ACL runner only exists on Windows; the Windows CI lane also runs
+  // the end-to-end Worktree case that first caught this mismatch.
+  it.skipIf(process.platform !== 'win32')('matches the upstream profile against the policy root after the Session moves', async () => {
+    const moved = join(fixture.base, 'third')
+    mkdirSync(moved, { recursive: true })
+    const ours = await mount(MultiRootSandboxProvider, 'workspace-write', internalsFor('windows-acl'))
+    // The Session identity stays on its header origin; only the resolved policy
+    // root follows the effective directory (ADR-0012).
+    ours.ctx.provide('sessions', {
+      get: (id: string) => id === 'moved-session' ? { header: { cwd: fixture.workspace } } : undefined,
+    } as never)
+    ours.ctx.multiRootScope.setAdditionalRoots(fixture.workspace, [{
+      id: 'root-0', path: fixture.outside, recordedPath: canonicalPath(fixture.outside), access: 'read-write',
+    }])
+    const policy: SandboxPolicy = { mode: 'workspace-write', workspaceRoot: moved, sessionId: 'moved-session' }
+    const result = await confined(ours.provider, COMMAND, policy)
+    // Regression: the widening call used the origin spelling here and made the
+    // profile cross-check fail with "does not match the policy root".
+    expect(result.argv).toContain('--workspace')
+    expect(result.argv).toContain(canonicalPath(moved))
+    expect(result.argv).toContain('--additional-root')
+    expect(result.argv).toContain(canonicalPath(fixture.outside))
+  })
+
   it.skipIf(upstreamRejectsWindowsAdditionalRoots)('grants a scope root while an upstream additional root stays out of the process profile', async () => {
     // 0.2.2-rc.2: upstream's windows-acl argv ignores `additionalWritableRoots`
     // (they apply to harness file tools only), so only the plugin's scope

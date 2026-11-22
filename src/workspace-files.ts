@@ -26,7 +26,7 @@ export function apply(ctx: Context): void {
       const restoreList = wrapMethod(service, 'list', original => async function(this: WorkspaceFiles, request, path, signal) {
         // Registry identity is the Session origin; the wire root stays the
         // upstream path base (ADR-0012).
-        const origin = requestOrigin(scope, request)
+        const origin = await requestOrigin(scope, request)
         // A granted root or a registered-but-withheld set must still resolve
         // the selected path: the listing may target another granted root even
         // while the primary itself resolves inside a withheld boundary.
@@ -37,7 +37,14 @@ export function apply(ctx: Context): void {
         // The withheld check belongs to the directory the requested path
         // selects, not to the session root.
         if (route !== undefined && underWithheldRoot(scope, route.primaryRoot, route.absolutePath, request.workspaceRoot)) throw await outside(path)
-        if (route === undefined || route.workspaceRoot === route.primaryRoot) return original.call(this, request, path, signal)
+        if (route === undefined || route.workspaceRoot === route.primaryRoot) {
+          // An unrouteable path falls back to upstream, whose containment check
+          // uses the wire (effective) root — the plugin's withheld negative
+          // boundary must still refuse a directory that sits in a registered
+          // but currently withheld root, exactly like the `changes` fallback.
+          if (underWithheldRoot(scope, origin, path, request.workspaceRoot)) throw await outside(path)
+          return original.call(this, request, path, signal)
+        }
         const result = await original.call(this, { ...request, workspaceRoot: route.workspaceRoot }, route.absolutePath, signal)
         if (!scope.multiRootScope.scopeOf(route.primaryRoot).includes(route.workspaceRoot)) throw await outside(path)
         return result
@@ -77,7 +84,7 @@ export function apply(ctx: Context): void {
           if (baseFile !== undefined) {
             const routed = await routeRead(scope, request, baseFile, signal)
             if (routed === 'deny') throw await outside(baseFile)
-            const escaped = await relatedTailWithheld(scope, requestOrigin(scope, request), routed, path, signal)
+            const escaped = await relatedTailWithheld(scope, await requestOrigin(scope, request), routed, path, signal)
             if (escaped !== undefined) throw await outside(escaped)
             const routedOptions = baseFile === routed.path ? options : { ...options as Record<string, unknown>, baseFile: routed.path }
             return call.call(this, routed.request, path, routedOptions, signal)
@@ -102,13 +109,13 @@ export function apply(ctx: Context): void {
         ? wrapMethod(legacy as WorkspaceFiles & LegacyReads, 'readRelated', original => (async function(this: WorkspaceFiles, request: WorkspaceFileScope, path: string, relativePath: string, signal: AbortSignal): Promise<unknown> {
             const routed = await routeRead(scope, request, path, signal)
             if (routed === 'deny') throw await outside(path)
-            const escaped = await relatedTailWithheld(scope, requestOrigin(scope, request), routed, relativePath, signal)
+            const escaped = await relatedTailWithheld(scope, await requestOrigin(scope, request), routed, relativePath, signal)
             if (escaped !== undefined) throw await outside(escaped)
             return original.call(this, routed.request, routed.path, relativePath, signal)
           }) as unknown as typeof original)
         : undefined
       const restoreWatch = adaptPathWatch(service, originalChanges => async function*(this: WorkspaceFiles, request, path, signal) {
-        const origin = requestOrigin(scope, request)
+        const origin = await requestOrigin(scope, request)
         const check = async () => {
           await withRegistryRead(scope, origin, 'files', async () => {
             // The watch may target another granted root; check the directory
@@ -168,7 +175,7 @@ export function apply(ctx: Context): void {
           if (typeof methods[key] !== 'function') continue
           admissionRestores.push(wrapMethod(methods, key, original => async function(this: unknown, ...args: unknown[]) {
             const request = args[0] as WorkspaceFileScope
-            return withRegistryRead(scope, requestOrigin(scope, request), 'files', async () => original.apply(this, args))
+            return withRegistryRead(scope, await requestOrigin(scope, request), 'files', async () => original.apply(this, args))
           }))
         }
       }
@@ -188,7 +195,7 @@ export function apply(ctx: Context): void {
             // The browser's call carries no marker: its tree is the wire root
             // while its Registry identity is the Session origin. A plugin-routed
             // call carries the origin as the host-internal marker.
-            const primaryRoot = rawScope.primaryRoot ?? requestOrigin(scope, rawScope)
+            const primaryRoot = rawScope.primaryRoot ?? await requestOrigin(scope, rawScope)
             const searchRoot = rawScope.workspaceRoot
             if (rawScope.primaryRoot === undefined) {
               return withRegistryRead(scope, primaryRoot, 'files', async () => {
@@ -252,7 +259,7 @@ type LegacyReads = {
  */
 async function routeRead(scope: Context, request: WorkspaceFileScope, path: string, signal: AbortSignal): Promise<RoutedRead> {
   const registry = scope.get('multiRootRegistry')
-  const origin = requestOrigin(scope, request)
+  const origin = await requestOrigin(scope, request)
   if (registry?.shared && scope.multiRootScope.resolve({ workspaceRoot: origin, mode: 'read-only' }).authority === 'unavailable') {
     const route = await routeWorkspacePath(scope, origin, path, signal, request.workspaceRoot)
     return route !== undefined && route.workspaceRoot === route.primaryRoot ? { request, path: route.absolutePath } : 'deny'
@@ -276,16 +283,45 @@ async function routeRead(scope: Context, request: WorkspaceFileScope, path: stri
  * (the working directory), so the request's own root can move while the
  * Registry record set stays on the Session origin (ADR-0012). The request root
  * remains the upstream path base; only the Registry lookups are re-keyed here.
- * A stored Session has no live Session to name its origin, so its wire root is
- * the only identity this Host can derive.
- * @param scope - host context carrying the Session store.
+ * A stored Session's wire root follows its projection cache (the effective
+ * directory), so its durable header is the only origin this Host can read; the
+ * wire root is just the upstream path base then.
+ * @param scope - host context carrying the Session store and persistence.
  * @param request - the wire scope of one `workspaceFiles` call.
  * @returns the origin spelling verbatim, or `request.workspaceRoot`.
  */
-function requestOrigin(scope: Context, request: WorkspaceFileScope): string {
+async function requestOrigin(scope: Context, request: WorkspaceFileScope): Promise<string> {
+  const cached = requestOrigins.get(request)
+  if (cached !== undefined) return cached
+  const resolved = resolveRequestOrigin(scope, request)
+  requestOrigins.set(request, resolved)
+  return resolved
+}
+
+/** One stored Session snapshot surface: only the immutable header is read. */
+interface StoredSessionSnapshot {
+  readonly header?: { readonly cwd?: unknown }
+}
+
+/** The `sessionPersistence` surface this file consumes, structurally. */
+interface SessionPersistenceLike {
+  readonly stat?: (id: string) => Promise<unknown>
+}
+
+/** Per-request memo: every wrapped Files method may ask for the origin again. */
+const requestOrigins = new WeakMap<object, Promise<string>>()
+
+async function resolveRequestOrigin(scope: Context, request: WorkspaceFileScope): Promise<string> {
   const session = scope.get('sessions')?.get(request.sessionId)
-  if (session === undefined) return request.workspaceRoot
-  return originDirectory(scope, session) ?? request.workspaceRoot
+  if (session !== undefined) return originDirectory(scope, session) ?? request.workspaceRoot
+  try {
+    const persistence = scope.get('sessionPersistence' as never) as SessionPersistenceLike | undefined
+    const stored = await persistence?.stat?.(request.sessionId) as StoredSessionSnapshot | undefined
+    const cwd = stored?.header?.cwd
+    return typeof cwd === 'string' && cwd !== '' ? cwd : request.workspaceRoot
+  } catch {
+    return request.workspaceRoot
+  }
 }
 
 /**

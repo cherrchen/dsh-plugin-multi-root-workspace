@@ -124,6 +124,22 @@ describe('workspace-files isolation', () => {
     const foreign = join(fixture.base, 'foreign'); mkdirSync(foreign)
     await expect(service.list({ ...scope, workspaceRoot: foreign }, fixture.outside, new AbortController().signal)).rejects.toMatchObject({ code: 'workspace-file/outside-workspace' })
   })
+  it('keys a stored Session by its durable header origin, not the moved wire root', async () => {
+    const moved = join(fixture.base, 'moved'); mkdirSync(moved)
+    // Upstream's stored-session scope takes the projection cache's working
+    // directory as the wire root; the Registry identity is still the header.
+    ctx.provide('sessionPersistence', {
+      stat: async () => ({ header: { cwd: fixture.workspace } }),
+    } as never)
+    const { service } = await files()
+    const cold = { sessionId: 'cold' as never, workspaceRoot: moved }
+    // The additional root is granted for the header origin; a fallback to the
+    // moved wire root would find no registration and hand the call to upstream,
+    // which rejects `outside` as outside the (moved) workspace.
+    const listing = await service.list(cold, fixture.outside, new AbortController().signal)
+    expect(listing.path).toBe('')
+    expect(listing.entries.map(entry => entry.name)).toContain('same.ts')
+  })
   it('rejects removed roots and restores upstream confinement on unload', async () => {
     const { service, scope, fiber } = await files()
     await service.list(scope, fixture.outside, new AbortController().signal)
@@ -338,6 +354,24 @@ describe('workspace-files isolation', () => {
       list: (primary: string) => primary === linked ? [withheldRegistration(canonicalPath(withheld))] : [],
     } as never)
     await expect(service.list({ sessionId: 's' as never, workspaceRoot: linked }, linked, new AbortController().signal))
+      .rejects.toMatchObject({ code: 'workspace-file/outside-workspace' })
+  })
+
+  it('refuses a list fallback whose selected directory sits in a withheld registration', async () => {
+    const moved = join(fixture.base, 'moved')
+    const secret = join(moved, 'secret')
+    mkdirSync(secret, { recursive: true })
+    writeFileSync(join(secret, 'hidden.txt'), 'hidden')
+    // The Session origin still registers `secret` (withheld: the grant is
+    // absent), while the effective wire root is its ancestor. The selected path
+    // is under upstream's own workspace root, so only the plugin's withheld
+    // check can refuse it once routing finds no grant.
+    ctx.provide('sessions', { get: (id: string) => id === 's' ? { header: { cwd: fixture.workspace } } : undefined } as never)
+    const { service } = await files()
+    ctx.provide('multiRootRegistry', {
+      list: (primary: string) => primary === fixture.workspace ? [withheldRegistration(secret)] : [],
+    } as never)
+    await expect(service.list({ sessionId: 's' as never, workspaceRoot: moved }, secret, new AbortController().signal))
       .rejects.toMatchObject({ code: 'workspace-file/outside-workspace' })
   })
 

@@ -305,6 +305,12 @@ export function apply(ctx: Context, config: Config = {}): void {
   if (maxBytes <= 0 || !Number.isFinite(maxBytes)) return
 
   const states = new WeakMap<object, SessionState>()
+  // Seed events (the log loaded by a resume) never publish `session/event`; they
+  // are replayed exactly once, for the events that existed before this row saw
+  // the Session. Later activity arrives through the live listener below, whose
+  // `effectiveDirectory` is the Host's resume semantics (a 0.2.3 host ignores a
+  // legacy `working-directory/change` and resumes at the origin).
+  const liveEventCounts = new WeakMap<object, number>()
   const callsBySession = new WeakMap<object, PendingCalls>()
   const executions = new AsyncLocalStorage<ToolCaller>()
 
@@ -503,6 +509,7 @@ export function apply(ctx: Context, config: Config = {}): void {
   // arguments, `tool/result` names the call it answers, and a pairing is a
   // directory the session has worked in.
   ctx.on('session/event', (session, event) => {
+    liveEventCounts.set(session, (liveEventCounts.get(session) ?? 0) + 1)
     const pendingCalls = callsBySession.get(session) ?? new Map()
     callsBySession.set(session, pendingCalls)
     const ptc = ptcFileActivity(event)
@@ -562,13 +569,20 @@ export function apply(ctx: Context, config: Config = {}): void {
           worked: new Set(),
           liveOpsEvidence: new Map(existing?.liveOpsEvidence ?? []),
         }
-        // Seed events do not publish session/event on resume. Read their
-        // successful activity without mutating the main agent's delivery index.
+        // Seed events do not publish session/event on resume, while activity
+        // after this row mounted was already resolved against the Host's
+        // effective directory by the live listener above. Replay is still run
+        // over the WHOLE log so OPS history is validated every snapshot, but
+        // only events before the resume boundary may contribute touched paths:
+        // re-deriving a live event's relative path through a superseded legacy
+        // `working-directory/change` chain would misattribute it.
         // oxlint-disable-next-line typescript/no-deprecated -- No public activity projection exists.
-        for (const path of replayedInstructionTargets(agent.session.snapshotEvents(), agent.session.header.cwd,
+        const seedEvents = agent.session.snapshotEvents()
+        const boundary = Math.max(0, seedEvents.length - (liveEventCounts.get(agent.session) ?? 0))
+        for (const path of replayedInstructionTargets(seedEvents, agent.session.header.cwd,
           modeToken === undefined ? undefined : existing?.liveOpsEvidence,
           modeToken === undefined ? undefined : pending,
-          { opsCompatibility: modeToken !== undefined })) state.touched.add(path)
+          { opsCompatibility: modeToken !== undefined, touchBoundary: boundary })) state.touched.add(path)
         const targets = typeof target === 'string' ? [target] : target ?? []
         for (const item of targets) state.touched.add(item)
         if (roots.length === 0) return []

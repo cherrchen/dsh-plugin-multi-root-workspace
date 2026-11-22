@@ -12,6 +12,7 @@ import { tmpdir } from 'node:os'
 import { dirname, isAbsolute, join, relative, resolve, sep } from 'node:path'
 import { pathToFileURL } from 'node:url'
 import { loadRuntimeModule, runtimeRequire, REPO_ROOT } from './lib/dsh-runtime.mjs'
+import { profileContextOverlays } from './lib/profile-context.mjs'
 import { wrapMethod } from '../src/method-wrapper.ts'
 
 const upstream = process.argv.includes('--upstream') ? resolve(process.argv[process.argv.indexOf('--upstream') + 1]) : undefined
@@ -472,7 +473,7 @@ try {
     ] }]))
     await writeFile(join(dir, 'cordis.yml'), '[]\n')
     const profile = { name: 'probe', dir, home, startedBundles: ['probe-bundle'], patchPath: join(dir, 'cordis.patch.yml'),
-      installAnchor: join(home, 'package.json'), cwd: home, overlayPaths: [], telemetryDisabledEnv: undefined }
+      installAnchor: join(home, 'package.json'), cwd: home, ...profileContextOverlays(), telemetryDisabledEnv: undefined }
     let config, mounts = 0, invalidations = 0
     const field = z.boolean().default(true)
     const volatile = typeof field.volatile === 'function'

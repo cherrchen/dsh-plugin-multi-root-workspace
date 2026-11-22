@@ -208,6 +208,38 @@ describe('with additional roots', () => {
     expect(text).toContain('# repo-b rules')
   })
 
+  it('does not replay post-resume activity through a superseded legacy cwd', async () => {
+    const nested = join(repoB, 'sub')
+    mkdirSync(join(nested, 'nested'), { recursive: true })
+    writeFileSync(join(nested, 'nested', 'probe.txt'), 'probe')
+    writeFileSync(join(nested, 'AGENTS.md'), '# nested rules')
+    const world = await mountWorld({}, [repoB])
+    // The durable seed log moved the Session under repoB/sub with the legacy
+    // event a pre-0.2.3 model could write. A 0.2.3 Host ignores that event and
+    // resumes at the origin; live relative activity must follow the Host.
+    const seed = [
+      { type: 'working-directory/change', data: { cwd: canonicalPath(nested) } },
+    ]
+    const live: unknown[] = []
+    vi.spyOn(world.session, 'snapshotEvents').mockImplementation(() => [...seed, ...live])
+    const snapshot = async (): Promise<string> => {
+      const entries = await world.ctx.multiRootInstructions.snapshot(
+        { session: world.session } as never, [repoB], undefined, new AbortController().signal,
+      )
+      return entries.map(entry => entry.text).join('\n')
+    }
+    expect(await snapshot()).toBe('')
+    const finish = world.touch('nested/probe.txt', { tool: 'read' })
+    live.push(
+      { type: 'tool/call', data: { turn: 1, step: 1, callId: 'live-relative', name: 'read', arguments: JSON.stringify({ file_path: 'nested/probe.txt' }) } },
+      { type: 'tool/result', data: { message: { source: { callId: 'live-relative' }, content: [], isError: false } } },
+    )
+    finish()
+    // Regression: a second snapshot used to replay the live pair through the
+    // legacy cwd (repoB/sub), discovering repoB/sub/AGENTS.md even though the
+    // live dispatch resolved the relative path under the origin.
+    expect(await snapshot()).not.toContain('nested rules')
+  })
   it('names each file by its absolute path, so two roots\' AGENTS.md are distinguishable', async () => {
     writeFileSync(join(repoA, 'AGENTS.md'), '# repo-a rules')
     writeFileSync(join(repoB, 'AGENTS.md'), '# repo-b rules')

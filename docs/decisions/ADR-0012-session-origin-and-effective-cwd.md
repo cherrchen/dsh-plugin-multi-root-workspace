@@ -80,6 +80,16 @@ Status 保持 **Accepted**；Session 原始项目、有效 cwd、授权集合与
 
 安全理由（按有效拼写查表的后果，而不是可用性问题）：Host 移动 Session 目录后，按有效拼写查 scope 表得到空集，`deniedRoots` 与 `toolAccess` 上限随之丢失；若新目录落在已登记的 `read-only` 附加根内，`workspace-write` 会话可能获得该根写权限。`workspace-root/change` 事件（stateVersion 3）与旧 `working-directory/change` 都在 resume 重放中接受。回归测试见 `tests/working-directory.e2e.ts`；上游差异见[0.2.3 接口审查](../reference/dsh-0.2.3-migration.md)。
 
+## 修订二：不可用 authority 的 clamp、冷会话 origin 与恢复边界（2026-11-22）
+
+外部复核指出三个同源缺口，修复都围绕「有效目录不是身份」：
+
+1. **不可用 authority 的进程 clamp**：`clampedExecution()` 原先把 `policy.workspaceRoot`（有效目录）作为唯一可写根，而文件径 `src/fs.ts` 在 `authority === 'unavailable'` 时只授 `scope.primaryRoot`。Session 移动后进程可获得有效目录写权限，超出 fail-closed 降级边界。现在 clamp 用 `policyOriginRoot()` 推导原始主根（无 live Session 时回退 policy root，与 fs 一致）；Windows ACL 的 profile 交叉校验仍使用 policy root（上游 profile 的实际 workspace），只有 graft 的授权根用原始主根。
+2. **冷会话 Files 身份**：upstream 对 stored Session 的 wire root 取投影缓存中的有效目录，插件却在没有 live Session 时回退 wire root 查 Registry。现在 `workspace-files` 优先读 `sessionPersistence.stat(id).header.cwd`，按请求缓存一次；不可证明时仍回退 wire root。
+3. **恢复后重放边界**：`multiRootInstructions.snapshot()` 每次都以全量 `snapshotEvents()` 重放，恢复后新事件会被 legacy `working-directory/change` 链重新解析（0.2.3 宿主已忽略该事件）。现在每个 Session 只重放一次，并且只重放本进程首次观察时的「恢复前缀」；此后活动由 live 监听按 `effectiveDirectory` 处理。历史段仍按当时 cwd 解析。
+
+同时修正 Windows ACL widen 调用：第 4 个交叉校验参数必须是上游 profile 的 workspace（有效 policy root），Registry 授权仍从原始主根取得。回归见 `tests/sandbox-multi-root.spec.ts`（Windows）、`tests/authority-boundaries.spec.ts`、`tests/workspace-routing.spec.ts` 与 `tests/instructions.spec.ts`。
+
 ## Alternatives Considered
 
 - 用 effective cwd 替换 policy root / Registry key：会隐式授权并错配持久化，拒绝。
