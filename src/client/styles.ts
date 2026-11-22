@@ -1330,7 +1330,8 @@ aside[data-mrfw-navigator] > [data-files-search-settings] {
   border-bottom: 0.5px solid var(--dsw-alias-border-l2);
 }
 
-.mrfw-rowBare {
+.mrfw-rowBare,
+.mrfw-row:last-child {
   border-bottom: none;
 }
 
