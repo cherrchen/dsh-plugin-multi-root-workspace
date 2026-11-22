@@ -125,7 +125,6 @@ export function RemoteRootMenu(props: RemoteRootMenuProps): ReactNode {
       items.push({ id: 'remove', label: t('panel.remoteRemove'), icon: <IconTrash />, danger: true, disabled: controlsPending })
     }
   } else {
-    items.push({ id: 'cancel', label: t('ssh.cancel'), disabled: saving })
     if (error !== undefined) {
       const label = t(errorKeyOf(error.code)) + (errorHasDetail(error.code) ? ` (${error.message})` : '')
       items.push({ id: 'error', type: 'label', text: label }, { id: 'retry', label: t('panel.retry') })
@@ -176,6 +175,7 @@ export function RemoteRootMenu(props: RemoteRootMenuProps): ReactNode {
         disabled: !changed,
       })
     }
+    items.push({ id: 'cancel', label: t('ssh.cancel'), disabled: saving })
   }
 
   return <><Menu open={open} anchor={props.anchor} items={items} selectedIds={editing ? [...checked] : []}
