@@ -117,7 +117,7 @@ export function RemoteRootMenu(props: RemoteRootMenuProps): ReactNode {
     if (canEdit && props.onEditBinding !== undefined) {
       items.push({ id: 'edit-binding', label: t('panel.remoteEdit'), icon: <IconEdit />, disabled: controlsPending })
     }
-    if (canEdit) items.push({ id: 'edit', label: t('ssh.binding.editCapabilities'), disabled: controlsPending })
+    if (canEdit) items.push({ id: 'edit', label: t('ssh.binding.editCapabilities'), icon: <IconEdit />, disabled: controlsPending })
     if (registering) {
       items.push({
         id: 'register', label: t(endpoint.state === 'withheld' ? 'panel.reRegister' : 'panel.remoteRegister'), disabled: controlsPending,
