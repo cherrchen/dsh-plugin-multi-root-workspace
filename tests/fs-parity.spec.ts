@@ -32,6 +32,7 @@ import { mountCompat } from './support/compat.ts'
 import { createFixtureWorkspace } from './support/temp-workspace.ts'
 import { symlinkUnsupportedReason } from './support/temp-workspace.ts'
 import type { FixtureWorkspace } from './support/temp-workspace.ts'
+import { LocalOnlyFileSystem } from './support/local-fs-facade.ts'
 
 const fixtures: FixtureWorkspace[] = []
 const fibers: Array<Awaited<ReturnType<Context['plugin']>>> = []
@@ -56,18 +57,19 @@ interface Backend {
 }
 
 async function mount(plugin: unknown, fixture: FixtureWorkspace, mode: SandboxMode, roots: readonly string[]): Promise<Backend> {
+  const multiRoot = plugin === MultiRootFileSystem || plugin === LocalOnlyFileSystem
   fixtures.push(fixture)
   const ctx = new Context()
   fibers.push(
     await ctx.plugin(SessionProjectionRegistry),
     await ctx.plugin(SandboxPolicyService, { mode, workspaceRoot: fixture.workspace }),
   )
-  if (plugin === MultiRootFileSystem) {
+  if (multiRoot) {
     fibers.push(await ctx.plugin(MultiRootScopeService))
     await mountCompat(ctx)
   }
   fibers.push(await ctx.plugin(plugin as never, { cwd: fixture.workspace }))
-  if (plugin === MultiRootFileSystem) {
+  if (multiRoot) {
     ctx.multiRootScope.setAdditionalRoots(fixture.workspace, roots.map((path, index) => ({ id: `root-${index}`, path, recordedPath: canonicalPath(path), access: 'inherit' })))
   }
   return { ctx, fs: ctx.fs, fixture }
@@ -226,9 +228,9 @@ async function record(backend: Backend, cases: readonly Case[]): Promise<Map<str
   return recorded
 }
 
-async function runParity(mode: SandboxMode): Promise<void> {
+async function runParity(mode: SandboxMode, plugin: unknown = MultiRootFileSystem): Promise<void> {
   const upstream = await mount(SandboxedFileSystem, createFixtureWorkspace('fs-parity-up'), mode, [])
-  const ours = await mount(MultiRootFileSystem, createFixtureWorkspace('fs-parity-ours'), mode, [])
+  const ours = await mount(plugin, createFixtureWorkspace('fs-parity-ours'), mode, [])
   expect(ours.fs.sandboxMode).toBe(upstream.fs.sandboxMode)
 
   const cases = mutationCases(mode)
@@ -250,6 +252,12 @@ describe('parity with the upstream single-root fence (empty additional roots)', 
 
   it('danger-full-access', async () => {
     await runParity('danger-full-access')
+  })
+})
+
+describe('G1 local-only facade (test composition)', () => {
+  it.each(['workspace-write', 'read-only', 'danger-full-access'] as const)('preserves empty-root upstream behavior under %s', async mode => {
+    await runParity(mode, LocalOnlyFileSystem)
   })
 })
 

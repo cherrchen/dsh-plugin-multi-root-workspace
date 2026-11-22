@@ -1,12 +1,14 @@
 // @vitest-environment jsdom
-import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { BundleSettingsCard, installSkillsSettingsCard } from '../src/client/skills-settings.tsx'
+import { BundleSettingsCard, installSkillsSettingsCard, RemoteSwitchRow } from '../src/client/skills-settings.tsx'
 import * as Confirmation from '../src/compat/ops-confirmation.ts'
 import { DICTIONARIES } from '../src/client/locales.ts'
 import { OpsCompatibilitySettingsCard } from '../src/client/ops-settings.tsx'
 import { bindSettingsForm, bindSkillsForm, type SkillsForm } from '../src/compat/skills-client.ts'
 import type { Translate } from '../src/client/WorkspaceFoldersAction.tsx'
+import { createSshSettingsClient } from '../src/client/ssh-client.ts'
+import { SSH_SETTINGS_CHANNEL } from '../src/remote/personal-contract.ts'
 const t: Translate = key => key
 const cleanups: (() => void)[] = []
 afterEach(() => { vi.restoreAllMocks(); cleanup(); for (const stop of cleanups.splice(0).reverse()) stop() })
@@ -42,7 +44,7 @@ describe('OPS compatibility settings card', () => {
     fireEvent.click(confirm)
     await waitFor(() => expect(writes).toEqual([[[{ op: 'set', path: ['enabled'], value: true }], 3]]))
     expect(screen.queryByRole('dialog')).toBeNull()
-    expect(screen.queryByRole('alert')).toBeNull()
+    expect(screen.queryByRole('status')).toBeNull()
   })
 
   it.each([{ status: 'loading', writable: true }, { status: 'ready', writable: false }])('disables the switch while unavailable', async (state) => {
@@ -146,8 +148,9 @@ describe('bundle settings coordinator', () => {
     const registrations: { name: string; key: string; component: unknown }[] = []
     const skillsForm = opsForm({ value: { enabled: true }, status: 'ready', writable: true })
     const ops = opsForm({ value: { enabled: false }, status: 'ready', writable: true })
+    const unavailable = opsForm({ status: 'unavailable', writable: true })
     const services: Record<string, unknown> = modern
-      ? { configForms: { get: (id: string) => { selected.push(id); return id === 'multi-root-skills' ? skillsForm : ops } } }
+      ? { configForms: { get: (id: string) => { selected.push(id); return id === 'multi-root-skills' ? skillsForm : id === 'multi-root-ops-compatibility' ? ops : unavailable } } }
       : { settingsScope: { bind: ({ namespace }: { namespace: string }) => { selected.push(namespace); return namespace === 'multi-root-skills' ? skillsForm : ops } } }
     const ctx = {
       get: (name: string) => services[name],
@@ -168,6 +171,32 @@ describe('bundle settings coordinator', () => {
     render(<Bundle {...props} />)
     expect(screen.getByRole('switch', { name: 'skills.globalEnable' })).not.toBeNull()
     expect(screen.queryByRole('switch', { name: 'ops.compatibilityEnable' }) !== null).toBe(modern)
+  })
+
+  it('exposes the remote-tools form to the Workspace panel', () => {
+    const remote = opsForm({ value: { enabled: false }, status: 'ready', writable: true })
+    const registrations: { name: string; key: string }[] = []
+    const ctx = {
+      get: (name: string) => name === 'configForms' ? { get: (id: string) => id === 'multi-root-remote-tools' ? remote : undefined } : undefined,
+      inject: (names: string[], callback: (ctx: unknown) => unknown) => {
+        if (names.every(name => name === 'configForms' || name === 'settingsScope')) {
+          const stop = callback(ctx); if (typeof stop === 'function') cleanups.push(stop as () => void)
+        }
+      },
+      slots: {
+        inject: (_name: string, callback: () => unknown) => { callback(); return () => {} },
+        register: (options: { name: string; key: string }) => { registrations.push(options); return () => {} },
+      },
+      effect: (setup: () => unknown) => { const stop = setup(); if (typeof stop === 'function') cleanups.push(stop as () => void) },
+    }
+    const signal = installSkillsSettingsCard(ctx as never, t)
+    expect(signal.remoteForm()).toBe(remote)
+    let notified = 0
+    const stop = signal.subscribeRemote(() => { notified += 1 })
+    for (const listener of remote.listeners) listener()
+    expect(notified).toBeGreaterThan(0)
+    stop()
+    expect(registrations.some(row => row.key === 'multi-root-remote-tools')).toBe(true)
   })
 
   it('does not register an OPS settings item when the host omits its namespace', () => {
@@ -221,4 +250,92 @@ describe('bundle settings coordinator', () => {
     expect(bindSkillsForm(ctx as never)).toEqual({ namespace: 'multi-root-skills' })
     expect(bindSettingsForm(ctx as never, 'multi-root-ops-compatibility')).toEqual({ namespace: 'multi-root-ops-compatibility' })
   })
+})
+
+describe('personal SSH remote-environments settings', () => {
+  it('shows SSH management first when enabled and opens the dialog without a session', async () => {
+    let snapshot = { value: { enabled: false }, status: 'ready', writable: true, revision: 1 }
+    const { listeners, ...remoteForm } = opsForm(snapshot)
+    remoteForm.getSnapshot = () => snapshot
+    const form = opsForm({ value: { enabled: true }, status: 'ready', writable: true })
+    const call = vi.fn(async (_channel, endpoint) => ({
+      ok: true,
+      value: endpoint === 'status' ? { custodyMode: 'personal', status: { state: 'ready' }, connections: [] }
+        : endpoint === 'sshConfigAliases' ? { aliases: [] }
+          : { mode: 'personal', enabled: true, linked: true, revision: 0, environments: [], credentials: [], bindings: [] },
+    }))
+    render(<BundleSettingsCard form={form} remoteForm={remoteForm} sshSettings={createSshSettingsClient({ rpc: { call } })} t={t} />)
+    expect(screen.queryByRole('button', { name: 'ssh.settings.manage' })).toBeNull()
+    act(() => { snapshot = { ...snapshot, value: { enabled: true }, revision: 2 }; listeners.forEach(listener => listener()) })
+    const title = await screen.findByText('ssh.settings.title')
+    expect(document.querySelector('.mrfw-skillsSettings')).toBe(title.parentElement)
+    fireEvent.click(within(title.parentElement!).getByRole('button', { name: 'ssh.settings.manage' }))
+
+    const dialog = await screen.findByRole('dialog', { name: 'ssh.dialog.title' })
+    expect(await within(dialog).findByRole('button', { name: 'ssh.tab.add' })).toBeTruthy()
+    const navigation = within(dialog).getByRole('navigation', { name: 'ssh.tab.listLabel' })
+    expect(within(navigation).getAllByRole('button').map(node => node.textContent)).toEqual(['ssh.tab.connections', 'ssh.tab.keys'])
+    expect(call.mock.calls.map(args => args.slice(0, 3))).toEqual(expect.arrayContaining([
+      [SSH_SETTINGS_CHANNEL, 'status', {}], [SSH_SETTINGS_CHANNEL, 'sshState', {}],
+    ]))
+    act(() => { snapshot = { ...snapshot, value: { enabled: false }, revision: 3 }; listeners.forEach(listener => listener()) })
+    expect(screen.queryByRole('button', { name: 'ssh.settings.manage' })).toBeNull()
+    expect(screen.queryByRole('dialog', { name: 'ssh.dialog.title' })).toBeNull()
+  })
+
+  it('carries the warning-tone tag and keeps the setting off until acknowledged and confirmed', async () => {
+    const writes: unknown[] = []
+    const form = opsForm({ value: { enabled: false }, status: 'ready', writable: true, revision: 3 }, writes)
+    render(<RemoteSwitchRow form={form} t={t} />)
+    expect(screen.getByText('remote.experimental').getAttribute('data-tone')).toBe('warning')
+    const toggle = screen.getByRole('switch', { name: 'remote.settingsEnable' })
+    expect(toggle.getAttribute('aria-checked')).not.toBe('true')
+    fireEvent.click(toggle)
+    expect(screen.getByRole('dialog', { name: 'remote.confirmTitle' })).not.toBeNull()
+    expect(screen.getByText('remote.confirmDescription')).not.toBeNull()
+    expect(toggle.getAttribute('aria-checked')).toBe('false')
+    expect(writes).toEqual([])
+    const confirm = screen.getByRole('button', { name: 'remote.confirmEnable' }) as HTMLButtonElement
+    fireEvent.click(confirm)
+    expect(writes).toEqual([])
+    fireEvent.click(screen.getByRole('checkbox', { name: 'remote.confirmAcknowledge' }))
+    fireEvent.click(confirm)
+    await waitFor(() => expect(writes).toEqual([[[{ op: 'set', path: ['enabled'], value: true }], 3]]))
+    expect(screen.queryByRole('dialog')).toBeNull()
+  })
+
+  it('turns an enabled setting off immediately without a confirmation', async () => {
+    const writes: unknown[] = []
+    render(<RemoteSwitchRow form={opsForm({ value: { enabled: true }, status: 'ready', writable: true, revision: 4 }, writes)} t={t} />)
+    fireEvent.click(screen.getByRole('switch'))
+    await waitFor(() => expect(writes).toEqual([[[{ op: 'set', path: ['enabled'], value: false }], 4]]))
+    expect(screen.queryByRole('dialog')).toBeNull()
+  })
+
+  it('hides the row while unavailable and blocks enabling without the host warning dialog', () => {
+    render(<RemoteSwitchRow form={opsForm({ status: 'unavailable', writable: true })} t={t} />)
+    expect(screen.queryByRole('switch')).toBeNull()
+    cleanup()
+    vi.spyOn(Confirmation, 'remoteRiskConfirmation').mockReturnValue(undefined)
+    const writes: unknown[] = []
+    render(<RemoteSwitchRow form={opsForm({ value: { enabled: false }, status: 'ready', writable: true }, writes)} t={t} />)
+    expect((screen.getByRole('switch') as HTMLButtonElement).disabled).toBe(true)
+    fireEvent.click(screen.getByRole('switch'))
+    expect(writes).toEqual([])
+  })
+
+  it('renders inside the bundle card and mutates only its own form', async () => {
+    const remoteWrites: unknown[] = [], opsWrites: unknown[] = []
+    const remote = opsForm({ value: { enabled: false }, status: 'ready', writable: true, revision: 1 }, remoteWrites)
+    const ops = opsForm({ value: { enabled: false }, status: 'ready', writable: true, revision: 2 }, opsWrites)
+    render(<BundleSettingsCard opsForm={ops} remoteForm={remote} t={t} />)
+    fireEvent.click(screen.getByRole('switch', { name: 'remote.settingsEnable' }))
+    expect(remoteWrites).toEqual([])
+    fireEvent.click(screen.getByRole('checkbox', { name: 'remote.confirmAcknowledge' }))
+    fireEvent.click(screen.getByRole('button', { name: 'remote.confirmEnable' }))
+    await waitFor(() => expect(remoteWrites).toHaveLength(1))
+    expect(opsWrites).toEqual([])
+    expect(screen.getByRole('switch', { name: 'ops.compatibilityEnable' })).not.toBeNull()
+  })
+
 })

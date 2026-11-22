@@ -72,6 +72,10 @@ jobs:
             exit 1
           fi
 
+      - name: Resolve the npm dist-tag and release channel
+        id: publish
+        run: node scripts/release-channel.mjs >> "$GITHUB_OUTPUT"
+
       - name: Install
         run: pnpm install --frozen-lockfile
       - name: Build the package
@@ -94,13 +98,26 @@ jobs:
       # workflow; `id-token: write` above grants the OIDC claim, and pnpm
       # exchanges it for a short-lived publish credential itself (no
       # registry-url/npmrc auth needed).
+      # Prereleases go to their own dist-tag (`0.1.24-beta.1` -> `beta`) so the
+      # stable line keeps `latest`; a bug in the derived tag must never fall
+      # back to publishing a beta as stable.
       - name: Publish to npm
-        run: pnpm publish --no-git-checks --provenance
+        env:
+          NPM_DIST_TAG: ${{ steps.publish.outputs.tag }}
+        run: pnpm publish --no-git-checks --provenance --tag "$NPM_DIST_TAG"
 
       - name: Generate the release notes
         run: node scripts/release-notes.mjs "$GITHUB_REF_NAME" > release-notes.md
 
+      # A prerelease is published as a GitHub prerelease and never becomes the
+      # repository's "latest release", which stays on the stable line.
       - name: Create the GitHub release
-        run: gh release create "$GITHUB_REF_NAME" --verify-tag --title "$GITHUB_REF_NAME" --notes-file release-notes.md "$TARBALL"
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          RELEASE_PRERELEASE: ${{ steps.publish.outputs.prerelease }}
+        run: |
+          args=(--verify-tag --title "$GITHUB_REF_NAME" --notes-file release-notes.md)
+          if [ "$RELEASE_PRERELEASE" = "true" ]; then
+            args+=(--prerelease --latest=false)
+          fi
+          gh release create "$GITHUB_REF_NAME" "${args[@]}" "$TARBALL"

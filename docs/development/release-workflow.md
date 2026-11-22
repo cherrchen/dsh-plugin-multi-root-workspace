@@ -47,6 +47,20 @@ pnpm release prerelease --pre rc   # 0.2.0 -> 0.2.0-rc.1（再跑一次 rc.2、r
 - 默认只改写 `package.json` 的 `version`（保持文件其余部分逐字节不变），打印 `旧版本 -> 新版本`；
 - `--tag`：改完后把 `package.json` 单独提交（`chore(release): v<version>`）并打 annotated tag `v<version>`。工作区若有**除 `package.json` 之外**的改动或该 tag 已存在，脚本拒绝执行——发版提交不允许夹带无关变更。
 
+## 预发布（prerelease）
+
+`package.json` 的 `version` 带预发布后缀时（例如 `0.1.24-beta.1`），发布链路自动切换到预发布模式；稳定版本的行为不变。判定与取值集中在 `scripts/release-channel.mjs`，由 `release.yml` 在 publish 前调用：
+
+- **npm dist-tag**：稳定版发布到 `latest`；预发布用它的标识符（`0.1.24-beta.1` → `beta`，`0.2.0-rc.2` → `rc`；标识符不能作为 npm tag 时回退 `next`）。因此预发布**不会占用 `latest`**，裸包名安装仍然得到稳定版；安装预发布需显式指定标签或精确版本：`dsh plugin --profile web add <包>@beta`。
+- **GitHub Release**：预发布用 `gh release create --prerelease --latest=false` 创建，不成为仓库的 latest release；稳定版仍然正常创建。
+- **tag**：仍然是 `v<version>`（例如 `v0.1.24-beta.1`），`release.yml` 继续校验 tag 与 `package.json` 一致。
+
+本地确认一次推导结果：
+
+```sh
+node scripts/release-channel.mjs   # 例如 tag=beta、prerelease=true
+```
+
 ## Release Note：`scripts/release-notes.mjs`
 
 ```sh
@@ -68,8 +82,9 @@ node scripts/release-notes.mjs v0.1.1   # 本地预览，输出 markdown
    - `pnpm install --frozen-lockfile && pnpm build`（`lib/` 不进 git，tarball 必须现构建；client 制品须在 pack 前就绪）；
    - `pnpm licenses:check` 校验 `THIRD_PARTY_LICENSE` 与 `package.json`、构建产物和 vendored 清单一致；
    - `node scripts/check-pack.mjs` 校验 tarball：必备文件（含 `THIRD_PARTY_LICENSE` 与 `lib/windows-runner.js`——缺后者 Windows 受限多根就不存在）、每个 `exports` 目标、`cordis.patch.yml` 引用的每个模块、传递依赖的共享 chunk 全部在内（见 [client-bundle-not-in-boot-graph](../troubleshooting/client-bundle-not-in-boot-graph.md)）；
-   - `pnpm publish --no-git-checks --provenance` 发布（`--no-git-checks` 是因为 Actions 中处于 detached HEAD）；认证走 npm trusted publishing（OIDC），`package.json` 的 `repository` 字段与 job 的 `id-token: write` 权限是它的前提；
-   - 用 `gh release create` 创建 GitHub Release：正文来自 release-notes 脚本，tarball 作为 Release 资产。
+   - `scripts/release-channel.mjs` 从 `package.json` 的版本推导 npm 发布标签与是否预发布，写成 `publish` step 的输出；
+   - `pnpm publish --no-git-checks --provenance --tag <推导出的标签>` 发布（`--no-git-checks` 是因为 Actions 中处于 detached HEAD）；认证走 npm trusted publishing（OIDC），`package.json` 的 `repository` 字段与 job 的 `id-token: write` 权限是它的前提；预发布因此不会覆盖 `latest`；
+   - 用 `gh release create` 创建 GitHub Release：正文来自 release-notes 脚本，tarball 作为 Release 资产；预发布额外传 `--prerelease --latest=false`，不会成为 latest release。
 
 `pnpm publish` 的公共访问由 `package.json` 的 `publishConfig.access: "public"` 保证（scoped 包必需）。认证完全依赖 trusted publishing：npm 侧登记的仓库 + workflow 与本次运行必须一致，否则 OIDC 换取发布凭证会被 registry 拒绝（404/403）。
 
@@ -92,6 +107,7 @@ git push origin main --follow-tags
 
 ## 验证
 
+- 预发布前确认 `node scripts/release-channel.mjs` 推导出预期的标签（例如 `tag=beta`、`prerelease=true`），且 `latest` 仍指向预期的稳定版本。
 - 发版前本地跑通与 CI 相同的完整门禁：`pnpm lint && pnpm typecheck && pnpm build && pnpm test && pnpm smoke`（受本机内核方言影响时见开发流程文档的故障排查），外加 `pnpm compat:check`、`pnpm docs:check` 与 `pnpm licenses:check`。
 - 打 tag 前确认：`package.json` 的 `version`、CHANGELOG 的新条目（中英两份）与即将打出的 tag 三者指的是同一个版本。
 - 发版完成后到 [npmjs 包页面](https://www.npmjs.com/package/@dsh-electron/dsh-plugin-multi-root-workspace) 与 GitHub Releases 页面确认版本、附件与 Release Note。

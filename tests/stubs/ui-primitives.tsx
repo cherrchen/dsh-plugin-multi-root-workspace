@@ -33,6 +33,7 @@ function icon(name: string): (props: IconProps) => ReactNode {
 }
 
 export const IconChevronDownOutline14 = icon('chevron-down')
+export const IconChevronRightOutline14 = icon('chevron-right')
 export const IconChevronUpOutline14 = icon('chevron-up')
 export const IconCopyOutline16 = icon('copy')
 export const IconEditOutline16 = icon('edit')
@@ -44,11 +45,19 @@ export const IconRefreshOutline16 = icon('refresh')
 export const IconSettingsOutline16 = icon('settings')
 export const IconTrashOutline16 = icon('trash')
 
+/** Minimal `Input` mirror: a wrapper span around the native input. */
+export function Input(props: { readonly className?: string; readonly icon?: ReactNode } & Record<string, unknown>): ReactNode {
+  const { className, icon: _icon, ...rest } = props
+  return createElement('span', { className }, createElement('input', rest))
+}
+
 // The *Regular family the open-in-app fork spells verbatim (0.1.7+ names).
 export const IconChevronDownOutlineRegular = icon('chevron-down')
+export const IconChevronRightOutlineRegular = icon('chevron-right')
 export const IconRightUpOutlineRegular = icon('right-up')
 export const IconFolderOpenOutlineRegular = icon('folder-open')
 export const IconWarningOutlineRegular = icon('warning')
+export const IconWarningOutline16 = icon('warning-16')
 
 // The names the files-tree fork spells verbatim: the folder pair the tree
 // rows toggle between (Regular in 0.1.7+, pixel-sized before it) and the
@@ -67,6 +76,8 @@ export const IconSearchOutlineRegular = icon('search')
 export const IconEyeOutlineRegular = icon('eye')
 export const IconEyeOffOutlineRegular = icon('eye-off')
 export const IconCloseOutlineRegular = icon('close')
+export const IconCheckOutlineRegular = icon('check')
+export const IconPlayOutlineRegular = icon('play')
 export const IconInfoOutlineRegular = icon('info')
 export const IconPlusOutlineRegular = icon('plus')
 export const IconTrashOutlineRegular = icon('trash')
@@ -88,16 +99,17 @@ export function Switch(props: {
 export function Button(props: {
   readonly variant?: string
   readonly size?: string
+  readonly icon?: ReactNode
   readonly className?: string
   readonly onClick?: () => void
   readonly children?: ReactNode
 } & Record<string, unknown>): ReactNode {
-  const { variant, size, className, onClick, children, ...rest } = props
+  const { variant, size, icon: _icon, className, onClick, children, ...rest } = props
   return createElement('button', {
     type: 'button',
     'data-variant': variant,
     'data-size': size,
-    className,
+    className: ['mrfw-stub-button', variant, size, className].filter(value => value !== undefined && value !== '').join(' '),
     onClick,
     ...rest,
   }, children)
@@ -110,6 +122,15 @@ export function StateDot(props: {
   readonly className?: string
 }): ReactNode {
   return createElement('span', { 'data-state-dot': props.state, className: props.className })
+}
+
+/** Minimal `TextShimmer` mirror: the active flag rides a data attribute. */
+export function TextShimmer(props: {
+  readonly children?: ReactNode
+  readonly active?: boolean
+  readonly className?: string
+}): ReactNode {
+  return createElement('span', { 'data-shimmer': props.active ? 'true' : undefined, className: props.className }, props.children)
 }
 
 /** Minimal `Tag` mirror: the same `span[data-tone]` shape the host renders. */
@@ -200,6 +221,8 @@ export function Modal(props: {
   readonly title: string
   readonly description?: string
   readonly closeLabel: string
+  readonly className?: string
+  readonly contentClassName?: string
   readonly footer?: ReactNode
   readonly children?: ReactNode
   readonly className?: string
@@ -212,7 +235,7 @@ export function Modal(props: {
       createElement('h2', null, props.title),
       createElement('button', { type: 'button', 'aria-label': props.closeLabel, onClick: props.onClose }, '×'),
       props.description === undefined ? null : createElement('p', null, props.description),
-      props.children,
+      props.contentClassName === undefined ? props.children : createElement('div', { className: props.contentClassName }, props.children),
       props.footer,
     ),
     document.body,
@@ -305,7 +328,7 @@ export function Menu(props: {
       ? createPortal(
           createElement(
             'div',
-            { 'data-menu': 'true' },
+            { role: 'menu', 'data-menu': 'true' },
             props.items.map(entry),
             (props.footer ?? []).map(entry),
           ),

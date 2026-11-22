@@ -51,7 +51,7 @@ ADR-0001-short-title.md
 ADR-0002-short-title.md
 ```
 
-编号递增，标题使用小写中划线。ADR-0030–0034 已分配给 `feat/ssh-workspace` 分支；该分支另有 `ADR-0040-credential-broker` / `ADR-0041-ssh-custody-modes` 的历史编号，与主线 0040/0041 的用途不同，不应作为主线编号依据。主线在 ADR-0029 之后直接使用 0035 起跳，跳号属有意保留而非缺失；新增 ADR 前必须扫描全部分支：0042 为附加根行右键、0043 为预览导航搜索、0044 为 sidebar footer 对齐、**0045** 为 Worktree 清理 UI（该提案原拟 0043，rebase 到主线时为避免重号改为 0045），本线新增决策从 0046 起；**0046** 为 Files 页头 RootSwitcher 窄宽让位（2026-11-17，本线首个使用该号的决策），下一个可用编号为 0047。
+编号递增，标题使用小写中划线。ADR-0030–0034 已预留给 Issue #32，因此主线在 ADR-0029 后从 ADR-0035 起编号。合并 main 后，SSH 凭据代理与托管模式分别使用 ADR-0048 和 ADR-0049（分支原编号为 0040 和 0041）。新增 ADR 前扫描全部分支确认编号可用。
 
 - [ADR-0022-auto-review-loader-entry.md](./ADR-0022-auto-review-loader-entry.md) — Auto Review 并入主包：默认关闭的单一 loader 行、运行时接管、并发导入防护、有序 owner 交接与单包构建（取代 ADR-0021 的交付结构）。
 
@@ -91,3 +91,14 @@ ADR-0002-short-title.md
 - [ADR-0046-files-header-rootswitch-shrink-priority.md](./ADR-0046-files-header-rootswitch-shrink-priority.md) — Files 页头 `RootSwitcher` 的窄宽让位优先级：收缩能力必须写在参与 header 外层 flex 的 `Menu` anchor 包装上（`min-width: 0`）；固定控件不动，完整路径以零 basis 先让到 0，根名随后省略，触发器图标最后裁剪。取代「只给内层按钮写 `min-width: 0`」的无效写法；24 个受支持发布的 `Menu.className` 逐 tag 核对，无版本分支（Accepted，实施见计划）。
 
 - [ADR-0045-worktree-cleanup-panel-ui.md](./ADR-0045-worktree-cleanup-panel-ui.md) — Workspace Folders 面板的 Worktree 清理 UI 与失效行收敛：批量清理入口移到「附属工作目录」标题行、确认改为覆盖在面板上的 primitives `Modal`、`cleanupEligible` 行只留标题/权限/路径 + 红色删除 + `...`（移除技能/reveal/重新登记与行内提示，路径复用披露移入确认层）、手动发现空结果用官方 info Toast；取代 ADR-0039 §3.2 的 deletion 徽标呈现（仅 cleanupEligible 行）、§6.2 的徽标/副行呈现与确认形态、§6.5 的提示位置与 Alternatives 的清理弹窗否决（Proposed；外部技术评审 2026-11-16 通过、无阻断项，转 Accepted 由维护者决定）。
+
+## Issue #32 · 多执行环境架构决策
+
+- [ADR-0030](./ADR-0030-environment-and-root-identity.md) — 一个 Session 的环境身份、根登记和有序准入 (Accepted).
+- [ADR-0031](./ADR-0031-filesystem-routing.md) — 单一文件系统入口与消费者的环境归属 (Accepted).
+- [ADR-0032](./ADR-0032-upstream-ssh-backend.md) — DSH 官方 SSH 后端的公开入口、分发与平台边界 (Accepted).
+- [ADR-0033](./ADR-0033-remote-command-and-sandbox.md) — 显式远端命令、沙箱与取消语义 (Accepted).
+- [ADR-0034](./ADR-0034-binary-transfer.md) — 跨环境二进制复制的授权、发布与失败语义 (Accepted).
+- [ADR-0048](./ADR-0048-credential-broker.md) — 独立 OS 账户托管 SSH 连接的本机凭据代理、认证与证明条件 (Proposed).
+- [ADR-0049](./ADR-0049-ssh-custody-modes.md) — SSH 远端环境的三档凭据托管：personal（Host 进程内直跑官方栈、用户凭据）、team（broker 托管、放宽部署证明）、hardened（ADR-0048 全量证据）(Accepted).
+- [ADR-0050](./ADR-0050-add-affordance-and-wizard-kit.md) — 工作区面板底栏收口为单一 `+` 按钮（按 remote-tools 开关呈双形态）、本地添加的信任确认 Dialog，以及为旧 SSH 弹窗迁移预留的向导设计套件 `src/client/wizard/` (Accepted).

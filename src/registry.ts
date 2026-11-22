@@ -63,6 +63,13 @@ import { RecoveryScheduler } from './authority/recovery.ts'
 import { RegistryAuthorityLease, RegistryLeaseContendedError } from './registry-lease.ts'
 import { freezeOperationScope, runRegistryOperation, runPrimaryOperation } from './registry-operation.ts'
 import type { RegistryOperation, RegistryOperationKind } from './registry-operation.ts'
+import { RemoteAdmissionError, type RemoteOperation, type RemoteOperationIdentity, type RemoteOperationRequest, type RemoteStatus } from './remote/contract.ts'
+import { effectiveRootAccess } from './contract.ts'
+import type { LocalDestinationAuthority } from './remote/local-sink.ts'
+import { RemoteControlPlane, type RemoteConfig } from './remote/plane.ts'
+import type { loadDeploymentManifest } from './remote/manifest.ts'
+import { parseRemoteArguments, REMOTE_MUTATION_BUDGET_MS, remoteAdmitSchema, remoteSnapshotSchema, type RemoteMethod } from './remote/protocol.ts'
+import type { AdmittedLocalRoot, RemoteEndpointRef, RemoteSnapshotReply } from './remote/contract.ts'
 import {
   additionalRootId,
   canonicalRoot,
@@ -210,6 +217,12 @@ export interface Config {
    * decisions and cleanup tracking never changes authorization.
    */
   readonly promptsRoot?: string
+  /**
+   * The remote-environments experiment (ADR-0030; off by default). Absent or
+   * `enabled !== true` keeps the control plane `disabled` and everything
+   * byte-identical to today; failures degrade only the remote side.
+   */
+  readonly remoteEnvironments?: RemoteConfig
 }
 
 declare module '@deepseek-ai/cordis' {
@@ -426,6 +439,8 @@ export class MultiRootRegistry extends Service {
   private connectionAbort: AbortController | undefined
   private remoteProjectionReady = false
   private readonly remoteRevisions = new Map<string, number>()
+  /** The remote control plane (G1a): manifest, remote domain, remote-2 channel. */
+  private readonly remotePlane: RemoteControlPlane
   /**
    * Primary roots whose projection must still be synced after a follower
    * reconnect — populated from the tracked cache keys at adoption, removed as
@@ -489,7 +504,7 @@ export class MultiRootRegistry extends Service {
    * @param ctx - the host context; `storage` and `multiRootScope` are injected.
    * @param config - the patch row's `sharedStorageRoot`, `leasePath`, and `maxAdditionalRoots`.
    */
-  constructor(ctx: Context, config: Config = {}) {
+  constructor(ctx: Context, config: Config = {}, internals: { loadRemoteManifest?: typeof loadDeploymentManifest } = {}) {
     super(ctx, 'multiRootRegistry')
     this.authorityStorageContext = ctx
     this.leasePath = config.leasePath
@@ -497,6 +512,8 @@ export class MultiRootRegistry extends Service {
     this.promptsRoot = typeof config.promptsRoot === 'string' && isAbsolute(config.promptsRoot) && config.promptsRoot !== ''
       ? config.promptsRoot
       : undefined
+    this.remoteConfig = config.remoteEnvironments
+    this.remotePlane = new RemoteControlPlane(config.remoteEnvironments, ctx.logger, internals.loadRemoteManifest)
     this.recovery = new RecoveryScheduler({
       enabled: config.backgroundRecovery !== false,
       eligible: () => !this.disposed && (this.authorityState.kind === 'contended'
@@ -1636,6 +1653,417 @@ export class MultiRootRegistry extends Service {
   }
 
   /**
+   * The remote control plane's state. `ready` is the only state that admits
+   * remote work; every other state is a reason remote is unavailable while
+   * the LOCAL registry keeps behaving exactly as without the experiment.
+   */
+  get remoteStatus(): RemoteStatus {
+    return this.remotePlane.status
+  }
+
+  /**
+   * The validated deployment manifest, once the remote experiment is enabled
+   * and the manifest parsed. The tools row builds its connection manager and
+   * capability projection from this value. A missing manifest closes
+   * admission, including when an existing tool mount is awaiting repair.
+   */
+  get remoteManifest(): import('./remote/manifest.ts').DeploymentManifest | undefined {
+    return this.remotePlane.manifest
+  }
+
+  /**
+   * The plane's live switch. `remoteEnvironments.enabled` on this row is only
+   * the INITIAL value — the remote-tools row's settings switch rewrites it
+   * through {@link MultiRootRegistry.configureRemote}. Other rows read this
+   * instead of the row config so a dedicated profile's `enabled: true` also
+   * serves as their live default.
+   */
+  private readonly remoteConfig: RemoteConfig | undefined
+
+  get remoteEnabled(): boolean {
+    return this.remotePlane.enabled
+  }
+
+  /** The live custody mode (ADR-0049): personal | team | hardened. */
+  get remoteMode(): import('./remote/plane.ts').RemoteMode {
+    return this.remotePlane.mode
+  }
+
+  /** The loaded manifest digest (personal or deployment), when ready. */
+  get remoteManifestDigest(): string | undefined {
+    return this.remotePlane.manifestDigest
+  }
+
+  private readonly remoteListeners = new Set<() => void>()
+
+  /** Subscribe to remote plane rebinds and grant removals. */
+  onRemoteChange(listener: () => void): () => void {
+    this.remoteListeners.add(listener)
+    return () => { this.remoteListeners.delete(listener) }
+  }
+
+  private notifyRemoteChange(): void {
+    this.remotePlane.notifyFollowers()
+    for (const listener of this.remoteListeners) {
+      try { listener() } catch (error) {
+        this.ctx.logger.warn(`multi-root registry: remote-change listener failed: ${error instanceof Error ? error.message : String(error)}`)
+      }
+    }
+  }
+
+  /** The personal-mode config path, when this row provides one. */
+  get remotePersonalPath(): string | undefined {
+    return this.remoteConfig?.personalPath
+  }
+
+  /** The personal-mode credential root, when this row provides one. */
+  get remoteCredentialRoot(): string | undefined {
+    return this.remoteConfig?.credentialRoot
+  }
+
+  /**
+   * Re-evaluate the remote plane against new live facts, serialized with
+   * every other authority transition: teardown (remote-2 listener / remote
+   * domain / follower channel) runs against the old facts, the facts rebind,
+   * then the owner or follower remote open runs for the current authority
+   * shape. Disabling restores the exact `disabled` state — no remote-2
+   * listener and no remote domain stays open — while v1 keeps working.
+   */
+  async configureRemote(request: import('./remote/plane.ts').RemoteLiveConfig): Promise<void> {
+    const next = this.remotePlane.effectiveConfig(request)
+    let rebound = false
+    await this.serializeAuthority(async () => {
+      if (this.disposed) return
+      const same = this.remotePlane.enabled === next.enabled && this.remotePlane.mode === next.mode
+      if (same && (!next.enabled || next.manifestPath === undefined || next.manifestPath === this.remotePlane.liveManifestPath)) return
+      rebound = true
+      this.remotePlane.dropFollower()
+      await this.remotePlane.closeOwner()
+      this.remotePlane.configure(next)
+      if (this.authorityState.kind === 'follower') {
+        await this.remotePlane.connectFollower(this.medium!, this.authorityState.epoch, () => this.notifyRemoteChange())
+      } else if (this.authorityState.kind === 'active') {
+        await this.remotePlane.openOwner(this.authorityStorageContext, this.medium!, this.operationEpoch!,
+          (method, args, digest, signal) => this.dispatchRemote(method as RemoteMethod, args, digest, signal))
+      }
+    })
+    // Notify only on a real rebind — a no-op read must not re-queue the
+    // listener's own sync (it would loop forever).
+    if (rebound) this.notifyRemoteChange()
+  }
+
+  /**
+   * Personal mode (ADR-0049 §2): before every remote snapshot/list/admit/
+   * add/remove on BOTH authority shapes, re-stat the personal config. A
+   * changed file reloads in place, keeping the grant domain and live IPC
+   * channel. Each request proves the current digest independently.
+   */
+  async refreshRemotePersonal(): Promise<void> {
+    if (this.remotePlane.mode !== 'personal' || !this.remotePlane.enabled) return
+    await this.serializeAuthority(async () => {
+      if (this.disposed) return
+      const result = this.remotePlane.refreshPersonal()
+      let reloaded = result === 'reloaded' || result === 'invalid'
+      if (result === 'invalid') this.remotePlane.dropFollower()
+      if (this.authorityState.kind === 'follower' && this.remotePlane.client === undefined
+        && this.remotePlane.manifest !== undefined) {
+        const previous = this.remotePlane.status.state
+        await this.remotePlane.connectFollower(this.medium!, this.authorityState.epoch, () => this.notifyRemoteChange())
+        reloaded ||= previous !== this.remotePlane.status.state
+      }
+      if (reloaded) this.notifyRemoteChange()
+    })
+  }
+
+  /** Owner-side injection point for endpoint verification (none ships in G1a). */
+  setRemoteEndpointVerifier(verifier: import('./remote/contract.ts').RemoteEndpointVerifier): () => void {
+    this.remotePlane.verifier = verifier
+    return () => { if (this.remotePlane.verifier === verifier) this.remotePlane.verifier = undefined }
+  }
+
+  private requireRemote(): void {
+    if (this.disposed || this.remotePlane.status.state !== 'ready') {
+      throw new RemoteAdmissionError('remote-unavailable', `the remote control plane is ${this.remotePlane.status.state}${this.remotePlane.status.reason === undefined ? '' : `: ${this.remotePlane.status.reason}`}`)
+    }
+  }
+
+  private remoteEpoch(): string | undefined {
+    return this.client !== undefined ? this.remotePlane.client?.epoch : this.operationEpoch
+  }
+
+  /**
+   * List one primary's remote grants with their live state.
+   * @param primaryRoot - the session workspace root (any spelling).
+   */
+  async remoteList(primaryRoot: string): Promise<RemoteSnapshotReply> {
+    await this.ensureAuthority()
+    await this.refreshRemotePersonal()
+    this.requireRemote()
+    const key = primaryKey(primaryRoot)
+    if (this.client) return remoteSnapshotSchema.parse(await this.remotePlane.remoteRequest('remote-snapshot', [key])) as RemoteSnapshotReply
+    this.requireActive()
+    return await this.serialize(key, async () => this.remotePlane.snapshot(key, this.operationEpoch!))
+  }
+
+  /**
+   * Register one deployment-authorized remote endpoint. Endpoint verification
+   * (network I/O) runs OUTSIDE the queue; the manifest binding is re-checked
+   * inside it before anything persists.
+   */
+  async addRemote(primaryRoot: string, ref: RemoteEndpointRef, signal?: AbortSignal): Promise<RemoteSnapshotReply> {
+    await this.ensureAuthority()
+    await this.refreshRemotePersonal()
+    this.requireRemote()
+    if (typeof ref?.environmentId !== 'string' || ref.environmentId === '' || typeof ref?.rootId !== 'string' || ref.rootId === '' || Object.keys(ref).length !== 2) {
+      throw new RemoteAdmissionError('invalid-arguments', 'a remote endpoint reference is exactly { environmentId, rootId }')
+    }
+    if (this.client) return remoteSnapshotSchema.parse(await this.remotePlane.remoteRequest('remote-add', [primaryRoot, ref])) as RemoteSnapshotReply
+    this.requireActive()
+    const key = primaryKey(primaryRoot)
+    const verification = signal ?? AbortSignal.timeout(REMOTE_MUTATION_BUDGET_MS)
+    const refused = () => new RemoteAdmissionError('endpoint-unverifiable', 'remote registration stopped before commit')
+    if (verification.aborted) throw refused()
+    const stopped = Promise.withResolvers<never>()
+    const onAbort = () => stopped.reject(refused())
+    verification.addEventListener('abort', onAbort, { once: true })
+    try {
+      const verified = await Promise.race([this.remotePlane.verifiedAddTarget(key, ref, verification), stopped.promise])
+      const result = await this.serialize(key, async () => {
+        if (verification.aborted || this.disposed) throw refused()
+        return await this.remotePlane.commitAdd(key, ref, verified.digest, verified.verifiedTarget, this.operationEpoch!)
+      })
+      this.notifyRemoteChange()
+      return result
+    } finally {
+      verification.removeEventListener('abort', onAbort)
+    }
+  }
+
+  /** Remove one remote grant. */
+  async removeRemote(primaryRoot: string, ref: RemoteEndpointRef, signal?: AbortSignal): Promise<RemoteSnapshotReply> {
+    await this.ensureAuthority()
+    await this.refreshRemotePersonal()
+    this.requireRemote()
+    if (this.client) return remoteSnapshotSchema.parse(await this.remotePlane.remoteRequest('remote-remove', [primaryRoot, ref])) as RemoteSnapshotReply
+    this.requireActive()
+    const key = primaryKey(primaryRoot)
+    const result = await this.serialize(key, async () => {
+      if (signal?.aborted) throw new RemoteAdmissionError('authority-timeout', 'remote removal stopped before commit')
+      return await this.remotePlane.remove(key, ref, this.operationEpoch!)
+    })
+    this.notifyRemoteChange()
+    return result
+  }
+
+  /** Persist a verified redirect without touching a replacement registration. */
+  async withholdRemote(primaryRoot: string, ref: RemoteEndpointRef, incarnation: string, signal?: AbortSignal): Promise<void> {
+    await this.ensureAuthority()
+    await this.refreshRemotePersonal()
+    this.requireRemote()
+    const key = primaryKey(primaryRoot)
+    if (this.client) {
+      await this.remotePlane.remoteRequest('remote-withhold', [key, ref, incarnation])
+      return
+    }
+    await this.serialize(key, async () => {
+      if (signal?.aborted) throw new RemoteAdmissionError('authority-timeout', 'remote withhold stopped before commit')
+      await this.remotePlane.withhold(key, ref, incarnation)
+    })
+    this.notifyRemoteChange()
+  }
+
+  /**
+   * Admit one remote operation at the owner's ordering point, then run its
+   * body with a frozen handle that expires when the body settles.
+   *
+   * Narrowing happens BEFORE any owner call on every Host: a read-only
+   * session cannot write, exec, or transfer to a remote root, and a capped
+   * tool cannot either — so the owner only ever sees requests the caller's
+   * own mode already permits.
+   */
+  async withRemoteOperation<T>(request: RemoteOperationRequest, body: (operation: RemoteOperation) => T | Promise<T>): Promise<T> {
+    const operationId = randomUUID()
+    const trace = (phase: string, detail = '') =>
+      this.ctx.logger.debug(`multi-root-workspace remote ${phase}: op=${operationId} epoch=${this.remoteEpoch() ?? '-'}${detail === '' ? '' : ` ${detail}`}`)
+    trace('requested')
+    const deny = (code: string, message: string): never => {
+      trace('denied', `code=${code}`)
+      throw new RemoteAdmissionError(code, message)
+    }
+    if (this.disposed) deny('remote-unavailable', 'the registry is disposed')
+    await this.ensureAuthority()
+    try { await this.refreshRemotePersonal() } catch { /* a reload failure lands in status.reason below */ }
+    if (this.remotePlane.status.state !== 'ready') {
+      deny('remote-unavailable', `the remote control plane is ${this.remotePlane.status.state}${this.remotePlane.status.reason === undefined ? '' : `: ${this.remotePlane.status.reason}`}`)
+    }
+    let policy: SandboxExecutionPolicy | undefined
+    try {
+      policy = request.session === undefined ? undefined : this.ctx.get('sandboxPolicy')?.resolve({ session: request.session as never }) as SandboxExecutionPolicy | undefined
+    } catch { policy = undefined }
+    if (request.session?.header?.cwd === undefined || policy?.mode === undefined) {
+      deny('session-policy-unavailable', 'no live sandbox policy could be resolved for this session')
+    }
+    const key = primaryKey(request.session!.header.cwd)
+    const effectiveMode = policy!.mode === 'read-only' ? 'read-only' : 'workspace-write'
+    const transferToRemote = request.purpose === 'transfer' && request.endpoints[1]?.environmentId !== 'local'
+    if (effectiveMode === 'read-only' && (request.purpose === 'write' || request.purpose === 'exec' || transferToRemote)) {
+      deny('mode-denies', `a read-only session cannot ${request.purpose === 'transfer' ? 'transfer to a remote root' : `${request.purpose} a remote root`}`)
+    }
+    if (this.ctx.multiRootScope.capsTool(request.toolName) && (request.purpose === 'write' || request.purpose === 'exec' || transferToRemote)) {
+      deny('tool-capped', `tool "${request.toolName}" is capped to read-only and cannot ${request.purpose === 'transfer' ? 'transfer to a remote root' : `${request.purpose} a remote root`}`)
+    }
+    trace('narrowed')
+    const args = { purpose: request.purpose, endpoints: [...request.endpoints], manifestDigest: this.remotePlane.manifestDigest! }
+    const admission = this.client
+      ? remoteAdmitSchema.parse(await this.remotePlane.remoteRequest('remote-admit', [key, args])) as import('./remote/contract.ts').RemoteAdmission
+      : await this.admitRemoteOperation(key, args)
+    if (admission.epoch !== this.remoteEpoch()) deny('stale-epoch', 'the remote admission epoch does not match the live channel')
+    trace('admitted', 'decision=admit')
+    const identity: RemoteOperationIdentity = Object.freeze({
+      operationId, purpose: request.purpose, toolName: request.toolName, sessionId: request.session!.id,
+      primaryRoot: key, authorityEpoch: admission.epoch, authorizationFingerprint: admission.authorizationFingerprint, effectiveMode,
+    })
+    let active = true
+    const endpoints = Object.freeze([...admission.endpoints])
+    const operation: RemoteOperation = Object.freeze({
+      identity,
+      get endpoints() {
+        if (!active) throw new Error('multi-root registry: remote operation admission has expired')
+        return endpoints
+      },
+    })
+    try {
+      return await body(operation)
+    } finally {
+      active = false
+      trace('expired')
+    }
+  }
+
+  /**
+   * The owner's authoritative local record remote admission binds a `local`
+   * endpoint to (ADR-0034): `primary` resolves to the canonical session root,
+   * every other id must name an `available` registered root under the live
+   * local authority — the state v1 admission revalidates before it answers.
+   */
+  private admittedLocalRecord(key: string, rootId: string): AdmittedLocalRoot {
+    if (rootId === 'primary') return { rootId, path: canonicalRoot(key), access: 'primary', incarnation: key }
+    const status = this.available ? this.statusesOf(key).find(entry => entry.aliasId === rootId) : undefined
+    if (status === undefined || status.state !== 'available') {
+      throw new RemoteAdmissionError('local-root-unavailable', `local root "${rootId}" is not an available registered root of this primary`)
+    }
+    return { rootId, path: status.path, access: status.access, incarnation: status.id }
+  }
+
+  /**
+   * Owner-side remote admission at the queue's ordering point: stored roots
+   * are reclassified — the live check v1 admission runs — and `local`
+   * endpoints resolve through {@link admittedLocalRecord}.
+   */
+  private async admitRemoteOperation(key: string, args: Parameters<RemoteControlPlane['admit']>[1]): Promise<import('./remote/contract.ts').RemoteAdmission> {
+    return await this.serialize(key, async () => {
+      if (args.endpoints.some(endpoint => endpoint.environmentId === 'local')) await this.reclassify(key)
+      return this.remotePlane.admit(key, args, this.operationEpoch!, rootId => this.admittedLocalRecord(key, rootId))
+    })
+  }
+
+  /**
+   * Authorize one LOCAL binary write destination for the transfer port
+   * (ADR-0034). This is the same fence the filesystem mutations consult, minus
+   * the `ctx.fs` call: the named root must be a live `available` registration
+   * (or the primary root), its access level must permit a write at the
+   * operation's effective session mode, the calling tool must not be capped for
+   * additional-root writes, and the returned protected boundaries keep the
+   * staging file and the published name out of the DSH home, the storage
+   * medium, and the lease directory under every mode.
+   *
+   * On a follower the local projection is stale by definition, so the
+   * authority is issued only against the owner-admitted record carried by
+   * the operation's remote admission: the projection must still agree —
+   * same path and access, state `available` — or the call fails closed.
+   *
+   * A transfer must ask again immediately before publication; the authority is
+   * a snapshot, never a cached permit.
+   * @param primaryRoot - the session's primary root (any spelling).
+   * @param rootId - `primary` or the stable alias id of a registered root.
+   * @param effectiveMode - the operation's session mode, capped at workspace-write.
+   * @param toolName - the dispatching tool, whose per-tool cap narrows additional roots.
+   * @param admitted - the owner-admitted local record from the remote admission; required on a follower.
+   * @returns the canonical root and the protected boundaries to enforce.
+   * @throws {RemoteAdmissionError} with a stable refusal code.
+   */
+  localTransferDestination(
+    primaryRoot: string,
+    rootId: string,
+    effectiveMode: 'read-only' | 'workspace-write',
+    toolName: string,
+    admitted?: AdmittedLocalRoot | null,
+  ): LocalDestinationAuthority {
+    if (this.disposed) throw new RemoteAdmissionError('remote-unavailable', 'the registry is disposed')
+    if (typeof rootId !== 'string' || rootId === '') throw new RemoteAdmissionError('invalid-arguments', 'a local transfer destination requires a root id')
+    if (admitted !== undefined && admitted !== null && admitted.rootId !== rootId) {
+      throw new RemoteAdmissionError('admission-changed', `the admitted local root "${admitted.rootId}" does not match "${rootId}"`)
+    }
+    if ((admitted === undefined || admitted === null) && this.client !== undefined) {
+      throw new RemoteAdmissionError('local-authority-unavailable', 'a follower issues a local transfer authority only against the owner-admitted record')
+    }
+    if (!this.available) {
+      throw new RemoteAdmissionError('local-authority-unavailable', 'the local registry authority is not live; additional roots are not granted here')
+    }
+    const deny = this.knownProtectedPaths().map(path => path.path)
+    if (rootId === 'primary') {
+      if (effectiveMode === 'read-only') throw new RemoteAdmissionError('mode-denies', 'a read-only session cannot write into the primary root')
+      const root = canonicalRoot(primaryKey(primaryRoot))
+      if (admitted !== undefined && admitted !== null && (admitted.access !== 'primary' || !samePath(admitted.path, root))) {
+        throw new RemoteAdmissionError('admission-changed', 'the admitted primary root does not match this host\'s authority')
+      }
+      return { rootId, root: admitted?.path ?? root, access: 'primary', deny }
+    }
+    const status = this.list(primaryRoot).find(entry => entry.aliasId === rootId)
+    if (status === undefined || status.state !== 'available') {
+      throw new RemoteAdmissionError('local-root-unavailable', `local root "${rootId}" is not an available registered root of this primary`)
+    }
+    if (admitted !== undefined && admitted !== null && (!samePath(admitted.path, status.path) || admitted.access !== status.access || admitted.incarnation !== status.id)) {
+      throw new RemoteAdmissionError('admission-changed', `the admitted local root "${rootId}" does not match this host's projection`)
+    }
+    if (effectiveRootAccess(status.access, effectiveMode) === 'read-only') {
+      throw new RemoteAdmissionError(
+        status.access === 'read-only' ? 'local-destination-read-only' : 'mode-denies',
+        status.access === 'read-only'
+          ? `local root "${rootId}" is a read-only root and cannot receive a transfer`
+          : `a read-only session cannot write into the inherit local root "${rootId}"`,
+      )
+    }
+    if (this.ctx.multiRootScope.capsTool(toolName)) {
+      throw new RemoteAdmissionError('tool-capped', `tool "${toolName}" is capped to read-only and cannot write into local root "${rootId}"`)
+    }
+    return { rootId, root: admitted?.path ?? status.path, access: admitted?.access ?? status.access, deny }
+  }
+
+  /** The remote-2 listener's dispatch: same queue, same epoch as v1. */
+  private async dispatchRemote(method: RemoteMethod, values: unknown[], manifestDigest?: string, signal?: AbortSignal): Promise<unknown> {
+    const args = parseRemoteArguments(method, values)
+    if (method === 'hello') return null
+    const primary = String(args[0])
+    if (!isAbsolute(primary)) throw new RemoteAdmissionError('invalid-arguments', 'remote primary must be absolute')
+    // R7: follower-issued requests must see a changed personal file too.
+    await this.refreshRemotePersonal()
+    this.requireRemote()
+    if (this.remotePlane.manifestDigest !== manifestDigest) {
+      throw new RemoteAdmissionError('config-digest-mismatch', 'the deployment manifest digest does not match the owner’s')
+    }
+    const key = primaryKey(primary)
+    switch (method) {
+      case 'remote-snapshot': return await this.serialize(key, async () => this.remotePlane.snapshot(key, this.operationEpoch!))
+      case 'remote-add': return await this.addRemote(primary, args[1] as RemoteEndpointRef, signal)
+      case 'remote-remove': return await this.removeRemote(primary, args[1] as RemoteEndpointRef, signal)
+      case 'remote-withhold': await this.withholdRemote(primary, args[1] as RemoteEndpointRef, String(args[2]), signal); return null
+      case 'remote-admit': return await this.admitRemoteOperation(key, args[1] as Parameters<RemoteControlPlane['admit']>[1])
+      default: throw new RemoteAdmissionError('unknown-method', `unsupported remote method ${method}`)
+    }
+  }
+
+  /**
    * Observe registry changes.
    * @param listener - called with the Registry key (`primaryKey()`, case-folded on Windows) after each durable change.
    * @returns the disposer that stops observing.
@@ -1982,6 +2410,7 @@ export class MultiRootRegistry extends Service {
     try {
       this.connectionGeneration++
       this.client = undefined
+      this.remotePlane.dropFollower()
       this.remoteRevisions.clear()
       this.pendingSync.clear()
       this.authorityState = { kind: 'contended' }
@@ -2197,6 +2626,10 @@ export class MultiRootRegistry extends Service {
                   this.ctx.multiRootScope.setRegistryAuthority(true)
                   this.remoteProjectionReady = true
                 }
+                // The remote-2 channel shares the v1 epoch; it dies with it.
+                await this.remotePlane.connectFollower(this.medium, client.epoch!, () => this.notifyRemoteChange())
+                // Remote tools can mount when the follower plane becomes ready.
+                this.notifyRemoteChange()
                 this.recovery.kick()
                 break
               } catch (error) { this.connectionFailure = String(error) /* Never open a follower domain. */ }
@@ -2282,6 +2715,14 @@ export class MultiRootRegistry extends Service {
         this.enterStorageFailed(`cannot start shared registry: ${String(error)}`, 'retryable')
         return
       }
+      // The remote-2 entry is a SECOND listener on the derived endpoint: an
+      // owner that never enables remote simply has no `.r1.sock`, which is
+      // exactly what a remote-capable follower reports as
+      // `owner-without-remote-protocol`. Remote failures degrade only remote.
+      await this.remotePlane.openOwner(this.authorityStorageContext, this.medium, epoch,
+        (method, args, digest, signal) => this.dispatchRemote(method as RemoteMethod, args, digest, signal))
+      // Remote tools can mount when the owner plane becomes ready.
+      this.notifyRemoteChange()
     }
     // One synchronous commit: the domain/table/epoch/authority assignments,
     // the cache swap, the per-key publishes over the OLD ∪ NEW key union
@@ -2331,6 +2772,7 @@ export class MultiRootRegistry extends Service {
     // Retain negative boundaries and cached lexical paths on uncertainty.
     for (const [key, rows] of this.cache) this.withholdScope(key, rows)
     this.server?.close(); this.server = undefined
+    this.remotePlane.ownerFailed(reason)
     this.table = undefined
     this.authorityState = { kind: 'storage-failed', reason, recovery }
     this.noteRecoveryTransition()
@@ -2367,6 +2809,7 @@ export class MultiRootRegistry extends Service {
     // this teardown would otherwise wait out ends immediately.
     this.connectionAbort?.abort()
     this.client?.close(); this.client = undefined
+    this.remotePlane.dropFollower()
     await this.serializeAuthority(async () => {
       // An in-flight open may create its listener after disposal starts. Wait
       // for that acquisition, then retire its endpoint before storage/lease.
@@ -2392,6 +2835,7 @@ export class MultiRootRegistry extends Service {
           // Dispose must not throw through the fiber.
         }
       }
+      await this.remotePlane.closeOwner()
       const lease = this.lease
       this.lease = undefined
       if (lease !== undefined) {

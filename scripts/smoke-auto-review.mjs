@@ -1,6 +1,9 @@
 import assert from 'node:assert/strict'
 import { mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
+// HMR treats the linked checkout as reloadable. Keep its app-boot copy in
+// the launcher's static graph so the root Include survives profile reloads.
+import '@deepseek-ai/dsh-app-boot'
 import { packTarball, readTarGz } from './check-pack.mjs'
 import { autoReviewBattery } from './lib/auto-review-battery.mjs'
 import { AUTO_REVIEW_CONTRACT_DATA } from './lib/auto-review-development.mjs'

@@ -42,7 +42,7 @@
 
 变化：`fs-local/src` `700a6e5ac9` → `9b50d98d22`；`sandbox/src` `01104584d8` → `4f678b29d0`；`sandbox-policy/src` `ec4a77eb6c` → `c8bd50194a`；`session/src` `d1aaa264d6` → `50a3aa9d38`；`session/working-directory/src` `1f72938a23` → `76cdb9852c`；`skill/src` `2c9c47d5ee` → `344f4c27f6`；`skill-filesystem/src` `bbd5a998e7` → `9d69c2a987`；`lsp/src` `6edec9f634` → `5436a1e908`；`lsp-stdio/src` `37b51c90c5` → `f2f07d4307`；`api/workspace-files/src` `55865100c9` → `e40b8ba9d2`；`experimental/auto-review/src` `2c4de92078` → `9178184679`；`client/ui-open-in-app/src/client` `3bed6f40cc` → `6b4a90b59d`；`client/ui-sidebar-files/src/client` `6cad50b5fd` → `0c199c941e`；`core/tools/src` `85fdc7658b` → `8781609698`；`core/agent/src` `e12358b3c4` → `e55453c525`；`core/system-prompt/src` `14fa82dab6` → `4b602ea0ce`；`interaction/commands/src` `b40e286329` → `5dd8df0ee3`；`interaction/permission-presets/src` `d6fe7f3b77` → `aaf300c7eb`；`llm/src` `13c5296093` → `8938288930`；`settings/src` `2c80a6f1cf` → `b636e51c17`；`api/session-controller/src` `28180f405a` → `8397c7d16a`；`session-query/src` `8553e7b8ae` → `03ed1a3dd4`；`typert/protocol/src` `a065d07fe1` → `6a6522dc21`；`client/connection/src` `a3c95ded8e` → `9de9ca7e3d`。
 
-未变：`fs/src` `a2ead247d1`、`fs-sandbox/src` `178f100356`、`sandbox-local/src` `df462d3e5e`、`sandbox-windows-acl/src` `ceee0b85f1`、`session/session-projection/src` `7935938ee8`、`storage-domain/src` `3f84d317ea`、`subprocess/src`、`agent-instructions/src`。
+未变：`fs/src` `a2ead247d1`、`fs-sandbox/src` `178f100356`、`sandbox-local/src` `df462d3e5e`、`sandbox-windows-acl/src` `ceee0b85f1`、`session/session-projection/src` `7935938ee8`、`storage-domain/src` `3f84d317ea`、`subprocess/src`、`agent-instructions/src`，以及四个可选 SSH 包——`ssh/ssh/src` `ea33ac94f9`、`ssh/fs-ssh/src` `f9a7c29ec0`、`ssh/sandbox-ssh/src` `ca2401aace`、`ssh/subprocess-ssh/src` `495a4c6e65`，`rc.5` 与 `alpha.2` 指向同一树。
 
 ## 环境要求变化
 
@@ -55,7 +55,8 @@
 3. Auto Review 联合合同：`AUTO_REVIEW_CURRENT_RELEASES` 加两个 alpha（13 个联合发布），编译 pin 前移到 `0.2.3-alpha.2`，新增 `src/compat/cordis-root.ts` 与差分门禁第 9 项；
 4. `pnpm-workspace.yaml`：release-age 条目整体重指；`libreoffice-kit` `0.1.3` → `0.2.3`、`cordis-plugin-*` `1.1.0` / `1.2.0` → `1.2.0-alpha.1` / `1.3.0-alpha.1`、`cosmokit` `1.9.0` → `1.10.0-alpha.1`、schemastery 排除范围追加 `3.20.0-alpha.1`，并新增 17 个新传递包；
 5. 安全适配：Session 原始目录成为所有 Registry/scope 身份来源（`src/compat/session-directory.ts` + `src/scope.ts` / `src/instructions.ts` / `src/review-context.ts` / `src/command.ts` / `src/workspace-files.ts` / `src/process-fence.ts`），并接受 `workspace-root/change`；
-6. 更新 README 支持矩阵、`AGENTS.md` 兼容契约段、兼容笔记双语 §25、ADR-0012 修订、ADR-0040 修订五、路线账本与本文；`CHANGELOG` 条目随实际发版的发布流程写入，本分支不创建版本号或 tag。
+7. SSH 地板随核心 pin 前移：`SUPPORTED_SSH_RELEASES` 追加 `0.2.3-alpha.1`/`0.2.3-alpha.2`（保持 `SUPPORTED_DSH_RELEASES` 后缀），四个 SSH 可选 peer 的 range 随 28 个精确发布全量更新，SSH 开发 pin 跟随核心 pin 到 `0.2.3-alpha.2`；SSH 能力仍只在 macOS/Linux 开放且默认关闭，包缺席或漂移只让 SSH 缺席。SSH 参考、用户指南与门禁计划的当前地板同步到两个 alpha。
+8. 更新 README 支持矩阵、`AGENTS.md` 兼容契约段、兼容笔记双语 §25、ADR-0012 修订、ADR-0040 修订五、路线账本与本文；`CHANGELOG` 条目随实际发版的发布流程写入，本分支不创建版本号或 tag。
 
 ## 安静陷阱（开发树）
 

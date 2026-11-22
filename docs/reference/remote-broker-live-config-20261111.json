@@ -1,0 +1,15 @@
+{
+  "socketPath": "$EVIDENCE_PATH_001",
+  "brokerUid": 996,
+  "credentialRoot": "$EVIDENCE_PATH_002",
+  "manifestPath": "$EVIDENCE_PATH_003",
+  "fullAccessDisabled": true,
+  "confinementProbe": {
+    "verified": true,
+    "evidence": "live probe 2026-11-10 initiator-host: dsh-test uid=1000 under bwrap --unshare-all (NoNewPrivs) — cred-root read EACCES; socket connect accepted then closed with 0 bytes (sandboxed peer refused); unconfined control received protocol-3 hello brokerUid=996 sshCapability eligible envs=4; unit dsh-ssh-broker PrivateTmp=yes ProtectSystem=strict; broker code root-owned $EVIDENCE_PATH_004"
+  },
+  "primary": "$EVIDENCE_PATH_005",
+  "outsideSentinel": "$EVIDENCE_PATH_006",
+  "workspaceApp": "$EVIDENCE_PATH_007",
+  "workspaceLib": "$EVIDENCE_PATH_008"
+}

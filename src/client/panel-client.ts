@@ -61,7 +61,45 @@ export class PanelError extends Error {
  */
 export function errorKeyOf(code: string): Key {
   const candidate = `error.${code}`
-  return (candidate in zh ? candidate : 'error.fallback') as Key
+  if (candidate in zh) return candidate as Key
+  // A suffixed code (`ssh-capability-absent:<gate reason>`) localizes by its
+  // prefix; the suffix is host detail `errorHasDetail` keeps visible.
+  const colon = code.indexOf(':')
+  if (colon > 0) {
+    const prefixed = `error.${code.slice(0, colon)}`
+    if (prefixed in zh) return prefixed as Key
+  }
+  return 'error.fallback'
+}
+
+/**
+ * Whether the host's own message adds diagnosis the localized key omits.
+ * Transport and protocol failures carry their detail in the message text,
+ * and a code this build has no key for can say nothing else; a code with a
+ * translated key already says what it means, so the host prose stays off.
+ * @param code - the failure code.
+ * @returns whether to render `error.message` after the localized key.
+ */
+/** Codes whose host message names the actual cause the fixed copy cannot. */
+const DETAIL_CODES = new Set([
+  'access-key-reconcile-required',
+  // `verifiedAddTarget` alone throws it for three unrelated failures (no
+  // verifier, incomplete confinement, probe timeout) — the message splits them.
+  'endpoint-unverifiable',
+  // The message says which ssh -G/known_hosts check failed and names the alias.
+  'ssh-config-not-linked',
+  'host-identity-unverifiable',
+  'invalid-manifest',
+  'workspace-invalid',
+  // The SFTP picker surfaces the server's/transport's own reason (not found,
+  // permission denied, timeout); the fixed copy cannot name which one.
+  'remote-path-listing-failed',
+])
+
+export function errorHasDetail(code: string): boolean {
+  // A code with no exact key (transport, suffixed, or unknown) means the
+  // localized text cannot name the failure; the host message must show.
+  return code === 'unavailable' || code.startsWith('panel/') || DETAIL_CODES.has(code) || !(`error.${code}` in zh)
 }
 
 /** The panel's callable face, injected into its component. */

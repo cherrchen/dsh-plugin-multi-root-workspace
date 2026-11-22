@@ -34,6 +34,8 @@ import { nativeTreeRenderer } from '../compat/files-tree.ts'
 import { createPanelClient, type PanelClient } from './panel-client.ts'
 import { createWorktreeClient } from './worktree-client.ts'
 import { WorktreePrompt } from './WorktreePrompt.tsx'
+import { createRemotesClient, type RemotesClient } from './remotes-client.ts'
+import { createSshClient, createSshSettingsClient, type SshClient } from './ssh-client.ts'
 import { DICTIONARIES, NS } from './locales.ts'
 import { STYLES } from './styles.ts'
 import { HeroWorkspaceEntry } from './HeroWorkspaceEntry.tsx'
@@ -89,6 +91,7 @@ const NAVIGATOR_SLOT_ID = 'multi-root-navigator'
 
 /** The id of the `<style>` element carrying this plugin's sheet. */
 const STYLE_ELEMENT_ID = 'multi-root-workspace-styles'
+const STYLE_OWNERS = Symbol.for('@dsh-electron/multi-root-workspace/style-owners')
 
 /**
  * Phase P3 gate: the prompt renders as a read-only preview until the Registry
@@ -131,14 +134,22 @@ export function apply(ctx: ClientContext): void {
   // The panel's classes resolve against this sheet; removing it on unload keeps
   // a hot-unplugged plugin from leaving dead rules behind.
   ctx.effect(() => {
-    let element = document.getElementById(STYLE_ELEMENT_ID)
-    if (element === null) {
+    const token = Symbol('style-owner')
+    let element = document.getElementById(STYLE_ELEMENT_ID) as (HTMLStyleElement & { [STYLE_OWNERS]?: Set<symbol> }) | null
+    if (!(element instanceof HTMLStyleElement) || !(element?.[STYLE_OWNERS] instanceof Set)) {
+      element?.remove()
       element = document.createElement('style')
       element.id = STYLE_ELEMENT_ID
-      element.textContent = STYLES
+      element[STYLE_OWNERS] = new Set()
       document.head.append(element)
     }
-    return () => { element?.remove() }
+    const owners = element[STYLE_OWNERS]!
+    owners.add(token)
+    element.textContent = STYLES
+    return () => {
+      owners.delete(token)
+      if (owners.size === 0) element.remove()
+    }
   }, 'multi-root-workspace: styles')
 
   // Cordis binds `this.ctx` to the *caller's* fiber for the registry methods, so
@@ -146,10 +157,17 @@ export function apply(ctx: ClientContext): void {
   const connectionHandle = ctx.get('connection')
   const panel: PanelClient | undefined = connectionHandle === undefined ? undefined : createPanelClient(connectionHandle)
   const worktreeClient = connectionHandle === undefined ? undefined : createWorktreeClient(connectionHandle)
+  // The remote section speaks its own contract over the same channel; a host
+  // without the remote experiment answers with a code the section renders.
+  const remotes: RemotesClient | undefined = connectionHandle === undefined ? undefined : createRemotesClient(connectionHandle)
+  // Personal-custody management speaks its own contract over the same channel;
+  // a host in another mode answers `remote-personal-unavailable` and the area
+  // simply never mounts (the view's custodyMode gates it).
+  const ssh: SshClient | undefined = connectionHandle === undefined ? undefined : createSshClient(connectionHandle)
   // The footer's dialog owner and the workspace menu share exactly one
   // controller for this apply() lifetime: the menu asks the footer to open
   // its dialog, and the menu entry is disabled while no footer owner exists
-  // (ADR-0036). RootSwitcher deliberately keeps its own local dialog.
+  // (ADR-0038). RootSwitcher deliberately keeps its own local dialog.
   const dialogController = createWorkspaceFoldersDialogController()
   const pickDirectory = async (): Promise<string | null> => {
     // Read per call, as before: the picker belongs to the surface and may be
@@ -167,8 +185,19 @@ export function apply(ctx: ClientContext): void {
   // builds its own over the same binding, the preview navigator receives this
   // one. Sharing the helper is what keeps the two failure wordings identical.
   const describeSearchFailure = createSearchFailureDescriber(t)
+  // Share switch change notifications so an open Workspace panel refreshes.
+  const worktreeSettings = installSkillsSettingsCard(ctx, t, connectionHandle === undefined ? undefined : createSshSettingsClient(connectionHandle))
+  // One dependency bundle for the Workspace Folders dialog across all four
+  // entries (footer + the menu's shared owner, Files switcher/launcher, hero):
+  // the panel must render identical sections no matter which trigger opened
+  // it; each entry still supplies its own session identity and look.
+  const dialogDeps = {
+    panel, remotes, ssh, pickDirectory, subscribeSession, t, worktrees: worktreeClient,
+    worktreePromptEnabled: worktreeSettings.enabled,
+    subscribeRemoteSettings: worktreeSettings.subscribeRemote,
+    remoteEnabled: worktreeSettings.remoteEnabled,
+  }
   installSkillsClient(ctx, t, listener => subscribeCurrentSession(readService(ctx, 'sessions'), listener))
-  const worktreeSettings = installSkillsSettingsCard(ctx, t)
   // The worktree confirmation is a shell-level overlay: it must be able to
   // appear over any page, and it long-polls only while a live session exists.
   // The settings signal is what remounts a loop that stopped when the switch
@@ -234,13 +263,8 @@ export function apply(ctx: ClientContext): void {
   }, owner => {
     const wide = (owner as { readonly wide?: boolean } | undefined)?.wide
     return createElement(WorkspaceFoldersAction, {
-      panel,
-      pickDirectory,
+      ...dialogDeps,
       sessionId,
-      subscribeSession,
-      t,
-      worktrees: worktreeClient,
-      worktreePromptEnabled: worktreeSettings.enabled,
       dialogController,
       dialogOwner: true,
       ...(wide === undefined ? {} : { wide }),
@@ -269,12 +293,8 @@ export function apply(ctx: ClientContext): void {
       const composedSessionId = props.sessionId
       const readSession = useCallback(() => composedSessionId, [composedSessionId])
       return createElement(HeroWorkspaceEntry, {
-        panel,
-        pickDirectory,
+        ...dialogDeps,
         sessionId: readSession,
-        t,
-        worktrees: worktreeClient,
-        worktreePromptEnabled: worktreeSettings.enabled,
       })
     })
   })
@@ -314,8 +334,8 @@ export function apply(ctx: ClientContext): void {
     // never restarts because of it. `undefined` means the fork cannot mount.
     const filesTree = createFilesTreeSurface(props, filesTreeT, filesTreeSeats)
     return absolutePath === undefined
-      ? createElement(WorkspaceFoldersAction, { panel, pickDirectory, sessionId: paneSessionId, subscribeSession, t, worktrees: worktreeClient, worktreePromptEnabled: worktreeSettings.enabled, compact: true })
-      : createElement(RootSwitcher, { primaryPath: absolutePath, panel, pickDirectory, sessionId: paneSessionId, subscribeSession, t, worktrees: worktreeClient, worktreePromptEnabled: worktreeSettings.enabled, openInApp: openInApp?.adapter, filesTree, nativeTree: nativeTreeRenderer((props as { renderFactorySlot?: unknown }).renderFactorySlot) })
+      ? createElement(WorkspaceFoldersAction, { ...dialogDeps, sessionId: paneSessionId, compact: true })
+      : createElement(RootSwitcher, { ...dialogDeps, primaryPath: absolutePath, sessionId: paneSessionId, openInApp: openInApp?.adapter, filesTree, nativeTree: nativeTreeRenderer((props as { renderFactorySlot?: unknown }).renderFactorySlot) })
   }))
   // Optional: the document preview's navigator seat exists only on runtimes
   // whose `ui-sidebar-files` draws the Folder-toggle tree (0.2.2-alpha.3+);

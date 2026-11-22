@@ -1,0 +1,569 @@
+diff --git a/tests/review-20261121-host.spec.ts b/tests/review-20261121-host.spec.ts
+new file mode 100644
+index 0000000..66b57b6
+--- /dev/null
++++ b/tests/review-20261121-host.spec.ts
+@@ -0,0 +1,228 @@
++/**
++ * 2026-11-21 review repros (host side). Each case asserts the CURRENT
++ * behavior the review flagged — a green run is the reproduction, not a pass
++ * of the intended contract.
++ *
++ * R-A — an unrelated grant write terminates an in-flight `remote_bash` as
++ *   'revoked'. `RemoteControlPlane.revision` (src/remote/plane.ts:64) is ONE
++ *   counter per plane: `persistGrants` bumps it for ANY primary's grant
++ *   write (:163), `admit()` hands it to the operation identity (:271), and
++ *   `runRemoteCommand`'s `checkGrant` compares it against the revision
++ *   captured at launch (src/remote/exec.ts:225-232). Registering a
++ *   different remote root — under the same primary or a different one —
++ *   moves the revision and kills a running command whose own grant never
++ *   changed.
++ *
++ * R-B — "Add connection" with an existing environmentId silently replaces
++ *   that connection. `sshEnvironmentSave` filters by id and pushes the
++ *   draft (src/remote/personal-endpoints.ts:269-275) with no
++ *   create-vs-update distinction, and the Add wizard auto-slugs the id from
++ *   the display name without a uniqueness check — a fresh Add for "prod"
++ *   retargets every Workspace binding that already named "prod".
++ */
++import { chmodSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
++import { tmpdir } from 'node:os'
++import { join } from 'node:path'
++import { afterEach, beforeEach, describe, expect, it } from 'vitest'
++import type { Context } from '@deepseek-ai/cordis'
++import Sessions, { SessionId } from '@deepseek-ai/dsh-session'
++import Projections from '@deepseek-ai/dsh-session-projection'
++import Policy from '@deepseek-ai/dsh-sandbox-policy'
++import { runRemoteCommand, type RemoteExecutionBackend, type RemoteProcessHandle } from '../src/remote/exec.ts'
++import { handlePersonalEndpoint } from '../src/remote/personal-endpoints.ts'
++import type { ExecFile } from '../src/remote/personal/credentials.ts'
++import type { SshCall, SshStateView } from '../src/remote/personal-contract.ts'
++import { savePersonalConfig, type PersonalConfig } from '../src/remote/personal/config.ts'
++import type { MultiRootRegistry } from '../src/registry.ts'
++import { mountRegistryStack, type RegistryStack } from './support/registry-stack.ts'
++import { createFixtureWorkspace, type FixtureWorkspace } from './support/temp-workspace.ts'
++
++let fixture: FixtureWorkspace
++let stacks: RegistryStack[]
++beforeEach(() => { fixture = createFixtureWorkspace('review-20261121'); stacks = [] })
++afterEach(async () => { for (const stack of stacks.reverse()) await stack.dispose(); fixture.dispose() })
++
++const REF = { environmentId: 'build-01', rootId: 'app' }
++const OTHER_REF = { environmentId: 'build-01', rootId: 'data' }
++const DEPLOYMENT = { shell: ['/bin/sh', '-c'], env: { PATH: '/bin' }, maxTimeoutMs: 60_000, stdoutLimit: 64, stderrLimit: 64, terminateGraceMs: 10 } as const
++
++// Same shape as tests/remote-exec.spec.ts, plus a second binding under the
++// same primary (OTHER_REF) and a third under a second primary root — the
++// manifest authorizes them all; only `app` is ever registered.
++function manifestFile() {
++  const path = join(fixture.base, 'deploy.json')
++  writeFileSync(path, JSON.stringify({
++    schemaVersion: 1, configVersion: 'cfg-1',
++    environments: [{ environmentId: 'build-01', platform: 'linux', account: 'ci', hostKey: `SHA256:${'A'.repeat(43)}`, namespace: 'ns', transport: 'sftp', helper: null, connection: { host: 'vps' }, credentialIsolation: 'unattested' }],
++    bindings: [
++      { primary: fixture.workspace, environmentId: 'build-01', rootId: 'app', path: '/work/app', actions: ['read', 'write', 'exec'] },
++      { primary: fixture.workspace, environmentId: 'build-01', rootId: 'data', path: '/work/data', actions: ['read', 'write', 'exec'] },
++      { primary: fixture.outside, environmentId: 'build-01', rootId: 'app', path: '/work/app', actions: ['read', 'write', 'exec'] },
++    ],
++  }))
++  chmodSync(path, 0o600)
++  return path
++}
++
++class FakeHandle implements RemoteProcessHandle {
++  readonly started = Promise.resolve()
++  terminateCalls = 0
++  private readonly exit = Promise.withResolvers<{ exitCode: number | null; signal: string | null }>()
++  readonly exited = this.exit.promise
++  constructor(private readonly sink: { stdout(c: Uint8Array): void; stderr(c: Uint8Array): void }) {}
++  emit(chunk: string, err = false) { this.sink[err ? 'stderr' : 'stdout'](new TextEncoder().encode(chunk)) }
++  finish(exitCode = 0, signal: string | null = null) { this.exit.resolve({ exitCode, signal }) }
++  terminate() { this.terminateCalls++ }
++  async waitForExit() { return true }
++}
++
++function fakeBackend() {
++  const state = { generation: 'gen-1', handles: [] as FakeHandle[] }
++  const backend: RemoteExecutionBackend = {
++    deployment: DEPLOYMENT,
++    async confine(argv) { return { argv, enforcement: 'full' as const, generation: state.generation } },
++    currentGeneration: () => state.generation,
++    spawn(_argv, _options, sink) {
++      const handle = new FakeHandle(sink)
++      state.handles.push(handle)
++      return handle
++    },
++  }
++  return { backend, state }
++}
++
++async function mount() {
++  const stack = await mountRegistryStack(join(fixture.base, 'store'), {
++    remoteEnvironments: { enabled: true, manifestPath: manifestFile() },
++  }, {
++    allowUserOwnedRemoteManifestForTesting: true,
++    beforeGate: async ctx => {
++      await ctx.plugin(Projections)
++      await ctx.plugin(Sessions)
++      await ctx.plugin(Policy, { mode: 'workspace-write', workspaceRoot: fixture.workspace })
++    },
++  })
++  stacks.push(stack)
++  stack.registry.setRemoteEndpointVerifier({ verify: async (_e, b) => ({ platform: 'linux' as const, target: { kind: 'path' as const, value: b.path } }) })
++  await stack.registry.addRemote(fixture.workspace, REF)
++  return stack
++}
++
++let seq = 0
++const sessionOf = (stack: RegistryStack) =>
++  stack.ctx.sessions.create(SessionId(`review-${++seq}`), { meta: { cwd: fixture.workspace } })
++async function waitHandles(state: { handles: FakeHandle[] }, count = 1) {
++  for (let i = 0; i < 400 && state.handles.length < count; i++) await new Promise(resolve => setTimeout(resolve, 5))
++  if (state.handles.length < count) throw new Error(`expected ${count} spawned handle(s), got ${state.handles.length}`)
++}
++async function waitTerminate(handle: FakeHandle) {
++  // The grant check poll interval is 250ms; the kill lands shortly after it.
++  for (let i = 0; i < 600 && handle.terminateCalls === 0; i++) await new Promise(resolve => setTimeout(resolve, 5))
++}
++const run = (stack: RegistryStack, backend: RemoteExecutionBackend) =>
++  runRemoteCommand(stack.registry, () => backend, {
++    session: sessionOf(stack), environmentId: REF.environmentId, rootId: REF.rootId, command: 'sleep 60', timeoutMs: 30_000,
++  } as never, 'remote_bash', new AbortController().signal)
++
++describe.skipIf(process.platform === 'win32')('R-A: an unrelated grant write terminates an in-flight remote_bash', () => {
++  it('registering a second root under the SAME primary kills the running command as revoked', async () => {
++    const stack = await mount()
++    const { backend, state } = fakeBackend()
++    const pending = run(stack, backend)
++    await waitHandles(state)
++    // `data` shares the environment and the primary; the command's own grant
++    // for `app` is never touched — yet the revision bump ends it.
++    await stack.registry.addRemote(fixture.workspace, OTHER_REF)
++    await waitTerminate(state.handles[0]!)
++    expect(state.handles[0]!.terminateCalls).toBe(1)
++    state.handles[0]!.finish(0)
++    await expect(pending).resolves.toMatchObject({ status: 'scope-exited', exitCode: 0, termination: 'revoked' })
++    // The grant is still live: the next command on the same endpoint runs.
++    const again = run(stack, backend)
++    await waitHandles(state, 2)
++    state.handles[1]!.finish(0)
++    await expect(again).resolves.toMatchObject({ status: 'scope-exited', exitCode: 0 })
++  })
++
++  it('registering a root under a DIFFERENT primary kills the running command the same way', async () => {
++    const stack = await mount()
++    const { backend, state } = fakeBackend()
++    const pending = run(stack, backend)
++    await waitHandles(state)
++    // `fixture.outside` is a second primary root with its own manifest
++    // binding; the plane revision is not per-primary, so this write still
++    // moves the revision the running command pinned.
++    await stack.registry.addRemote(fixture.outside, REF)
++    await waitTerminate(state.handles[0]!)
++    expect(state.handles[0]!.terminateCalls).toBe(1)
++    state.handles[0]!.finish(0)
++    await expect(pending).resolves.toMatchObject({ status: 'scope-exited', exitCode: 0, termination: 'revoked' })
++  })
++})
++
++/** The personal-mode world of tests/remote-personal-ops.spec.ts: a tmp store plus a stub registry. */
++const dirs: string[] = []
++const tmp = (): string => { const dir = mkdtempSync(join(tmpdir(), 'mrfw-review-')); dirs.push(dir); return dir }
++afterEach(() => { for (const dir of dirs.splice(0)) rmSync(dir, { recursive: true, force: true }) })
++
++const world = () => {
++  const dir = tmp()
++  const personalPath = join(dir, 'remote-personal.json')
++  const credentialRoot = join(dir, 'cred')
++  const registry = {
++    remoteEnabled: true,
++    remoteMode: 'personal',
++    remotePersonalPath: personalPath,
++    remoteCredentialRoot: credentialRoot,
++    refreshRemotePersonal: async () => {},
++  } as unknown as MultiRootRegistry
++  return { registry, personalPath, credentialRoot }
++}
++
++describe.skipIf(process.platform === 'win32')('R-B: a fresh Add with an existing environmentId silently replaces that connection', () => {
++  it('re-saving "prod" against a new host succeeds and the Workspace binding follows it', async () => {
++    const { registry, personalPath } = world()
++    await savePersonalConfig(personalPath, { schemaVersion: 2, revision: 0, environments: [], bindings: [] } satisfies PersonalConfig, 0)
++    const fingerprint = `SHA256:${'B'.repeat(43)}`
++    const exec: ExecFile = async (file, args) => {
++      if (file === 'ssh-keyscan') return { stdout: `${args[args.length - 1]} ssh-ed25519 AAAAKEY\n`, stderr: '' }
++      if (file === 'ssh-keygen') return { stdout: `256 ${fingerprint} (ED25519)\n`, stderr: '' }
++      return { stdout: '', stderr: '' }
++    }
++    const call = async (payload: SshCall) =>
++      await handlePersonalEndpoint(undefined as never as Context, registry, '/w', payload, { exec }) as SshStateView
++    // The Add wizard's draft for "Production": the id is auto-slugged from the name.
++    const draft = (hostname: string) => ({
++      environmentId: 'prod', platform: 'linux' as const, displayName: 'Production',
++      endpoint: { hostname, port: 22, user: 'deploy' },
++      credential: { kind: 'managed' as const, credentialId: 'aabbccddeeff' },
++    })
++
++    // The original Add: scan host-a, save prod -> host-a.example.
++    const scanA = await handlePersonalEndpoint(undefined as never as Context, registry, '/w',
++      { endpoint: 'sshHostKeyScan', sessionId: 's', hostname: 'host-a.example', port: 22 }, { exec }) as { token: string }
++    const added = await call({ endpoint: 'sshEnvironmentSave', sessionId: 's', revision: 0,
++      environment: draft('host-a.example'), fingerprint, hostKeyToken: scanA.token })
++    expect(added.environments).toHaveLength(1)
++    expect(added.environments[0]!.endpoint.hostname).toBe('host-a.example')
++
++    // A Workspace Root binding names prod.
++    const bound = await call({ endpoint: 'sshBindingSave', sessionId: 's', revision: 1,
++      binding: { environmentId: 'prod', path: '/srv/app', actions: ['read'] } })
++    expect(bound.bindings).toMatchObject([{ environmentId: 'prod', rootId: 'app', path: '/srv/app' }])
++
++    // A second Add wizard run for a DIFFERENT host auto-slugs the same id
++    // "prod" and saves exactly like a create: new scan token, no update flag.
++    const scanB = await handlePersonalEndpoint(undefined as never as Context, registry, '/w',
++      { endpoint: 'sshHostKeyScan', sessionId: 's', hostname: 'host-b.example', port: 22 }, { exec }) as { token: string }
++    const replaced = await call({ endpoint: 'sshEnvironmentSave', sessionId: 's', revision: 2,
++      environment: draft('host-b.example'), fingerprint, hostKeyToken: scanB.token })
++
++    // CURRENT behavior: the "create" overwrites in place — one environment
++    // named prod, now pointing at host-b, and the Workspace binding that
++    // referenced prod silently retargeted to the new host.
++    expect(replaced.environments).toHaveLength(1)
++    expect(replaced.environments[0]).toMatchObject({ environmentId: 'prod', endpoint: { hostname: 'host-b.example' } })
++    expect(replaced.bindings).toMatchObject([{ environmentId: 'prod', rootId: 'app', path: '/srv/app' }])
++  })
++})
+diff --git a/tests/review-20261121-client.spec.tsx b/tests/review-20261121-client.spec.tsx
+new file mode 100644
+index 0000000..2034436
+--- /dev/null
++++ b/tests/review-20261121-client.spec.tsx
+@@ -0,0 +1,329 @@
++// @vitest-environment jsdom
++/**
++ * 2026-11-21 review repros (client side). Same contract as the host file:
++ * each case pins the CURRENT behavior the review flagged — a green run is
++ * the reproduction, not a pass of the intended contract.
++ *
++ * R-C — `PanelErrorToast` statically imports `IconWarningOutlineRegular`
++ *   (src/client/error-toast.tsx:2). That export does not exist in
++ *   @deepseek-ai/dsh-client-ui-primitives 0.1.5-rc.2 or 0.1.6-alpha.2 — both
++ *   in SUPPORTED_DSH_RELEASES — so the bundled CJS client reads the name as
++ *   `undefined` and the first toast throws "Element type is invalid", taking
++ *   the panel down with it. The module mock below serves the usual stub
++ *   minus that one export: exactly the shape those runtimes give the bundle.
++ *   A positive control (the unmocked stub renders fine) is deliberately
++ *   absent: `vi.mock` is file-level, so a second case in this file could not
++ *   see the unmocked module without fighting the same mock.
++ *
++ * R-D — editing a saved connection cannot be saved without a fresh host-key
++ *   scan. The row's Edit button clears the recorded fingerprint
++ *   (src/client/ssh-panel.tsx:1404-1405) and `EnvironmentForm.canSave`
++ *   requires `fingerprint !== undefined` (:359-360), so a display-name-only
++ *   edit is unsaveable until `ssh.scan` runs — the Host's recorded-key
++ *   reuse path for identity-stable edits (`sameIdentity` in
++ *   src/remote/personal-endpoints.ts:206) is unreachable from the UI.
++ */
++import { createElement } from 'react'
++import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
++import { afterEach, describe, expect, it, vi } from 'vitest'
++import type { RootView, RootsView } from '../src/contract.ts'
++import type { RemotesView } from '../src/remote/panel-contract.ts'
++import type { RemoteModeControl } from '../src/compat/skills-client.ts'
++import { PanelError } from '../src/client/panel-client.ts'
++import { PanelErrorToast } from '../src/client/error-toast.tsx'
++import { WorkspaceFoldersDialog, type Translate } from '../src/client/WorkspaceFoldersAction.tsx'
++import type { SshBindingDraft, SshClient, SshEnvironmentView, SshStateView } from '../src/client/ssh-client.ts'
++
++vi.mock('@deepseek-ai/dsh-client-ui-primitives', async importOriginal => ({
++  ...(await importOriginal<Record<string, unknown>>()),
++  // The by-name probes in src/compat/client-icons.ts read every candidate
++  // export; under vi.mock an absent export throws instead of answering
++  // undefined, so the names the stub does not carry must exist as explicit
++  // undefineds — the same answer a real release's module namespace gives.
++  Checkbox: undefined,
++  SegmentedTabs: undefined,
++  IconWorkspaceTreeOutline16: undefined,
++  IconWorkspaceTreeOutlineRegular: undefined,
++  IconPlayOutline16: undefined,
++  IconPlayOutlineRegular: undefined,
++  IconDownloadOutline16: undefined,
++  IconDownloadOutlineRegular: undefined,
++  IconLinkOutline16: undefined,
++  IconLinkOutlineRegular: undefined,
++  IconShieldOutline16: undefined,
++  IconShieldOutlineRegular: undefined,
++  // The missing export on the older supported primitives releases.
++  IconWarningOutlineRegular: undefined,
++}))
++
++afterEach(cleanup)
++
++const t: Translate = key => key
++
++describe('R-C: PanelErrorToast without IconWarningOutlineRegular', () => {
++  it('review: rendering the first toast crashes with an invalid element type', () => {
++    // The throw IS the expectation; keep it out of the test output. jsdom
++    // reports the same error through a window 'error' event, which bypasses
++    // the console.error spy — both channels are silenced here.
++    const noise = vi.spyOn(console, 'error').mockImplementation(() => {})
++    const swallow = (event: ErrorEvent): void => { event.preventDefault() }
++    window.addEventListener('error', swallow)
++    try {
++      expect(() => render(createElement(PanelErrorToast, {
++        error: new PanelError('unavailable', 'boom'),
++        t,
++      }))).toThrow(/Element type is invalid/)
++    } finally {
++      window.removeEventListener('error', swallow)
++      noise.mockRestore()
++    }
++  })
++})
++
++const ROOT_A: RootView = {
++  ordinal: 1,
++  id: 'a',
++  path: '/repos/payments',
++  aliasId: 'payments',
++  addedAt: '2026-09-12T00:00:00.000Z',
++  state: 'available',
++  access: 'read-write',
++  alias: 'payments',
++}
++
++const ROOTS: RootsView = {
++  primaryRoot: '/repos/primary',
++  roots: [ROOT_A],
++  limit: 16,
++  count: 1,
++} as RootsView
++
++const ENV_A: SshEnvironmentView = {
++  environmentId: 'env-prod',
++  displayName: 'Production',
++  platform: 'linux',
++  endpoint: { hostname: 'prod.internal', port: 22, user: 'deploy' },
++  credential: { kind: 'managed', credentialId: 'aabbccddeeff' },
++  hostKey: 'SHA256:host-fingerprint',
++  helper: null,
++}
++
++function sshState(overrides: Partial<SshStateView> = {}): SshStateView {
++  return {
++    mode: 'personal',
++    enabled: true,
++    linked: true,
++    revision: 7,
++    environments: [ENV_A],
++    credentials: [{
++      id: 'aabbccddeeff',
++      label: 'deploy key',
++      kind: 'key',
++      publicKey: 'ssh-ed25519 AAAA test',
++      fingerprint: 'SHA256:cred-fingerprint',
++      createdAt: '2026-11-13T00:00:00.000Z',
++    }],
++    bindings: [],
++    ...overrides,
++  }
++}
++
++/** A recording `SshClient`; failures can be injected per method (copied from tests/client-ssh-panel.spec.tsx). */
++function fakeSsh(initial: SshStateView): SshClient & {
++  readonly calls: { method: string; args: unknown[] }[]
++  setState: (next: SshStateView) => void
++  fail: (method: string, error: PanelError) => void
++} {
++  let state = initial
++  const failures = new Map<string, PanelError>()
++  const calls: { method: string; args: unknown[] }[] = []
++  function record<T>(method: string, args: unknown[], answer: T): Promise<T> {
++    calls.push({ method, args })
++    const failure = failures.get(method)
++    if (failure !== undefined) return Promise.reject(failure)
++    return Promise.resolve(answer)
++  }
++  const fake = {
++    calls,
++    setState: (next: SshStateView) => { state = next },
++    fail: (method: string, error: PanelError) => { failures.set(method, error) },
++    state: async (sessionId: string) => await record('state', [sessionId], state),
++    aliases: async (sessionId: string) => await record('aliases', [sessionId], { aliases: ['prod.host', 'build.internal'] }),
++    listDirectories: async (sessionId: string, environmentId: string, path?: string) => {
++      const base = path === undefined || path === '' ? '/home/deploy' : path
++      return await record('listDirectories', [sessionId, environmentId, path], {
++        path: base,
++        parent: base === '/' ? '/' : base.slice(0, base.lastIndexOf('/')) || '/',
++        entries: [{ name: 'app', path: base === '/' ? '/app' : base + '/app' }],
++      })
++    },
++    credentialGenerate: async (sessionId: string, label: string) =>
++      await record('credentialGenerate', [sessionId, label], state),
++    credentialImport: async (sessionId: string, label: string, privateKey: string, passphrase?: string) =>
++      await record('credentialImport', [sessionId, label, privateKey, passphrase], state),
++    credentialPassword: async (sessionId: string, label: string, password: string) =>
++      await record('credentialPassword', [sessionId, label, password], state),
++    credentialRemove: async (sessionId: string, id: string) =>
++      await record('credentialRemove', [sessionId, id], state),
++    hostKeyScan: async (sessionId: string, target: { hostname?: string; port?: number; alias?: string }) =>
++      await record('hostKeyScan', [sessionId, target], {
++        token: 'scan-token-1',
++        keys: [{ type: 'ssh-ed25519', fingerprint: 'SHA256:scanned' }],
++        ...(target.alias !== undefined
++          ? { endpoint: { hostname: 'resolved.internal', port: 22, user: 'root' } }
++          : {}),
++      }),
++    environmentSave: async (sessionId: string, revision: number, environment: unknown, fingerprint: string, hostKeyToken?: string) => {
++      const draft = environment as Omit<SshEnvironmentView, 'hostKey' | 'helper'>
++      const previous = state.environments.find(existing => existing.environmentId === draft.environmentId)
++      const sameTarget = previous !== undefined
++        && previous.endpoint.hostname === draft.endpoint.hostname
++        && previous.endpoint.port === draft.endpoint.port
++        && previous.endpoint.user === draft.endpoint.user
++        && previous.credential.kind === draft.credential.kind
++      const next: SshStateView = {
++        ...state,
++        revision: revision + 1,
++        environments: [...state.environments.filter(existing => existing.environmentId !== draft.environmentId),
++          { ...draft, hostKey: fingerprint, helper: sameTarget ? previous.helper : null }],
++      }
++      const answer = await record('environmentSave', [sessionId, revision, environment, fingerprint, hostKeyToken], next)
++      state = next
++      return answer
++    },
++    environmentRemove: async (sessionId: string, revision: number, environmentId: string) => {
++      const next: SshStateView = { ...state, revision: revision + 1, environments: state.environments.filter(env => env.environmentId !== environmentId) }
++      const answer = await record('environmentRemove', [sessionId, revision, environmentId], next)
++      state = next
++      return answer
++    },
++    environmentTest: async (sessionId: string, environmentId: string) =>
++      await record('environmentTest', [sessionId, environmentId], { platform: 'linux', nodePath: '/usr/bin/node', nodeVersion: 'v22.0.0' }),
++    helperInstall: async (sessionId: string, revision: number, environmentId: string, nodePath?: string) => {
++      const helper = { nodePath: nodePath ?? '/usr/bin/node', helperPath: '/opt/dsh/helper.js', sha256: 'a'.repeat(64), protocol: 1 }
++      const next: SshStateView = {
++        ...state,
++        revision: revision + 1,
++        environments: state.environments.map(env => env.environmentId === environmentId ? { ...env, helper } : env),
++      }
++      const answer = await record('helperInstall', [sessionId, revision, environmentId, nodePath], next)
++      state = next
++      return answer
++    },
++    accessKeyInstall: async (sessionId: string, revision: number, environmentId: string) =>
++      await record('accessKeyInstall', [sessionId, revision, environmentId], state),
++    bindingSave: async (sessionId: string, revision: number, binding: SshBindingDraft) => {
++      const rootId = binding.rootId ?? binding.path.slice(binding.path.lastIndexOf('/') + 1)
++      const next: SshStateView = {
++        ...state,
++        revision: revision + 1,
++        bindings: [...state.bindings.filter(entry => entry.environmentId !== binding.environmentId || entry.rootId !== rootId), { ...binding, rootId }],
++      }
++      const answer = await record('bindingSave', [sessionId, revision, binding], next)
++      state = next
++      return answer
++    },
++    bindingRemove: async (sessionId: string, revision: number, environmentId: string, rootId: string) => {
++      const next: SshStateView = { ...state, revision: revision + 1, bindings: state.bindings.filter(binding => !(binding.environmentId === environmentId && binding.rootId === rootId)) }
++      const answer = await record('bindingRemove', [sessionId, revision, environmentId, rootId], next)
++      state = next
++      return answer
++    },
++    configLink: async (sessionId: string) => {
++      const next: SshStateView = { ...state, linked: true }
++      const answer = await record('configLink', [sessionId], next)
++      state = next
++      return answer
++    },
++  }
++  return fake as SshClient & typeof fake
++}
++
++function renderDialog(options: {
++  ssh?: SshClient
++  custodyMode?: 'personal' | 'team' | 'hardened'
++  state?: RemotesView['status']['state']
++  status?: RemotesView['status']
++  endpoints?: RemotesView['endpoints']
++  remoteMode?: RemoteModeControl
++  t?: Translate
++  onClose?: () => void
++} = {}): void {
++  const remotesView: RemotesView = {
++    primaryRoot: '/repos/primary',
++    mode: 'workspace-write',
++    status: options.status ?? { state: options.state ?? 'ready' },
++    custodyMode: options.custodyMode ?? 'personal',
++    endpoints: options.endpoints ?? [],
++  } as RemotesView
++  const panel = { call: async () => ROOTS }
++  const remotes = {
++    list: async () => remotesView,
++    add: async () => remotesView,
++    remove: async () => remotesView,
++  }
++  render(createElement(WorkspaceFoldersDialog, {
++    panel: panel as never,
++    remotes: remotes as never,
++    ssh: options.ssh,
++    remoteMode: options.remoteMode,
++    pickDirectory: undefined,
++    sessionId: () => 'session-1',
++    t: options.t ?? t,
++    onClose: options.onClose ?? (() => {}),
++  }))
++}
++
++function withDialog(options: Parameters<typeof renderDialog>[0], via: 'add' | 'manage'): Promise<HTMLElement> {
++  renderDialog(options)
++  return (async () => {
++    const entry = await screen.findByRole('button', { name: 'panel.remoteManage' })
++    await waitFor(() => { expect((entry as HTMLButtonElement).disabled).toBe(false) })
++    fireEvent.click(entry)
++    const dialog = await screen.findByRole('dialog', { name: 'ssh.dialog.title' })
++    if (via === 'manage') return dialog
++    fireEvent.click(await within(dialog).findByRole('button', { name: 'ssh.tab.add' }))
++    return await screen.findByRole('dialog', { name: 'ssh.tab.add' })
++  })()
++}
++
++async function callsOf(ssh: { calls: { method: string; args: unknown[] }[] }, method: string): Promise<unknown[][]> {
++  try {
++    await waitFor(() => expect(ssh.calls.some(call => call.method === method)).toBe(true))
++  } catch {
++    throw new Error(`callsOf(${method}) timed out; recorded: ${JSON.stringify(ssh.calls.map(call => call.method))}`)
++  }
++  return ssh.calls.filter(call => call.method === method).map(call => call.args)
++}
++
++describe('R-D: editing a saved connection cannot be saved without a fresh scan', () => {
++  it('review: a display-name-only edit keeps Save disabled until hostKeyScan runs', async () => {
++    const ssh = fakeSsh(sshState())
++    const dialog = await withDialog({ ssh }, 'manage')
++    await within(dialog).findByText('ssh.environments')
++    fireEvent.click(within(dialog).getByRole('button', { name: 'ssh.envEdit' }))
++    const editor = dialog.querySelector('.mrfw-sshEdit') as HTMLElement
++    const save = () => within(editor).getByRole('button', { name: 'ssh.envSave' }) as HTMLButtonElement
++
++    // Edit drops the recorded fingerprint: the untouched draft cannot save.
++    expect(save().disabled).toBe(true)
++    fireEvent.change(within(editor).getByLabelText('ssh.field.displayName'), { target: { value: 'Renamed production' } })
++    expect(save().disabled).toBe(true)
++    fireEvent.click(save())
++    expect(ssh.calls.some(call => call.method === 'environmentSave')).toBe(false)
++
++    // The only way the UI enables Save is a fresh scan of the SAME host —
++    // the recorded host key can never be offered back to the user.
++    fireEvent.click(within(editor).getByRole('button', { name: 'ssh.scan' }))
++    await within(editor).findByRole('radio', { name: /SHA256:scanned/ })
++    expect(ssh.calls.filter(call => call.method === 'hostKeyScan').map(call => call.args))
++      .toEqual([['session-1', { port: 22, hostname: 'prod.internal' }]])
++    expect(save().disabled).toBe(false)
++    fireEvent.click(save())
++    const saves = await callsOf(ssh, 'environmentSave')
++    expect(saves).toHaveLength(1)
++    expect((saves[0]![2] as { displayName?: string }).displayName).toBe('Renamed production')
++    expect(saves[0]![3]).toBe('SHA256:scanned')
++    expect(saves[0]![4]).toBe('scan-token-1')
++  })
++})

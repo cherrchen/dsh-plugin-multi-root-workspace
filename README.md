@@ -19,15 +19,16 @@
 
 并非所有项目都是 monorepo。一个开发项目往往由多个独立 Git 仓库组成，跨仓库干活原本得反复换会话。同类工具早已支持在一个工作区添加多个文件夹，本插件把同样的能力带给 DSH：把其他仓库登记为附加根，并按需设为只读、读写或跟随会话当前的权限，Agent 即可在授权范围内读写。
 
-- **不新增工具**：Agent 照旧使用原生 `read` / `write` / `edit` / `bash`，只是多了几个可访问的目录。
+- **沿用原生工具**：在本地工作区，Agent 照旧使用原生 `read` / `write` / `edit` / `bash`，只是多了几个可访问的目录。
 - **权限真正生效**：每个附加根可以设为只读、读写，或跟随当前会话的权限；限制由系统沙箱实际执行，而不是靠提示词提醒模型。Agent 的文件操作和 bash 命令适用同一套授权；由其他插件自行启动的进程不在这一保证内。
 - **在 Files 页签里浏览附加根**：Files 页签顶部可以在主根和任一附加根之间切换；附加根的目录树、打开文件、在外部应用打开、右键菜单、自动刷新和搜索都与主根一致，文件预览页的目录导航也会定位到文件所在的根。宿主版本较旧时，这些界面操作可能不可用，附加根仍按宿主原本的方式显示。
 - **附加根的 Skills**：自动发现附加根中的 `.dsh/skills` 和 `.agents/skills`，可用 `/别名:技能名` 调用；每个根可单独开关，默认开启。
 - **Auto Review（实验性，默认关闭）**：在插件管理器中手动开启后，自动审查也会看到附加根的目录结构、访问级别和指令文件，把附加根一并纳入审查。
 - **Worktree 建议（实验性，默认关闭）**：主根是 Git worktree 时，插件会提示把同一仓库的其他 worktree 添加为附加根；只有你确认后才会登记，不会自动增删。
+- **SSH 远端环境（实验性，默认关闭）**：在插件详情页开启个人 SSH 后，Agent 可对已登记的远端目录调用 `remote_copy` 和 `remote_bash`。连接和工作区目录绑定分别管理，每次调用经过 Registry 准入。
 - **不登记等于没装**：没有附加根时，行为和未安装插件完全一致；配置有误会直接报错，不会悄悄降级。
 
-当前发布版本 `v0.1.23`。各版本的用户可见变更见 [CHANGELOG](./CHANGELOG.md)；进度与发布状态见[路线图 §进度总账](./docs/plans/active/2026-09-12-multi-root-workspace.md#进度总账)。
+当前最新发布为 beta 预发布 `v0.1.24-beta.1`；npm 的 `latest` 标签仍指向稳定版 `v0.1.23`，安装 beta 请显式指定 `@beta`。各版本的用户可见变更见 [CHANGELOG](./CHANGELOG.md)；进度与发布状态见[路线图 §进度总账](./docs/plans/active/2026-09-12-multi-root-workspace.md#进度总账)。
 
 ## 快速开始
 
@@ -89,15 +90,19 @@ DSH 版本不在表内、或 `@deepseek-ai/dsh-*` 各包版本不一致时，插
 dsh plugin --profile web add @dsh-electron/dsh-plugin-multi-root-workspace
 ```
 
-安装的是预构建产物。
+当前 `latest` 是稳定版 `v0.1.23`；安装 beta 预发布（本次为 `v0.1.24-beta.1`）时显式指定 `@beta`：
+
+```sh
+dsh plugin --profile web add @dsh-electron/dsh-plugin-multi-root-workspace@beta
+```
 
 #### 从 tarball 安装
 
 ```sh
 pnpm pack @dsh-electron/dsh-plugin-multi-root-workspace
 # 或从 GitHub Release 资产下载，例如：
-# https://github.com/cherrchen/dsh-plugin-multi-root-workspace/releases/download/v0.1.23/dsh-electron-dsh-plugin-multi-root-workspace-0.1.23.tgz
-dsh plugin --profile web add ./dsh-electron-dsh-plugin-multi-root-workspace-0.1.23.tgz
+# https://github.com/cherrchen/dsh-plugin-multi-root-workspace/releases/download/v0.1.24-beta.1/dsh-electron-dsh-plugin-multi-root-workspace-0.1.24-beta.1.tgz
+dsh plugin --profile web add ./dsh-electron-dsh-plugin-multi-root-workspace-0.1.24-beta.1.tgz
 ```
 
 同样是预构建产物，适合内网或离线环境交付。
@@ -117,10 +122,10 @@ allowBuilds:
   '@dsh-electron/dsh-plugin-multi-root-workspace@github:cherrchen/dsh-plugin-multi-root-workspace#<commit>': true
 ```
 
-建议锁定版本（如 `#v0.1.23`），让后续推送无法悄悄改变实际运行的内容：
+建议锁定版本（如 `#v0.1.24-beta.1`），让后续推送无法悄悄改变实际运行的内容：
 
 ```sh
-dsh plugin --profile web add github:cherrchen/dsh-plugin-multi-root-workspace#v0.1.23
+dsh plugin --profile web add github:cherrchen/dsh-plugin-multi-root-workspace#v0.1.24-beta.1
 ```
 
 #### 从本地源码安装
@@ -214,12 +219,12 @@ DeepSeek Harness Desktop 可以在应用菜单的「管理 dsh 命令…」中�
 1. 完全退出 Desktop，包括托盘图标。
 2. 新装：
    ```sh
-   dsh plugin --profile desktop add @dsh-electron/dsh-plugin-multi-root-workspace@0.1.23
+   dsh plugin --profile desktop add @dsh-electron/dsh-plugin-multi-root-workspace@0.1.24-beta.1
    ```
 3. 已安装但缺少 bundle 登记：先 `remove` 再 `add`（只重跑 `add` 不会补登记）：
    ```sh
    dsh plugin --profile desktop remove @dsh-electron/dsh-plugin-multi-root-workspace
-   dsh plugin --profile desktop add @dsh-electron/dsh-plugin-multi-root-workspace@0.1.23
+   dsh plugin --profile desktop add @dsh-electron/dsh-plugin-multi-root-workspace@0.1.24-beta.1
    ```
 4. 打开 `$DSH_HOME/profiles/desktop/package.json`（未设置 `DSH_HOME` 时通常是 `~/.dsh/profiles/desktop/package.json`），确认 `dsh.profile.bundles` 包含本包。
 5. 重新打开 Desktop（冷启动）。
@@ -285,6 +290,14 @@ worktree 被删除或移动后，对话框显示徽标，但**永不自动清理
 ### Auto Review 适配（实验性，默认关闭）
 
 需要多根审查上下文时，在侧栏「插件」页的 Multi-root Workspace 详情页中，于组件列表里启用默认关闭的 Auto Review 行；同一设置卡中的「多根 Auto Review（实验性）」开关与之等价，默认关闭。普通安装不会自动启用或选择 Auto Review；该集成只随提供它的 DSH 精确发布生效。
+
+### SSH 远端环境（实验性，默认关闭）
+
+Issue #32 目前仅开放个人 SSH。插件详情设置卡里的 **SSH 远端环境** 默认关闭，开启时需要确认风险。本机 DSH Host 持有 SSH 凭据，同一操作系统账号下的进程可能访问它们。通过「SSH 远端 → 管理」或「工作区目录 → 管理 SSH 远端」打开连接管理。
+
+**个人模式**。先打开「管理 SSH 远端」→「添加连接」，填写主机和凭据，确认主机密钥后保存。第二步可检测 Node、安装 Helper，勾选「允许命令执行」后点「完成」保存。回到 Workspace Folders，打开「管理远端 Root 绑定」，选一个已有连接，选择远端目录并设置权限，再从「远端工作目录」中该行的「…」菜单登记。同一个连接可以绑定多个目录。
+
+启用后，模型工具仍须通过 SSH 兼容门禁，并对当前工作区已登记的目录逐次进行 Registry 准入。关闭开关会卸载远端工具并关闭远端控制面。完整步骤见 [SSH 远端环境用户指南](./docs/guide/user/ssh-remote-environments.md)。
 
 ### 界面入口
 

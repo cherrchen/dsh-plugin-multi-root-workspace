@@ -1,0 +1,77 @@
+{
+  "capturedAt": "2026-11-11T13:10:00Z",
+  "host": "initiator-host (203.0.113.87)",
+  "home": "$EVIDENCE_PATH_060",
+  "profilesDirectory": "$EVIDENCE_PATH_061",
+  "command": "runuser -u dsh-test -- env DSH_HOME=$EVIDENCE_PATH_060 PRIMARY=$EVIDENCE_PATH_005 DSH_CLI=$EVIDENCE_PATH_009 $EVIDENCE_PATH_043 $EVIDENCE_PATH_062 <profile>",
+  "profiles": [
+    {
+      "profile": "remote-exp",
+      "defaultMode": "workspace-write",
+      "presetNames": [
+        "read-only",
+        "workspace-write"
+      ],
+      "presets": {
+        "read-only": {
+          "sandbox": "read-only",
+          "approval": "ask"
+        },
+        "workspace-write": {
+          "sandbox": "workspace-write",
+          "approval": "ask"
+        }
+      },
+      "hasFullAccessPreset": false,
+      "forgedMode": {
+        "refused": "remote-profile-full-access: this profile never resolves danger-full-access"
+      },
+      "remoteTools": {
+        "copy": true,
+        "bash": true
+      },
+      "remoteStatus": {
+        "state": "ready"
+      },
+      "registryAuthority": {
+        "kind": "active"
+      }
+    },
+    {
+      "profile": "stock-exp",
+      "defaultMode": "workspace-write",
+      "presetNames": [
+        "read-only",
+        "workspace-write"
+      ],
+      "presets": {
+        "read-only": {
+          "sandbox": "read-only",
+          "approval": "ask"
+        },
+        "workspace-write": {
+          "sandbox": "workspace-write",
+          "approval": "ask"
+        }
+      },
+      "hasFullAccessPreset": false,
+      "forgedMode": {
+        "refused": "remote-profile-full-access: this profile never resolves danger-full-access"
+      },
+      "remoteTools": {
+        "copy": true,
+        "bash": true
+      },
+      "remoteStatus": {
+        "state": "ready"
+      },
+      "registryAuthority": {
+        "kind": "active"
+      }
+    }
+  ],
+  "otherProfileDirectories": [],
+  "activeHostProcesses": "only dsh-ssh-broker.service and the root fault-watcher were running; no Agent Host process was mounted",
+  "note": "The earlier entry-isolation evidence recorded stock-exp as the unpatched hazard control and then as the restricted control. The current profile patch on stock-exp is restricted; this runtime audit re-checks the effective preset table and forged-mode resolution. The deployment condition is satisfied for these two profiles; the maintainer sign-off must still confirm that no new unrestricted profile or Agent entry is added.",
+  "script": "remote-profile-audit-20261111.mjs"
+}

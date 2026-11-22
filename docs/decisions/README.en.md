@@ -49,7 +49,7 @@ ADR-0001-short-title.md
 ADR-0002-short-title.md
 ```
 
-Numbers increment; titles use lowercase kebab-case. ADR-0030–0034 are reserved for the `feat/ssh-workspace` branch; that branch also carries historical `ADR-0040-credential-broker` / `ADR-0041-ssh-custody-modes` numbers whose purposes differ from mainline 0040/0041, so they are no basis for mainline numbering. Mainline continues at 0035 after ADR-0029 — the gap is intentional, not missing entries; always scan every branch before adding an ADR: 0042 is additional-root row context menus, 0043 the preview navigator search, 0044 the sidebar footer alignment, and **0045** the Worktree cleanup UI (that proposal was originally numbered 0043 and was renumbered to 0045 on rebase to avoid the duplicate); new decisions on this line start at 0046.
+Numbers increment and titles use lowercase kebab-case. ADR-0030–0034 are reserved for Issue #32, so the main line resumes at ADR-0035. After merging main, the SSH credential broker and custody modes use ADR-0048 and ADR-0049 (formerly 0040 and 0041 on this branch). Scan all branches for available numbers before adding an ADR.
 
 - [ADR-0021-auto-review-context-companion.md](./ADR-0021-auto-review-context-companion.md) — Optional Auto Review companion, shared tool permission preview, current constraints, native overlap, fail-closed checks and fork synchronization (Accepted).
 
@@ -91,3 +91,14 @@ Numbers increment; titles use lowercase kebab-case. ADR-0030–0034 are reserved
 - [ADR-0046-files-header-rootswitch-shrink-priority.md](./ADR-0046-files-header-rootswitch-shrink-priority.md) (Chinese) — Shrink priority for the Files header's `RootSwitcher`: the shrink capability has to live on the `Menu` anchor wrapper that is the header row's outer flex item (`min-width: 0`); the fixed controls never move, the full path yields first through a zero flex basis, the root name ellipsizes next, and the trigger's own icons clip last. It replaces the ineffective "put `min-width: 0` on the inner button only" writing; `Menu.className` was checked against all 24 supported releases, so no version branch is needed (Accepted; implementation in the plan).
 
 - [ADR-0045-worktree-cleanup-panel-ui.md](./ADR-0045-worktree-cleanup-panel-ui.md) (Chinese) — Workspace Folders panel cleanup UX: the batch cleanup entry moves to the Additional roots section header, the confirmation becomes a primitives `Modal` layered over the panel, `cleanupEligible` rows keep only title/access/path plus a red delete and `...` (skills/reveal/re-register and inline status text removed; the path-reuse disclosure moves into the confirmation), and an empty manual discovery shows the official info Toast; supersedes ADR-0039's deletion badge presentation under §3.2 (cleanupEligible rows only), its §6.2 badge/subrow presentation and confirmation form, its path-reuse notice location, and its cleanup-overlay rejection (Proposed; external technical review passed on 2026-11-16 with no blockers; moving to Accepted is the maintainer's decision).
+
+## Issue #32 · Multi-environment workspace decisions
+
+- [ADR-0030](./ADR-0030-environment-and-root-identity.md) — Environment identity, root grants and ordered admission in one session (Accepted).
+- [ADR-0031](./ADR-0031-filesystem-routing.md) — One filesystem entry point and environment-aware consumers (Accepted).
+- [ADR-0032](./ADR-0032-upstream-ssh-backend.md) — Reusing the upstream SSH providers, with distribution and platform evidence (Accepted).
+- [ADR-0033](./ADR-0033-remote-command-and-sandbox.md) — Explicit remote commands, sandbox guarantees and cancellation (Accepted).
+- [ADR-0034](./ADR-0034-binary-transfer.md) — Authorization, publication and failure semantics for binary transfers (Accepted).
+- [ADR-0048](./ADR-0048-credential-broker.md) — A local credential broker holding SSH connections under a dedicated OS account, with kernel authentication and attestation conditions (Proposed).
+- [ADR-0049](./ADR-0049-ssh-custody-modes.md) — Three SSH credential custody tiers: personal (the upstream SSH stack in the Host process on the user's own credentials), team (broker custody with relaxed deployment evidence), hardened (the full ADR-0048 evidence path) (Accepted).
+- [ADR-0050](./ADR-0050-add-affordance-and-wizard-kit.md) (Chinese) — The workspace panel footer collapses to a single `+` button with two shapes driven by the remote-tools switch, a trust-confirmation dialog for local additions, and the `src/client/wizard/` design kit reserved for migrating the legacy SSH dialogs (Accepted).

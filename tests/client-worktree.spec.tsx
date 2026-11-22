@@ -1017,8 +1017,8 @@ describe('panel cleanup controls', () => {
     expect(batch.closest('.mrfw-sectionAction')).not.toBeNull()
     expect(batch.closest('.mrfw-actions')).toBeNull()
     // Nothing destructive is left in the footer.
+    expect(document.querySelector('.mrfw-actions')).not.toBeNull()
     expect(document.querySelector('.mrfw-actions .mrfw-btnDanger')).toBeNull()
-    expect(screen.getByRole('button', { name: 'panel.retry' })).toBeTruthy()
   })
 
   it('renders no batch action while no tracked root is cleanup-eligible', async () => {
@@ -1142,17 +1142,17 @@ describe('panel cleanup controls', () => {
     const dialog = cleanupDialog()
     fireEvent.click(within(dialog).getByText('worktree.cleanupDo'))
     await waitFor(() => {
-      expect(within(dialog).getByRole('alert').textContent).toBe('error.worktree/not-eligible')
+      expect(within(dialog).getByRole('status').textContent).toBe('error.worktree/not-eligible')
     })
     // Still open, row untouched, host prose not shown, panel body alert clean.
     expect(cleanupDialog()).toBeTruthy()
     expect(screen.getByText('/deleted/r1')).toBeTruthy()
     expect(within(dialog).queryByText(/host prose/)).toBeNull()
-    expect(screen.getAllByRole('alert')).toHaveLength(1)
+    expect(screen.getAllByRole('status')).toHaveLength(1)
     // Cancelling drops the local error together with the dialog.
     fireEvent.click(within(dialog).getByText('panel.aliasCancel'))
     expect(screen.queryByRole('dialog', { name: CLEANUP_TITLE })).toBeNull()
-    expect(screen.queryByRole('alert')).toBeNull()
+    expect(screen.queryByRole('status')).toBeNull()
     expect(screen.getByText('/deleted/r1')).toBeTruthy()
   })
 
@@ -1170,7 +1170,7 @@ describe('panel cleanup controls', () => {
     fireEvent.click(within(dialog).getByRole('button', { name: 'panel.close' }))
     expect(screen.queryByRole('dialog', { name: CLEANUP_TITLE })).toBeNull()
     await act(async () => { pending.reject(new PanelError('unavailable', 'socket closed')) })
-    const alert = await screen.findByRole('alert')
+    const alert = await screen.findByRole('status')
     expect(alert.textContent).toContain('error.unavailable')
     expect(alert.textContent).toContain('socket closed')
     expect(screen.queryByRole('dialog', { name: CLEANUP_TITLE })).toBeNull()
