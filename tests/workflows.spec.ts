@@ -6,6 +6,7 @@ import { join } from 'node:path'
 import { describe, expect, it } from 'vitest'
 import { SUPPORTED_DSH_RELEASES } from '../src/compat/dsh-version.ts'
 import { waitForMainCI } from '../scripts/verify-release-ci.mjs'
+import { distTagFor, isPrerelease } from '../scripts/release-channel.mjs'
 import { planMatrix, nodeForRelease } from '../scripts/ci/plan.mjs'
 import { artifactName, verifyResults } from '../scripts/ci/gate.mjs'
 import ubuntuOnly from '../scripts/ci/ubuntu-only.json' with { type: 'json' }
@@ -202,7 +203,37 @@ describe('release workflow gating', () => {
     expect(read('scripts/check-pack.mjs')).toContain('package/lib/windows-runner.js')
   })
 
+  it('publishes prereleases under their own dist-tag and marks them a GitHub prerelease', () => {
+    expect(distTagFor('0.1.24-beta.1')).toBe('beta')
+    expect(distTagFor('0.2.0-rc.2')).toBe('rc')
+    expect(distTagFor('0.1.23')).toBe('latest')
+    // A numeric prerelease identifier cannot be an npm dist-tag.
+    expect(distTagFor('1.0.0-0.2')).toBe('next')
+    expect(isPrerelease('0.1.24-beta.1')).toBe(true)
+    expect(isPrerelease('0.1.24')).toBe(false)
+    expect(() => distTagFor('not-a-version')).toThrow('Not a valid semver version')
+
+    const release = parse(read('.github/workflows/release.yml'))
+    const steps = release.jobs.publish.steps as Array<{
+      id?: string, name?: string, run?: string, env?: Record<string, string>
+    }>
+    const channel = steps.find(step => step.id === 'publish')
+    expect(channel?.run).toContain('node scripts/release-channel.mjs >> "$GITHUB_OUTPUT"')
+    const publish = steps.find(step => step.name === 'Publish to npm')
+    // Publishing without the derived tag would silently overwrite `latest`.
+    expect(publish?.run).toContain('pnpm publish --no-git-checks --provenance --tag "$NPM_DIST_TAG"')
+    expect(publish?.env?.NPM_DIST_TAG).toBe('${{ steps.publish.outputs.tag }}')
+    const githubRelease = steps.find(step => step.name === 'Create the GitHub release')
+    expect(githubRelease?.run).toContain('args+=(--prerelease --latest=false)')
+    expect(githubRelease?.env?.RELEASE_PRERELEASE).toBe('${{ steps.publish.outputs.prerelease }}')
+    // The channel is decided before anything is published or released.
+    expect(steps.indexOf(channel!)).toBeGreaterThan(-1)
+    expect(steps.indexOf(channel!)).toBeLessThan(steps.indexOf(publish!))
+    expect(steps.indexOf(channel!)).toBeLessThan(steps.indexOf(githubRelease!))
+  })
+
   it('restores the annotated tag object that checkout points at the commit', () => {
+
     const release = parse(read('.github/workflows/release.yml'))
     const resolve = release.jobs.verify.steps
       .find((step: { id?: string }) => step.id === 'tag') as { run: string }

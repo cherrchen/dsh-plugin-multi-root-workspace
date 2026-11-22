@@ -8,6 +8,26 @@ English: [CHANGELOG.en.md](./CHANGELOG.en.md)
 - 安装方式、受支持的上游运行时与已知限制见 [README](./README.md)。
 - 每个版本的实施证据、编号口径与发布状态见[路线图 §进度总账](./docs/plans/active/2026-09-12-multi-root-workspace.md#进度总账)；GitHub Release 的正文由 `scripts/release-notes.mjs` 从 commit 历史生成，是本文件之外的完整原始清单。
 
+## [0.1.24-beta.1] - 2026-11-22
+
+本版是 `0.1.24` 线的首个 beta 预发布：SSH 远端环境以实验性、默认关闭的个人模式进入发布包，另含 Workspace Folders 对话框附加根列表的滚动修复。没有不兼容变更；未配置附加根、未开启 SSH 时，行为与 `v0.1.23` 相同。
+
+### Added
+
+- **SSH 远端环境（实验性，默认关闭）**：Issue #32 的首个发布形态，只开放个人 SSH。插件详情设置卡中的开关（`multi-root-remote-tools.enabled`）默认关闭，首次开启需确认风险；关闭后卸载远端工具、以取消信号收束在飞操作并关闭远端控制面。连接与 Workspace Root 绑定分开管理：连接（主机、端口、账号、平台、主机指纹、凭据引用、Helper 与执行/传输能力上限）保存在插件级 `remoteEnvironments.personalPath`（默认 `$DSH_HOME/storages/multi_root_workspace.remote-personal.json`，schemaVersion 2），Workspace 绑定保存在同名 `.bindings.json`，同一 Workspace 可在同一连接上绑定多个互不重叠的远端目录。两份文件都要求当前 uid 的普通文件、非符号链接、权限至多 0600，父目录不得由 group/other 写，位置须在所有绑定的本地主根之外；每次 snapshot/list/admit/add/remove 前复核保护与内容，并发变更由内核租约 + CAS 串行化，多 Host 不丢记录。凭据根（默认 `$DSH_HOME/storages/multi_root_workspace.ssh`，0700）保存生成的密钥、导入的私钥、`secrets/`、托管的 `ssh_config` 与 `known_hosts`，任何端点都不返回私钥或密码字节。主机密钥经 `ssh-keyscan` 或本机 known_hosts 核对后以 60 秒令牌确认；托管连接在 `~/.ssh/config` 首行写入 `Include`（先备份、幂等；`~/.ssh/config` 是符号链接时写到解析目标、绝不替换链接），未链接时连接报 `ssh-config-not-linked`。Helper 安装按包内 `lib/*` 与安装后的文件集摘要校验，早于 `integrity: 2` 的 Helper 需重装；托管密码先经 0600 一次性口令文件与 `SSH_ASKPASS` 安装访问密钥，失败按目标回滚或返回 `access-key-reconcile-required`。本机 `~/.ssh/config` 的字面 `Host` 别名可直接选用，通配与否定项被跳过。
+- **`remote_copy`：三个方向的单文件传输**：本机 → 远端（SFTP staging）、远端 → 本机（目标父目录内 0600 独占 staging）、远端 → 远端（Host 中继，两端同时准入）。传输前绑定源 inode 并复核 realpath、普通文件、大小与 mtime，按分块读取；写入前累计校验 `maxBytes`，源在绑定后增长也以 `transfer-too-large` 拒绝，不会先把超限字节写到 staging；回读校验字节后以原子 no-replace hardlink 发布。应答丢失返回 `unknown` 与 reconcileId，绝不重试；清理只碰本次操作的 staging，且仅在同一会话代次仍存活时进行。`transfer.timeoutMs` 是涵盖准入、握手、读写、校验与发布的整次预算；每个复制端点独占一条 SFTP 通道，清理使用独立的一秒预算。
+- **`remote_bash`：两阶段准入的远端命令**：一次准入用于验证与 confine，第二次准入内才 spawn，撤权或后端代次变化不会漏到启动；从 spawn 返回 handle 起观察取消、超时与授权变化（owner 通知 + 每秒复核，单轮无结论 5.5 秒截止）。结果区分 `not-started` / `may-start` / `exited` / `scope-exited` / `unknown`，终止原因 `revoked | cancelled | timeout`；`terminateGraceMs` 内无法确认时返回 `unknown` 与 reconcileId，不无限等待、不重放。执行与传输独立授权，命令准备前拒绝重定向目录与越界 cwd。
+- **SSH 管理界面**：插件详情的「SSH 远端」经独立的 `/multi-root-workspace-ssh-settings` Connection 通道打开，连接与 SSH Key 分页管理，绑定仍走 `PANEL_CHANNEL` 由当前会话派生主根；「添加连接」是两步向导（连接 → 连接设置），Workspace Folders 新增「远端工作目录」与绑定向导，和主要/附属工作目录共用行形态，地址为可复制的 `ssh://user@host:port/path`。异步请求以原位转圈、`aria-busy`、延迟淡入的状态行与顶部进度条反馈，会改写配置的请求按 revision 串行。面板、插件详情页与预览的 8 份语言词典同步补齐 SSH 文案，键集、键序与占位符由 `tests/locale-parity.spec.ts` 钉住。
+- **SSH 兼容门禁**：`@deepseek-ai/dsh-ssh`、`dsh-fs-ssh`、`dsh-sandbox-ssh`、`dsh-subprocess-ssh` 作为可选 peer（peer range 与核心 allowlist 相同），运行时经 `src/compat/ssh-packages.ts` 从宿主锚点按需加载，绝不静态导入；`SUPPORTED_SSH_RELEASES`（`0.2.2-rc.1`–`0.2.2-rc.5`）必须是 26 个精确发布 allowlist 的后缀。SSH 包缺失、漂移或私有副本只让 SSH 能力缺席，不改变本地兼容判定；`pack:check` 拒绝静态 SSH 导入与打包后的 SSH broker 入口。
+
+### Changed
+
+- **新增集成默认不改变既有行为**：SSH 行随 bundle 挂载，但 `enabled: false` 时不注册远端工具、verifier、能力投影或 profile guard，Registry 的远端控制面保持 `disabled`；`team` / `hardened` / broker 档位按停用处理，发布包移除 broker 入口与安装脚本，相关设计与探针只留作研发记录。
+
+### Fixed
+
+- **Workspace Folders 对话框的附加根列表在根多、窗口矮或行换行时被裁掉**：对话框此前没有窗口相对的封顶，附加根区也不滚动——16 个根加数量上限提示、或窄宽下批量操作标题换行时，行被裁在区域里、添加控件被挤出可视区。现在对话框封顶 `min(80vh, 100%)`，附加根区先让高、行列表取剩余空间并在原位滚动，主根行、两个分区标题与添加行保持固定；列表最小高度取最高一行实测高度（`--mrfw-root-row-height`，空列表为 0，无法测量时回落 70px），保证至少一整行完整可见；视口过矮时由对话框 body 接管回退滚动，滚轮在列表末端交给 body，页脚与添加控件始终可达。正常高度下的对话框尺寸与滚动行为不变。
+
 ## [0.1.23] - 2026-11-19
 
 ### Added
@@ -351,7 +371,8 @@ English: [CHANGELOG.en.md](./CHANGELOG.en.md)
 
 - 发布前外部评审提出的 8 项发现（其中 3 项发布阻断）全部修复，每项各带一个回归测试：登记目录被替换为符号链接后授权转移（引入 `recordedPath`，**重新解析路径不等于重新授权**）、并发修改注册表丢写或复活已撤销的授权（每个主根的变更串行）、刷新不重新检查目录、手输路径被目录选择器覆盖、`reveal` 的应答契约与失败码、重复 id 未校验、主根未纳入嵌套校验、CI 先测后构建。
 
-[Unreleased]: https://github.com/cherrchen/dsh-plugin-multi-root-workspace/compare/v0.1.23...HEAD
+[Unreleased]: https://github.com/cherrchen/dsh-plugin-multi-root-workspace/compare/v0.1.24-beta.1...HEAD
+[0.1.24-beta.1]: https://github.com/cherrchen/dsh-plugin-multi-root-workspace/compare/v0.1.23...v0.1.24-beta.1
 [0.1.23]: https://github.com/cherrchen/dsh-plugin-multi-root-workspace/compare/v0.1.22...v0.1.23
 [0.1.22]: https://github.com/cherrchen/dsh-plugin-multi-root-workspace/compare/v0.1.21...v0.1.22
 [0.1.21]: https://github.com/cherrchen/dsh-plugin-multi-root-workspace/compare/v0.1.20...v0.1.21

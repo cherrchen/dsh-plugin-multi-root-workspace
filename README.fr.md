@@ -25,10 +25,10 @@ Tous les projets ne sont pas des monorepos. Un projet de développement se compo
 - **Skills des racines supplémentaires** : découverte automatique des `.dsh/skills` et `.agents/skills` dans les racines supplémentaires, appelables via `/alias:nom-du-skill` ; chaque racine dispose de son propre interrupteur, activé par défaut.
 - **Auto Review (expérimental, désactivé par défaut)** : une fois activé dans le gestionnaire de plugins, Auto Review voit aussi l'arborescence, les niveaux d'accès et les fichiers d'instructions des racines supplémentaires, et les intègre à sa revue.
 - **Suggestions Worktree (expérimental, désactivé par défaut)** : lorsque la racine principale est un Worktree Git, le plugin propose d'ajouter les autres Worktrees du même dépôt comme racines supplémentaires ; rien n'est enregistré avant votre confirmation, et rien n'est ajouté ni supprimé automatiquement.
-- **Environnements distants SSH (expérimental, désactivé par défaut, non publié)** — Activez le mode SSH personnel dans la fiche du plugin pour utiliser `remote_copy` et `remote_bash` sur les répertoires distants enregistrés. Les connexions et les liaisons aux espaces de travail se gèrent séparément, et le Registry autorise chaque appel.
+- **Environnements distants SSH (expérimental, désactivé par défaut)** — Activez le mode SSH personnel dans la fiche du plugin pour utiliser `remote_copy` et `remote_bash` sur les répertoires distants enregistrés. Les connexions et les liaisons aux espaces de travail se gèrent séparément, et le Registry autorise chaque appel.
 - **Sans enregistrement, comme non installé** : sans aucune racine supplémentaire, le comportement est identique à celui d'un plugin non installé ; une configuration erronée signale une erreur au lieu de dégrader silencieusement.
 
-Version publiée actuelle : `v0.1.23`. Les changements visibles par l'utilisateur de chaque version figurent dans le [CHANGELOG](./CHANGELOG.en.md) ; l'avancement et l'état des publications figurent dans le [grand livre de progression de la feuille de route](./docs/plans/active/2026-09-12-multi-root-workspace.md#进度总账).
+La dernière publication est la préversion bêta `v0.1.24-beta.1` ; l’étiquette `latest` de npm pointe toujours vers la version stable `v0.1.23`, donc installez la bêta en précisant `@beta`. Les changements visibles par l'utilisateur de chaque version figurent dans le [CHANGELOG](./CHANGELOG.en.md) ; l'avancement et l'état des publications figurent dans le [grand livre de progression de la feuille de route](./docs/plans/active/2026-09-12-multi-root-workspace.md#进度总账).
 
 ## Démarrage rapide
 
@@ -89,15 +89,19 @@ L'installation se fait de deux manières : en ligne de commande (CLI), ou via le
 dsh plugin --profile web add @dsh-electron/dsh-plugin-multi-root-workspace
 ```
 
-Il s'agit d'artefacts précompilés.
+Actuellement, `latest` correspond à la version stable `v0.1.23` ; pour installer la préversion bêta (`v0.1.24-beta.1` ici), indiquez `@beta` explicitement :
+
+```sh
+dsh plugin --profile web add @dsh-electron/dsh-plugin-multi-root-workspace@beta
+```
 
 #### Installer depuis un tarball
 
 ```sh
 pnpm pack @dsh-electron/dsh-plugin-multi-root-workspace
 # ou téléchargez le tgz depuis les assets de la GitHub Release, par exemple :
-# https://github.com/cherrchen/dsh-plugin-multi-root-workspace/releases/download/v0.1.23/dsh-electron-dsh-plugin-multi-root-workspace-0.1.23.tgz
-dsh plugin --profile web add ./dsh-electron-dsh-plugin-multi-root-workspace-0.1.23.tgz
+# https://github.com/cherrchen/dsh-plugin-multi-root-workspace/releases/download/v0.1.24-beta.1/dsh-electron-dsh-plugin-multi-root-workspace-0.1.24-beta.1.tgz
+dsh plugin --profile web add ./dsh-electron-dsh-plugin-multi-root-workspace-0.1.24-beta.1.tgz
 ```
 
 Là encore, des artefacts précompilés, adaptés à une livraison en réseau isolé ou hors ligne.
@@ -117,10 +121,10 @@ allowBuilds:
   '@dsh-electron/dsh-plugin-multi-root-workspace@github:cherrchen/dsh-plugin-multi-root-workspace#<commit>': true
 ```
 
-Il est recommandé d'épingler une version (par exemple `#v0.1.23`), afin qu'un push ultérieur ne puisse pas modifier silencieusement ce qui s'exécute réellement :
+Il est recommandé d'épingler une version (par exemple `#v0.1.24-beta.1`), afin qu'un push ultérieur ne puisse pas modifier silencieusement ce qui s'exécute réellement :
 
 ```sh
-dsh plugin --profile web add github:cherrchen/dsh-plugin-multi-root-workspace#v0.1.23
+dsh plugin --profile web add github:cherrchen/dsh-plugin-multi-root-workspace#v0.1.24-beta.1
 ```
 
 #### Installer depuis les sources locales
@@ -214,12 +218,12 @@ DeepSeek Harness Desktop peut installer une commande `dsh` globale depuis l'entr
 1. Quittez complètement Desktop, icône de la zone de notification comprise.
 2. Installation neuve :
    ```sh
-   dsh plugin --profile desktop add @dsh-electron/dsh-plugin-multi-root-workspace@0.1.23
+   dsh plugin --profile desktop add @dsh-electron/dsh-plugin-multi-root-workspace@0.1.24-beta.1
    ```
 3. Déjà installé mais entrée de bundle manquante : faites `remove`, puis `add` (relancer `add` seul ne complète pas l'enregistrement) :
    ```sh
    dsh plugin --profile desktop remove @dsh-electron/dsh-plugin-multi-root-workspace
-   dsh plugin --profile desktop add @dsh-electron/dsh-plugin-multi-root-workspace@0.1.23
+   dsh plugin --profile desktop add @dsh-electron/dsh-plugin-multi-root-workspace@0.1.24-beta.1
    ```
 4. Ouvrez `$DSH_HOME/profiles/desktop/package.json` (généralement `~/.dsh/profiles/desktop/package.json` lorsque `DSH_HOME` n'est pas défini) et vérifiez que `dsh.profile.bundles` contient ce paquet.
 5. Rouvrez Desktop (démarrage à froid).
@@ -286,7 +290,7 @@ Lorsqu'un Worktree est supprimé ou déplacé, la boîte de dialogue affiche un 
 
 Pour disposer d'un contexte de revue multi-racines, activez la ligne Auto Review, désactivée par défaut, dans la liste des composants de la page de détail de Multi-root Workspace, sur la page **Plugins** de la barre latérale ; l'interrupteur **Auto Review multi-racines (expérimental)** de la même carte de réglages est équivalent et également désactivé par défaut. Une installation ordinaire n'active ni ne sélectionne Auto Review ; l'intégration n'est disponible que sur les versions exactes de DSH qui la fournissent.
 
-### Environnements distants SSH (expérimental, désactivé par défaut, non publié)
+### Environnements distants SSH (expérimental, désactivé par défaut)
 
 Le ticket nº 32 ouvre pour l’instant le seul mode SSH personnel. Activez **Environnements distants SSH** dans les paramètres du plugin et confirmez l’avertissement. Le processus DSH local détient les identifiants SSH. D’autres processus du même compte système peuvent y accéder. Gérez les connexions depuis « SSH distant → Gérer » dans les paramètres ou « Gérer les hôtes SSH distants » dans les dossiers de l’espace de travail.
 
