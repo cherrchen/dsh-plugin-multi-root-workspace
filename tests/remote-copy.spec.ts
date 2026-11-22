@@ -685,12 +685,13 @@ describe('total transfer I/O deadline and cancellation', () => {
   it.skipIf(process.platform === 'win32').each(['realpath', 'write', 'read', 'fsync', 'hardlink', 'remove', 'close'] as const)('bounds a stalled %s without publishing again', async method => {
     fixture = createFixtureWorkspace('copy-deadline')
     writeFileSync(join(fixture.workspace, 'source.txt'), 'bounded')
-    const s = stack({ transfer: { maxBytes: 1024, timeoutMs: 40 } })
-    const entered = Promise.withResolvers<void>()
-    vi.spyOn(s.mem, method).mockImplementation(() => { entered.resolve(); return new Promise<never>(() => {}) })
-    const pending = run(s, localToRemote())
-    await entered.promise
-    const result = await pending
+    // Long enough for a loaded runner to reach the instrumented call; the
+    // transfer deadline — not the 30 s test timeout — must bound the stall.
+    const s = stack({ transfer: { maxBytes: 1024, timeoutMs: 1_000 } })
+    let entered = false
+    vi.spyOn(s.mem, method).mockImplementation(() => { entered = true; return new Promise<never>(() => {}) })
+    const result = await run(s, localToRemote())
+    expect(entered, `the transfer ended as ${result.code ?? result.status} before ${method} was invoked`).toBe(true)
     if (method === 'hardlink') expect(result).toMatchObject({ status: 'unknown', stage: 'publish', reconcileId: 'op-1' })
     else if (method === 'remove') expect(result).toMatchObject({ status: 'committed', staging: 'residual' })
     else expect(result.status).not.toBe('committed')

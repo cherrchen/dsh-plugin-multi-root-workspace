@@ -91,6 +91,8 @@ PR #73 首轮 CI [run 45011838211](https://github.com/cherrchen/dsh-plugin-multi
 
 **关于重跑**：单独重跑失败项可能因内核命名差异转绿，但会保留非确定性；因此选择修掉分类顺序后推送，触发整轮矩阵复验。`gate` 不单独处理，它只汇总 verify 结果。
 
+**复跑再次在同一车道失败（run 45018215618，`a5757c0`）**：这次是既有用例 `bounds a stalled fsync without publishing again` 报 `Error: Test timed out in 30000ms`。该用例用 40ms 的传输预算把某个 SFTP 调用替换为永不返回的 Promise，然后先 `await entered.promise` 再取结果；负载高的 runner 上 40ms 可能在插桩调用**之前**耗尽——`TransferIO.run` 在 `remaining <= 0` 时不执行 action 直接拒绝，于是 `entered` 永不落定，只能等 30s 测试超时。该用例自 `18504fe` 起如此，与本次改动无关。修复：预算提高到 1s（保证先到达调用），并改为先 `await` 传输结果、再断言被插桩方法确实被调用——预算提前耗尽会立即以明确信息失败而不是挂死；7 个方法用例逐一通过（约 1s/例）。
+
 ## 8. 风险
 
 - 新增错误码进入结果面：已有部署若把超预算增长当作 `source-changed` 处理，需要改为识别 `transfer-too-large`；两者都是 `failed`，都不发布目标。
