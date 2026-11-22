@@ -9,8 +9,8 @@ import { PendingBar, StatusLine } from './pending.tsx'
 import { sshLocation, sshTarget } from '../remote/ssh-location.ts'
 import { RemoteRootConfirm } from './remote-root-confirm.tsx'
 import { PanelError } from './panel-client.ts'
-import { ErrorToast, PanelErrorToast } from './error-toast.tsx'
-import type { CredentialPublicView, RemoteDirectoryListing, SshBindingView, SshClient, SshManagementClient, SshEnvironmentView, SshScanResult, SshStateView } from './ssh-client.ts'
+import { PanelErrorToast } from './error-toast.tsx'
+import type { CredentialPublicView, SshBindingView, SshClient, SshManagementClient, SshEnvironmentView, SshScanResult, SshStateView } from './ssh-client.ts'
 import {
   bindingDraftOf, blankBinding, editorIdentity, editorOf, environmentDraftOf, execHelperReady,
   newEnvironmentId, recordedFingerprint, remotePath, scanReady, scanTargetOf, sshPort, sshToken, togglePeer,
@@ -21,7 +21,8 @@ import {
 import { AddBindingWizard, type BindingSaveResult } from './wizard/add-binding.tsx'
 import type { RemotesClient } from './remotes-client.ts'
 import { AddConnectionWizard } from './wizard/add-connection.tsx'
-import { ChoiceCard, WizardActions, WizardField } from './wizard/kit.tsx'
+import { WizardPathBrowser } from './wizard/add-remote.tsx'
+import { ChoiceCard, WizardActions, WizardCheckbox, WizardField, WizardPicker } from './wizard/kit.tsx'
 import type { Key } from './locales.ts'
 import { localBindingPeers } from './remote-root-menu.tsx'
 import { WorkspaceRow } from './workspace-row.tsx'
@@ -595,96 +596,6 @@ export function CredentialsPanel(props: CredentialsPanelProps): ReactNode {
         onClose={() => setAddOpen(false)} onCreate={props.onCreate} />
     ) : null}
   </section>
-}
-
-interface RemotePathDialogProps {
-  readonly open: boolean
-  readonly initialPath: string
-  readonly environmentId: string
-  readonly ssh: SshClient | undefined
-  readonly sessionId: string | undefined
-  readonly t: Translate
-  readonly onClose: () => void
-  readonly onPick: (path: string) => void
-}
-
-/** Read-only SFTP directory picker; a failed listing never blocks a manual path. */
-function RemotePathDialog(props: RemotePathDialogProps): ReactNode {
-  const { t } = props
-  const [path, setPath] = useState(props.initialPath)
-  const [listing, setListing] = useState<RemoteDirectoryListing | undefined>(undefined)
-  const [loading, setLoading] = useState(false)
-  const [error, setError] = useState<string | undefined>(undefined)
-  const request = useRef(0)
-  const load = useCallback(async (target: string | undefined): Promise<void> => {
-    if (props.ssh === undefined || props.sessionId === undefined) {
-      setError('remote-personal-unavailable')
-      return
-    }
-    const id = ++request.current
-    setLoading(true)
-    setError(undefined)
-    try {
-      const answer = await props.ssh.listDirectories(props.sessionId, props.environmentId, target)
-      if (id !== request.current) return
-      setListing(answer)
-      setPath(answer.path)
-    } catch (cause: unknown) {
-      if (id !== request.current) return
-      setError(cause instanceof PanelError ? cause.message : cause instanceof Error ? cause.message : String(cause))
-    } finally {
-      if (id === request.current) setLoading(false)
-    }
-  }, [props.ssh, props.sessionId, props.environmentId])
-  useEffect(() => {
-    if (!props.open) return
-    request.current += 1
-    setListing(undefined)
-    setError(undefined)
-    setPath(props.initialPath)
-    void load(props.initialPath.trim() === '' ? undefined : props.initialPath.trim())
-    return () => { request.current += 1 }
-  }, [props.open, props.initialPath, load])
-  const pick = (): void => {
-    const chosen = path.trim() === '' ? listing?.path : path.trim()
-    if (chosen === undefined || chosen === '') return
-    props.onPick(chosen)
-    props.onClose()
-  }
-  const footer = <div className="mrfw-sshRowActions mrfw-sshDialogFooterActions">
-    <Button variant="ghost" onClick={props.onClose}>{t('ssh.cancel')}</Button>
-    <Button variant="primary" disabled={path.trim() === '' && listing === undefined} onClick={pick}>{t('ssh.pathPickerUse')}</Button>
-  </div>
-  return <Modal open={props.open} onClose={props.onClose} title={t('ssh.pathPickerTitle')}
-    description={t('ssh.pathPickerHint')} closeLabel={t('panel.close')} className="mrfw-sshPathDialog" footer={footer}>
-    <PendingBar active={loading} />
-    <div className="mrfw-sshArea">
-      <div className="mrfw-sshPathBar">
-        <Input className="mrfw-sshInput" aria-label={t('ssh.binding.path')} placeholder="/" value={path}
-          onChange={event => setPath(event.currentTarget.value)} />
-        <div className="mrfw-sshRowActions">
-          <Button variant="outline" size="sm" disabled={loading}
-            onClick={() => { void load(path.trim() === '' ? undefined : path.trim()) }}>{t('ssh.pathPickerGo')}</Button>
-          <Button variant="outline" size="sm" disabled={loading || listing === undefined}
-            onClick={() => { void load(listing?.parent) }}>{t('ssh.pathPickerParent')}</Button>
-        </div>
-      </div>
-      <ErrorToast error={error} format={message => t('ssh.pathPickerFailed', { message })} />
-      {loading ? <StatusLine state="ongoing">{t('ssh.pending.list')}</StatusLine> : null}
-      {listing === undefined ? null : listing.entries.length === 0 ? (
-        loading ? null : <p className="mrfw-note">{t('ssh.pathPickerEmpty')}</p>
-      ) : (
-        <div className="mrfw-sshDirList" aria-busy={loading ? 'true' : undefined}>
-          {listing.entries.map(entry => (
-            <button key={entry.path} type="button" className="mrfw-sshDirRow" onClick={() => { void load(entry.path) }}>
-              <span className="mrfw-sshDirName">{entry.name}</span>
-              <span className="mrfw-sshDirArrow" aria-hidden>›</span>
-            </button>
-          ))}
-        </div>
-      )}
-    </div>
-  </Modal>
 }
 
 /** What the dialog needs from the Workspace Folders panel. */
@@ -1352,37 +1263,44 @@ export function SshWorkspaceBindingsDialog(props: SshWorkspaceBindingsDialogProp
           expanded={addOpen} onClick={() => setAddOpen(true)} />
         {draft === undefined ? null : (
           <div className="mrfw-sshForm">
-            <Field label={t('ssh.binding.environment')}>
-              <SshPicker label={t('ssh.binding.environment')} value={draft.environmentId} disabled={busy || editing}
+            <WizardField label={t('ssh.binding.environment')}>
+              <WizardPicker label={t('ssh.binding.environment')} value={draft.environmentId} disabled={busy || editing}
                 items={view.environments.map(entry => ({ id: entry.environmentId, label: entry.displayName ?? entry.environmentId }))}
                 onChange={environmentId => setDraft(blankBinding(environmentId))} />
-            </Field>
-            <Field label={t('ssh.binding.path')} invalid={draft.path !== '' && !validPath}
-              hint={draft.path !== '' && !validPath ? t('error.workspace-invalid') : undefined}>
+            </WizardField>
+            <WizardField label={t('ssh.binding.path')} invalid={draft.path !== '' && !validPath}
+              hint={draft.path !== '' && !validPath ? t('error.workspace-invalid') : t('ssh.field.workspaceHint')}>
               <div className="mrfw-sshPathBar">
                 <Input className="mrfw-sshInput" aria-label={t('ssh.binding.path')} value={draft.path} disabled={busy}
                   onChange={event => setDraft({ ...draft, path: event.currentTarget.value })} />
-                <Button variant="outline" size="sm" disabled={busy || environment === undefined} onClick={() => setPathOpen(true)}>{t('ssh.add.pickPath')}</Button>
+                <Button variant="outline" size="sm" disabled={busy || environment === undefined} onClick={() => setPathOpen(true)}>{t('wizard.browse')}</Button>
               </div>
-            </Field>
-            <div className="mrfw-sshCheckRow" role="group" aria-label={t('ssh.binding.actions')}>
-              {(['read', 'write', 'exec'] as const).map(action => (
-                <SshCheckbox key={action} checked={draft[action]} disabled={busy || (action === 'exec' && !draft.exec && environment?.exec === undefined)}
-                  label={t(`remote.capability.${action}`)} onChange={next => setDraft({ ...draft, [action]: next })} />
-              ))}
-            </div>
-            <div className="mrfw-sshTransferRow" role="group" aria-label={t('ssh.binding.transfers')}>
-              {localPeers.map(peer => (
-                <div key={peer.id} className="mrfw-sshTransferPeer">
-                  <SshCheckbox checked={draft.imports.has(peer.id)} label={`${t('ssh.binding.import')} (${peer.label})`}
-                    disabled={busy || (environment?.transfer === undefined && !draft.imports.has(peer.id))}
-                    onChange={() => setDraft({ ...draft, imports: togglePeer(draft.imports, peer.id) })} />
-                  <SshCheckbox checked={draft.exports.has(peer.id)} label={`${t('ssh.binding.export')} (${peer.label})`}
-                    disabled={busy || (environment?.transfer === undefined && !draft.exports.has(peer.id))}
-                    onChange={() => setDraft({ ...draft, exports: togglePeer(draft.exports, peer.id) })} />
-                </div>
-              ))}
-            </div>
+            </WizardField>
+            <section className="mrfw-wizSection" aria-label={t('ssh.binding.actions')}>
+              <span className="mrfw-wizFieldLabel">{t('ssh.binding.actions')}</span>
+              <div className="mrfw-wizCheckRow">
+                {(['read', 'write', 'exec'] as const).map(action => (
+                  <WizardCheckbox key={action} checked={draft[action]}
+                    disabled={busy || (action === 'exec' && !draft.exec && environment?.exec === undefined)}
+                    label={t(`remote.capability.${action}`)} onChange={next => setDraft({ ...draft, [action]: next })} />
+                ))}
+              </div>
+            </section>
+            {localPeers.length === 0 ? null : (
+              <section className="mrfw-wizSection" aria-label={t('ssh.binding.transfers')}>
+                <span className="mrfw-wizFieldLabel">{t('ssh.binding.transfers')}</span>
+                {localPeers.map(peer => (
+                  <div key={peer.id} className="mrfw-wizCheckRow">
+                    <WizardCheckbox checked={draft.imports.has(peer.id)} label={`${t('ssh.binding.import')} (${peer.label})`}
+                      disabled={busy || (environment?.transfer === undefined && !draft.imports.has(peer.id))}
+                      onChange={() => setDraft({ ...draft, imports: togglePeer(draft.imports, peer.id) })} />
+                    <WizardCheckbox checked={draft.exports.has(peer.id)} label={`${t('ssh.binding.export')} (${peer.label})`}
+                      disabled={busy || (environment?.transfer === undefined && !draft.exports.has(peer.id))}
+                      onChange={() => setDraft({ ...draft, exports: togglePeer(draft.exports, peer.id) })} />
+                  </div>
+                ))}
+              </section>
+            )}
             {pending?.kind === 'save' ? <StatusLine state="ongoing">{t('ssh.pending.bindingSave')}</StatusLine> : null}
             <div className="mrfw-sshRowActions">
               <Button variant="primary" disabled={busy || environment === undefined || !validPath || !(draft.read || draft.write || draft.exec)}
@@ -1390,8 +1308,10 @@ export function SshWorkspaceBindingsDialog(props: SshWorkspaceBindingsDialogProp
                 onClick={() => { void save(draft).then(result => { if (result.state !== undefined) setDraft(undefined) }) }}>{t('ssh.binding.save')}</Button>
               <Button variant="ghost" disabled={busy} onClick={() => setDraft(undefined)}>{t('ssh.cancel')}</Button>
             </div>
-            <RemotePathDialog open={pathOpen} initialPath={draft.path} environmentId={draft.environmentId} ssh={ssh} sessionId={sessionId}
-              t={t} onClose={() => setPathOpen(false)} onPick={path => setDraft({ ...draft, path })} />
+            {environment === undefined ? null : (
+              <WizardPathBrowser open={pathOpen} initialPath={draft.path} environmentId={draft.environmentId} ssh={ssh} sessionId={sessionId}
+                t={t} onClose={() => setPathOpen(false)} onPick={path => setDraft({ ...draft, path })} />
+            )}
           </div>
         )}
       </>}

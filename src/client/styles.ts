@@ -2987,18 +2987,6 @@ button.mrfw-sshPickerTrigger {
   gap: 8px;
 }
 
-.mrfw-sshTransferRow {
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-}
-
-.mrfw-sshTransferPeer {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 6px 12px;
-}
-
 .mrfw-sshDanger:is(.mrfw-sshButton, .mrfw-iconBtn) {
   color: var(--dsw-alias-state-error-primary);
 }
@@ -3090,66 +3078,7 @@ button.mrfw-sshPickerTrigger {
   margin-inline-start: auto;
 }
 
-.mrfw-sshDirList {
-  display: flex;
-  flex-direction: column;
-  max-height: 280px;
-  overflow-y: auto;
-  border: 0.5px solid var(--dsw-alias-border-l2);
-  border-radius: 8px;
-}
-
-.mrfw-sshDirRow {
-  box-sizing: border-box;
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 8px;
-  width: 100%;
-  min-height: 36px;
-  padding: 0 10px;
-  border: 0;
-  border-bottom: 0.5px solid var(--dsw-alias-border-l2);
-  background: transparent;
-  color: var(--dsw-alias-label-primary);
-  font: inherit;
-  font-size: 13px;
-  line-height: 20px;
-  text-align: left;
-  cursor: pointer;
-}
-
-.mrfw-sshDirRow:last-child {
-  border-bottom-color: transparent;
-}
-
-.mrfw-sshDirRow:hover {
-  background: var(--dsw-alias-interactive-bg-hover);
-}
-
-.mrfw-sshDirRow:focus-visible {
-  outline: 2px solid var(--dsw-alias-brand-primary);
-  outline-offset: -2px;
-}
-
-.mrfw-sshDirName {
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.mrfw-sshDirArrow {
-  flex: none;
-  color: var(--dsw-alias-label-tertiary);
-}
-
-.mrfw-sshDialogFooterActions {
-  justify-content: flex-end;
-}
-
 /* Nested decisions are narrower than the management card. */
-.mrfw-sshPathDialog,
 .mrfw-sshCredentialDialog {
   width: min(620px, 100%);
   max-height: calc(100vh - 48px);
@@ -3499,15 +3428,6 @@ button.mrfw-sshButton {
 @keyframes mrfw-pending-slide {
   from { transform: translateX(-100%); }
   to { transform: translateX(250%); }
-}
-
-.mrfw-sshDirList {
-  transition: opacity 160ms var(--ds-ease-in-out);
-}
-
-.mrfw-sshDirList[aria-busy='true'] {
-  opacity: 0.55;
-  pointer-events: none;
 }
 
 @media (prefers-reduced-motion: reduce) {
