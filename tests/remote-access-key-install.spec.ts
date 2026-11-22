@@ -7,10 +7,12 @@
  */
 import { existsSync, mkdirSync, mkdtempSync, readdirSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
+import { createHash } from 'node:crypto'
 import { join } from 'node:path'
-import { afterEach, describe, expect, it } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 import { handlePersonalEndpoint } from '../src/remote/personal-endpoints.ts'
 import type { SshStateView } from '../src/remote/personal-contract.ts'
+import * as personalConfig from '../src/remote/personal/config.ts'
 import { loadPersonalConfig, savePersonalConfig, type PersonalConfig, type PersonalEnvironment } from '../src/remote/personal/config.ts'
 import type { ExecFile } from '../src/remote/personal/credentials.ts'
 import type { MultiRootRegistry } from '../src/registry.ts'
@@ -20,11 +22,14 @@ const dirs: string[] = []
 const tmp = (): string => { const dir = mkdtempSync(join(tmpdir(), 'ak-')); dirs.push(dir); return dir }
 afterEach(() => { for (const dir of dirs.splice(0)) rmSync(dir, { recursive: true, force: true }) })
 
+const SERVER_KEY = 'AAAA'
+const SERVER_FINGERPRINT = createHash('sha256').update(Buffer.from(SERVER_KEY, 'base64')).digest('base64').replace(/=+$/, '')
+
 const MANAGED: PersonalEnvironment = {
   environmentId: 'dev-box', platform: 'linux',
   endpoint: { hostname: 'build.internal', port: 22, user: 'builder' },
   credential: { kind: 'managed', credentialId: 'aabbccddeeff' },
-  hostKey: 'SHA256:' + 'A'.repeat(43),
+  hostKey: 'SHA256:' + SERVER_FINGERPRINT,
   helper: null,
 }
 const CONFIG: PersonalConfig = { schemaVersion: 2, revision: 0, environments: [MANAGED], bindings: [] }
@@ -46,6 +51,7 @@ const world = () => {
   mkdirSync(credentialRoot, { mode: 0o700 })
   mkdirSync(secretsDir, { mode: 0o700 })
   mkdirSync(keysDir, { mode: 0o700 })
+  writeFileSync(join(credentialRoot, 'known_hosts'), `build.internal ssh-ed25519 ${SERVER_KEY}\n`, { mode: 0o600 })
   writeFileSync(join(secretsDir, 'aabbccddeeff'), 's3cret', { mode: 0o600 })
   writeFileSync(join(credentialRoot, 'credentials.json'), JSON.stringify([
     { id: 'aabbccddeeff', label: 'builder password', kind: 'password', secretFile: join(secretsDir, 'aabbccddeeff'), createdAt: '2026-11-22T00:00:00.000Z' },
@@ -64,7 +70,7 @@ const execFactory = (commands: string[], onAuthorizedKeys?: () => Promise<void> 
   }
   if (file === 'ssh-keygen' && args[0] === '-lf') return { stdout: `256 SHA256:${'C'.repeat(43)} comment (ED25519)\n`, stderr: '' }
   if (file === 'ssh' && remote.includes('authorized_keys')) {
-    await onAuthorizedKeys?.()
+    if (remote.includes('printf')) await onAuthorizedKeys?.()
     return { stdout: '', stderr: '' }
   }
   return { stdout: '', stderr: '' }
@@ -116,9 +122,31 @@ describe.skipIf(process.platform === 'win32')('sshAccessKeyInstall revision safe
       await savePersonalConfig(personalPath, { ...current, environments: [moved, ...rest], revision: current.revision + 1 }, current.revision)
     })
     await expect(call(registry, 0, exec)).rejects.toMatchObject({ code: 'personal-config-conflict' })
+    expect(commands.filter(command => command.includes('authorized_keys'))).toHaveLength(2)
+    expect(commands.at(-1)).not.toContain('printf')
     // The generated key is gone: record removed, key files removed.
     expect(readdirSync(keysDir)).toHaveLength(0)
     const credential = loadPersonalConfig(personalPath).environments[0]!.credential
     expect(credential.kind === 'managed' ? credential.accessKeyId : undefined).toBeUndefined()
   })
+  it('rolls back both sides when the fresh CAS also fails', async () => {
+    const { registry, personalPath, keysDir } = world()
+    await savePersonalConfig(personalPath, CONFIG, 0)
+    const commands: string[] = []
+    let retry: ReturnType<typeof vi.spyOn> | undefined
+    const exec = execFactory(commands, async () => {
+      const current = loadPersonalConfig(personalPath)
+      await savePersonalConfig(personalPath, { ...current, revision: 1, environments: [{ ...MANAGED, displayName: 'Renamed' }] }, 0)
+      retry = vi.spyOn(personalConfig, 'savePersonalConfig').mockRejectedValueOnce(
+        Object.assign(new Error('second CAS conflict'), { code: 'personal-config-conflict' }),
+      )
+    })
+    try {
+      await expect(call(registry, 0, exec)).rejects.toThrow('second CAS conflict')
+      expect(commands.filter(command => command.includes('authorized_keys'))).toHaveLength(2)
+      expect(commands.at(-1)).not.toContain('printf')
+      expect(readdirSync(keysDir)).toHaveLength(0)
+    } finally { retry?.mockRestore() }
+  })
+
 })

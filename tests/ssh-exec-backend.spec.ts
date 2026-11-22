@@ -37,7 +37,7 @@ describe.skipIf(process.platform === 'win32')('helper-only execution cwd verific
     const signal = new AbortController().signal
     await expect(backend.verifyCwd!(root, root, signal, null)).resolves.toBeUndefined()
     await expect(backend.verifyCwd!(join(root, 'nested'), root, signal, null)).resolves.toBeUndefined()
-    await expect(backend.verifyCwd!(join(root, 'alias'), root, signal, null)).rejects.toMatchObject({ code: 'endpoint-redirected' })
+    await expect(backend.verifyCwd!(join(root, 'alias'), root, signal, null)).rejects.toMatchObject({ code: 'target-escapes-root' })
     await expect(backend.verifyCwd!(fixture.base, root, signal, null)).rejects.toMatchObject({ code: 'target-escapes-root' })
     expect(manager.openSftp).not.toHaveBeenCalled()
     expect(policies.length).toBeGreaterThan(0)

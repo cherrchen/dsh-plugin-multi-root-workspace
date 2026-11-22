@@ -19,7 +19,7 @@ import { createRequire } from 'node:module'
 import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
-import { renderHelperEntry, treeDigestSource } from '../src/remote/personal/operations.ts'
+import { renderHelperEntry, treeDigestSource, verifyHelperEntry } from '../src/remote/personal/operations.ts'
 
 const require = createRequire(import.meta.url)
 const packageDir = dirname(require.resolve('@deepseek-ai/dsh-ssh/package.json'))
@@ -110,4 +110,13 @@ describe.skipIf(process.platform === 'win32')('helper-entry.mjs real launch', ()
     expect(Buffer.concat(driftErr).toString('utf8')).toContain('integrity check failed')
     expect(Buffer.concat(driftOut)).toHaveLength(0)
   })
+})
+
+it('compares the installed launch entry against the Host-owned tree digest', async () => {
+  const tree = 'a'.repeat(64)
+  const digest = createHash('sha256').update(renderHelperEntry(tree)).digest('hex')
+  const probe = (stdout: string) => async () => ({ stdout })
+  await expect(verifyHelperEntry(probe(digest), 'test-host', '/node', '/entry.mjs', tree)).resolves.toBeUndefined()
+  await expect(verifyHelperEntry(probe('b'.repeat(64)), 'test-host', '/node', '/entry.mjs', tree))
+    .rejects.toMatchObject({ code: 'helper-hash-mismatch' })
 })

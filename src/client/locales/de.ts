@@ -363,6 +363,7 @@ export const de = {
   'error.remote-unavailable': 'Die Remote-Steuerungsebene ist derzeit nicht verfügbar.',
   'error.authority-unavailable': 'Der lokale Registry-Kanal ist nicht verfügbar oder ausgelastet; versuchen Sie es in Kürze erneut.',
   'error.authority-disconnected': 'Die Verbindung zum Host, der den Arbeitsbereichsspeicher hält, ist abgebrochen; das Ergebnis ist unbekannt. Aktualisieren Sie und versuchen Sie es erneut.',
+  'error.access-key-reconcile-required': "Das Zurücknehmen des Zugriffsschlüssels konnte nicht bestätigt werden. Prüfe den ursprünglichen SSH-Host.",
   'error.authority-timeout': 'Die Anfrage an den Host, der den Arbeitsbereichsspeicher hält, ist abgelaufen; das Ergebnis ist unbekannt. Aktualisieren Sie und versuchen Sie es erneut.',
   'error.authority-cancelled': 'Der Vorgang wurde abgebrochen.',
   'error.invalid-arguments': 'Die Anfrageparameter sind ungültig.',

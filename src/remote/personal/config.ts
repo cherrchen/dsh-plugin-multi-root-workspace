@@ -27,7 +27,8 @@ const helperSchema = z.object({
   sha256: z.string().regex(/^[0-9a-f]{64}$/),
   protocol: z.number().int().min(1),
   /** 1 = `helperPath` is `helper-entry.mjs`, which verifies the installed file set at launch. Absent on legacy installs. */
-  integrity: z.literal(1).optional(),
+  integrity: z.union([z.literal(1), z.literal(2)]).optional(),
+  treeSha256: z.string().regex(/^[0-9a-f]{64}$/).optional(),
 }).strict()
 
 export const personalEnvironmentSchema = z.object({
@@ -97,6 +98,7 @@ export function toDeploymentManifest(config: PersonalConfig, manifestPath: strin
     helper: environment.helper === null ? null : {
       sha256: environment.helper.sha256, protocol: environment.helper.protocol,
       ...(environment.helper.integrity === undefined ? {} : { integrity: environment.helper.integrity }),
+      ...(environment.helper.treeSha256 === undefined ? {} : { treeSha256: environment.helper.treeSha256 }),
     },
     connection: environment.helper !== null
       ? { host: managedAlias(environment), nodePath: environment.helper.nodePath, helperPath: environment.helper.helperPath }

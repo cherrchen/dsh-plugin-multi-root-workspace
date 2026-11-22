@@ -1,6 +1,6 @@
 /**
  * The remote control plane: deployment manifest, remote grant domain, the
- * remote-1 listener/client, and the owner-side admission evaluation. One
+ * remote-2 listener/client, and the owner-side admission evaluation. One
  * object owned by `MultiRootRegistry`; it shares the registry's lease,
  * medium, and operation queue but never the v1 records.
  */
@@ -64,7 +64,7 @@ export class RemoteControlPlane {
   client: RemoteClient | undefined
   private revision = 0
   verifier: RemoteEndpointVerifier | undefined
-  /** Test hook: overrides for the remote-1 client's per-method request budgets. */
+  /** Test hook: overrides for the remote-2 client's per-method request budgets. */
   requestTimeouts: RemoteRequestTimeouts | undefined
 
   constructor(private readonly config: RemoteConfig | undefined, private readonly logger: { warn(message: string): unknown }, private readonly loadDeploymentForTesting?: typeof loadDeploymentManifest) {
@@ -228,12 +228,28 @@ export class RemoteControlPlane {
       environmentId: ref.environmentId, rootId: ref.rootId, displayPath: found.binding.path,
       verifiedTarget, configVersion: this.manifest!.configVersion, bindingDigest: digest, addedAt: new Date().toISOString(), grantId: randomUUID(),
     }
-    if (existing !== -1 && grants[existing]!.bindingDigest === digest) return this.snapshot(key, epoch)
+    if (existing !== -1) {
+      const previous = grants[existing]!
+      if (previous.bindingDigest === digest && previous.verifiedTarget.kind === verifiedTarget.kind
+        && previous.verifiedTarget.value === verifiedTarget.value) return this.snapshot(key, epoch)
+    }
     const next = [...grants]
     if (existing === -1) next.push(record)
     else next[existing] = record
     await this.persistGrants(key, next)
     return this.snapshot(key, epoch)
+  }
+
+  /** Retire the observed incarnation until an explicit add verifies it again. */
+  async withhold(key: string, ref: RemoteEndpointRef, incarnation: string): Promise<void> {
+    const grants = this.grantsOf(key)
+    const withheldDigest = '0'.repeat(64)
+    const matching = grants.find(grant => grant.environmentId === ref.environmentId && grant.rootId === ref.rootId
+      && (grant.grantId ?? grant.addedAt) === incarnation)
+    if (matching === undefined || matching.bindingDigest === withheldDigest) return
+    // Keep the record and its verified identity. A reserved non-manifest digest
+    // makes older readers withhold it too, without changing the stored schema.
+    await this.persistGrants(key, grants.map(grant => grant === matching ? { ...grant, bindingDigest: withheldDigest } : grant))
   }
 
   /** Owner-side remove; called inside the queue. */
@@ -268,7 +284,7 @@ export class RemoteControlPlane {
     const admitted = (ref: RemoteEndpointRef): AdmittedRemoteEndpoint => {
       if (ref.environmentId === 'local') {
         const localRoot = localRecord(ref.rootId)
-        identities.push([ref.environmentId, ref.rootId, localRoot.path, localRoot.access])
+        identities.push([ref.environmentId, ref.rootId, localRoot.path, localRoot.access, localRoot.incarnation])
         return { environmentId: 'local', rootId: ref.rootId, displayPath: ref.rootId, verifiedTarget: null, bindingDigest: null, environmentDigest: null, configVersion: null, localRoot }
       }
       const grant = grants.find(candidate => candidate.environmentId === ref.environmentId && candidate.rootId === ref.rootId)
@@ -281,6 +297,7 @@ export class RemoteControlPlane {
         environmentId: ref.environmentId, rootId: ref.rootId, displayPath: grant.displayPath,
         verifiedTarget: grant.verifiedTarget, bindingDigest: grant.bindingDigest, configVersion: grant.configVersion,
         environmentDigest: environmentDigest(findBinding(manifest, key, ref)!.environment),
+        incarnation: grant.grantId ?? grant.addedAt,
         localRoot: null,
       }
     }
@@ -345,10 +362,10 @@ export class RemoteControlPlane {
   }
 
   /**
-   * Open the remote domain and the remote-1 listener under the held lease.
+   * Open the remote domain and the remote-2 listener under the held lease.
    * Failures degrade the remote side only — the local registry commits normally.
    */
-  async openOwner(ctx: Context, medium: Medium, epoch: string, dispatch: (method: string, args: unknown[], manifestDigest?: string) => Promise<unknown>): Promise<void> {
+  async openOwner(ctx: Context, medium: Medium, epoch: string, dispatch: (method: string, args: unknown[], manifestDigest?: string, signal?: AbortSignal) => Promise<unknown>): Promise<void> {
     if (!this.enabled || (this.manifest === undefined && !(this.mode === 'personal' && this.state.state === 'config-invalid'))) return
     // A retryable v1 failure keeps this handle open; never stack a second one.
     await this.closeOwner()
@@ -358,7 +375,7 @@ export class RemoteControlPlane {
         this.server = await RemoteServer.listen(medium.remoteEndpoint!, { store: medium.id, epoch, manifestDigest: () => this.digestForHello() }, dispatch)
       } catch (error) {
         // The listener is for followers; a failure must not block owner-side ops.
-        this.logger.warn(`multi-root-workspace: remote-1 listener failed (${error instanceof Error ? error.message : String(error)}); followers cannot reach the remote plane`)
+        this.logger.warn(`multi-root-workspace: remote-2 listener failed (${error instanceof Error ? error.message : String(error)}); followers cannot reach the remote plane`)
       }
       this.domain = domain
       this.table = domain.table(REMOTE_TABLE_NAME) as KvTable<string, PersistedRemoteGrants>
@@ -375,6 +392,8 @@ export class RemoteControlPlane {
     try { return loadPersonalManifest(path, this.personalSnapshot).digest } catch { return undefined }
   }
 
+  notifyFollowers(): void { this.server?.changed() }
+
   /** The v1 store failed: stop serving remote admission too. */
   ownerFailed(reason: string): void {
     this.server?.close(); this.server = undefined
@@ -389,10 +408,10 @@ export class RemoteControlPlane {
   }
 
   /**
-   * Follower-side: adopt the remote-1 channel of the just-connected v1 epoch.
+   * Follower-side: adopt the remote-2 channel of the just-connected v1 epoch.
    * Never throws — failures become the remote state.
    */
-  async connectFollower(medium: Medium, epoch: string): Promise<void> {
+  async connectFollower(medium: Medium, epoch: string, changed: () => void = () => {}): Promise<void> {
     if (!this.enabled || this.manifest === undefined) return
     try {
       const adopted: { client: RemoteClient | undefined } = { client: undefined }
@@ -404,9 +423,9 @@ export class RemoteControlPlane {
           this.client = undefined
           if (this.state.state === 'ready') this.setState('owner-without-remote-protocol', 'the remote channel closed')
         }
-      }, this.requestTimeouts)
+      }, this.requestTimeouts, changed)
       adopted.client = client
-      if (client.epoch !== epoch) { client.close(); adopted.client = undefined; this.setState('epoch-mismatch', 'the remote-1 epoch differs from the v1 authority epoch'); return }
+      if (client.epoch !== epoch) { client.close(); adopted.client = undefined; this.setState('epoch-mismatch', 'the remote-2 epoch differs from the v1 authority epoch'); return }
       this.client = client
       this.setState('ready')
     } catch (error) {
@@ -415,7 +434,7 @@ export class RemoteControlPlane {
       if (code === 'config-digest-mismatch') this.setState('config-digest-mismatch', 'the owner serves a different deployment manifest')
       else if (message === 'registry authority is not ready') {
         // The v1 lease is held by another Host, but that owner never opened
-        // the remote-1 listener. This is the common "desktop host owns the
+        // the remote-2 listener. This is the common "desktop host owns the
         // store, web host runs the SSH plugin" shape; a restart of the
         // follower cannot heal it. Surface an actionable diagnostic instead
         // of the raw socket-connect text.
@@ -435,10 +454,10 @@ export class RemoteControlPlane {
     }
   }
 
-  /** Follower-side remote-1 request; AuthorityRpcError propagates with its code. */
-  async remoteRequest(method: 'remote-snapshot' | 'remote-add' | 'remote-remove' | 'remote-admit', args: readonly unknown[]): Promise<unknown> {
+  /** Follower-side remote-2 request; AuthorityRpcError propagates with its code. */
+  async remoteRequest(method: 'remote-snapshot' | 'remote-add' | 'remote-remove' | 'remote-admit' | 'remote-withhold', args: readonly unknown[]): Promise<unknown> {
     const client = this.client
-    if (client === undefined) throw new RemoteAdmissionError('owner-without-remote-protocol', 'the remote control plane has no live remote-1 channel')
+    if (client === undefined) throw new RemoteAdmissionError('owner-without-remote-protocol', 'the remote control plane has no live remote-2 channel')
     try {
       return await client.request(method, args, this.manifestDigest)
     } catch (error) {

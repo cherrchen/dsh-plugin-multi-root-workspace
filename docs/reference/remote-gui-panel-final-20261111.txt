@@ -15,7 +15,7 @@ gui probe turn complete
 会话原始项目，不可移除
 default-workspace
 当前Agent工作目录
-/Users/example/Documents/deepseek-harness/default-workspace
+$EVIDENCE_PATH_035
 附属工作目录
 
 还没有附属工作目录。 添加后，Agent 可在同一会话中读写该目录，受限 shell 和终端同步生效。
@@ -25,17 +25,17 @@ default-workspace
 vps-app
 linux
 已登记
-app · /srv/dsh/work/app
+app · $EVIDENCE_PATH_007
 当前能力：读取, 写入, 执行, 发送
 vps-xfer
 linux
 已登记
-import · /import
+import · $EVIDENCE_PATH_039
 当前能力：读取, 写入, 接收, 发送
 mac-local
 darwin
 未登记
-mac · /Users/example/dsh-ssh-target-workspace
+mac · $EVIDENCE_PATH_040
 当前能力：不可用
 登记
 跟随会话

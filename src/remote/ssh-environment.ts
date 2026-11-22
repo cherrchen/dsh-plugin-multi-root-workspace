@@ -14,6 +14,7 @@ import { SandboxPolicyService } from '@deepseek-ai/dsh-sandbox-policy'
 import { classifyInstallation, classifySshCapability, sshPackageVersion, sshPrivateCopy, type SshCapability } from '../compat/dsh-version.ts'
 import { loadHostSshPackages } from '../compat/ssh-packages.ts'
 import { SftpClient, type SftpVersion } from './sftp.ts'
+import { verifyHelperEntry } from './personal/operations.ts'
 import { environmentDigest, type DeploymentManifest, type RemoteEnvironment } from './manifest.ts'
 
 export class SshEnvironmentError extends Error {
@@ -174,6 +175,7 @@ export class SshEnvironmentManager {
   private readonly resolved = new Map<string, SshEnvironment>()
   private readonly sftpOpenings = new Map<string, Promise<SftpEnvironment>>()
   private readonly sftpResolved = new Map<string, SftpEnvironment>()
+  private readonly transferSessions = new Map<AbortController, string>()
 
   constructor(options: SshEnvironmentManagerOptions) {
     this.manifest = options.manifest ?? UNAVAILABLE_MANIFEST
@@ -206,6 +208,7 @@ export class SshEnvironmentManager {
       if (changed.has(id) || !scopes.has(key)) void this.disposeHelper(key, true).catch(() => {})
     }
     for (const id of changed) this.markSftpStale(id)
+    for (const [session, id] of this.transferSessions) if (changed.has(id)) session.abort()
   }
 
   /** The current verified deployment manifest. */
@@ -286,6 +289,7 @@ export class SshEnvironmentManager {
   }
 
   async disposeAll(): Promise<void> {
+    for (const session of this.transferSessions.keys()) session.abort()
     await Promise.all([...this.openings.keys()].map(key => this.disposeHelper(key)))
     for (const id of [...this.sftpOpenings.keys()]) await this.disposeSftp(id)
   }
@@ -340,8 +344,37 @@ export class SshEnvironmentManager {
     if (opening !== undefined) await (await opening.catch(() => undefined))?.dispose()
   }
 
+  /** A copy owns its SFTP channel; interrupted requests cannot close a sibling's. */
+  async openTransferSftp(environmentId: string, signal: AbortSignal, expectedDigest?: string): Promise<SftpEnvironment & { live(): boolean }> {
+    signal.throwIfAborted()
+    this.requireEnvironmentDigest(environmentId, expectedDigest)
+    if (this.transferSessions.size >= 32) throw new SshEnvironmentError('transfer-unavailable', 'too many active SFTP endpoints')
+    const session = new AbortController()
+    this.transferSessions.set(session, environmentId)
+    const disown = () => { this.transferSessions.delete(session) }
+    const openingSignal = AbortSignal.any([session.signal, signal])
+    try {
+      const env = await this.openSftpFresh(environmentId, disown, openingSignal)
+      const dispose = async () => {
+        session.signal.removeEventListener('abort', close)
+        disown()
+        await env.dispose()
+      }
+      const close = () => { void dispose() }
+      session.signal.addEventListener('abort', close, { once: true })
+      if (openingSignal.aborted) {
+        await dispose()
+        openingSignal.throwIfAborted()
+      }
+      return { ...env, live: () => this.transferSessions.has(session), dispose }
+    } catch (error) {
+      disown()
+      throw error
+    }
+  }
+
   /** Same ordered refusals as open(), then the SFTP handshake + publish extensions. */
-  private async openSftpFresh(environmentId: string, onLoss: () => void): Promise<SftpEnvironment> {
+  private async openSftpFresh(environmentId: string, onLoss: () => void, signal?: AbortSignal): Promise<SftpEnvironment> {
     const environment = this.manifest.environments.find(entry => entry.environmentId === environmentId)
     if (environment === undefined) throw new SshEnvironmentError('unknown-environment', `no manifest environment "${environmentId}"`)
     if (this.gate.status !== 'eligible') {
@@ -355,8 +388,11 @@ export class SshEnvironmentManager {
     }
     if (environment.transfer === undefined) throw new SshEnvironmentError('transfer-unavailable', `environment "${environmentId}" declares no transfer block`)
     await this.verifyHostIdentity(environment)
+    signal?.throwIfAborted()
     const client = SftpClient.connect(environment.connection.host, { onLoss })
-    const timeout = setTimeout(() => client.dispose(), 15_000)
+    const cancel = () => client.dispose()
+    signal?.addEventListener('abort', cancel, { once: true })
+    const timeout = setTimeout(cancel, 15_000)
     timeout.unref()
     try {
       const version = await client.init()
@@ -369,7 +405,7 @@ export class SshEnvironmentManager {
     } catch (error) {
       client.dispose()
       throw error
-    } finally { clearTimeout(timeout) }
+    } finally { clearTimeout(timeout); signal?.removeEventListener('abort', cancel) }
   }
 
   /** The full ordered admission: gate → transport → isolation → identity → load → mount. */
@@ -382,8 +418,8 @@ export class SshEnvironmentManager {
     if (environment.transport !== 'helper') throw new SshEnvironmentError('transport-not-helper', `environment "${environmentId}" uses transport "${environment.transport}"`)
     // A helper installed before full-artifact integrity has no entry point to
     // verify its file set: refuse rather than trust the single-file digest.
-    if (this.personalCustody && environment.helper!.integrity === undefined) {
-      throw new SshEnvironmentError('helper-outdated', 'the recorded helper predates full-artifact integrity; reinstall the helper')
+    if (this.personalCustody && (environment.helper!.integrity !== 2 || environment.helper!.treeSha256 === undefined)) {
+      throw new SshEnvironmentError('helper-outdated', 'the recorded Helper predates Host-pinned integrity; reinstall the Helper')
     }
     if (environment.credentialIsolation !== 'attested' && !this.allowUnattested && !this.brokerCustody) {
       throw new SshEnvironmentError('credential-isolation-unattested', `environment "${environmentId}" is declared unattested; connections require an attested deployment`)
@@ -395,6 +431,9 @@ export class SshEnvironmentManager {
     }
     const identity = await this.verifyHostIdentity(environment)
     const connection = environment.connection
+    if (this.personalCustody) {
+      await verifyHelperEntry(this.exec, connection.host, connection.nodePath!, connection.helperPath!, environment.helper!.treeSha256!)
+    }
     const modules = await loadHostSshPackages(this.gate) as Record<string, Record<string, unknown> & { default?: Record<string, unknown> }>
     const exported = (pkg: string, name: string) => modules[pkg]![name] ?? modules[pkg]!.default?.[name]
     const ctx = new Context()

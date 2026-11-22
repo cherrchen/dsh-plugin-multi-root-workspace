@@ -96,13 +96,13 @@
   "modelOpening": "REVIEW PASSED (2026-11-11) — model entry remains closed by default pending maintainer sign-off; default patch has no remote-tools and remoteEnvironments is not enabled",
   "linuxLive": {
     "date": "2026-11-10/2026-11-11",
-    "topology": "initiator .87 (dsh-test uid 1000 + _dsh_ssh broker uid 996) -> target .93 (dshbuild/dshxfer/dshxfer2), both Ubuntu 24.04 x86_64",
+    "topology": "initiator initiator-host (dsh-test uid 1000 + _dsh_ssh broker uid 996) -> target target-host (dshbuild/dshxfer/dshxfer2), both Ubuntu 24.04 x86_64",
     "deployment": {
-      "package": "0.1.17-ssh.1 packed tarball deployed under root-owned /opt/dsh-broker with exact dependency tree (cordis 4.1.0, dsh 0.2.2-rc.1, four ssh peers, dsh-sandbox/-policy/-session added when the new chunk graph required them)",
-      "unit": "dsh-ssh-broker.service ActiveState=active SubState=running, PrivateTmp=yes, ProtectSystem=strict, User=_dsh_ssh; real private tmp at /tmp/systemd-private-*-dsh-ssh-broker.service-*",
-      "credentialRoot": "/var/lib/dsh-ssh-broker drwx------ _dsh_ssh:_dsh_ssh",
-      "socket": "/run/dsh-ssh-broker drwxr-x--- _dsh_ssh:dsh-ssh-clients, broker.sock srw-rw----",
-      "manifest": "/etc/dsh-remote/manifest.json root-owned; helper import bindings removed (destination-isolation-required observed live); transfer.maxBytes 512MiB for fault-injection payload",
+      "package": "0.1.17-ssh.1 packed tarball deployed under root-owned $EVIDENCE_PATH_004 with exact dependency tree (cordis 4.1.0, dsh 0.2.2-rc.1, four ssh peers, dsh-sandbox/-policy/-session added when the new chunk graph required them)",
+      "unit": "dsh-ssh-broker.service ActiveState=active SubState=running, PrivateTmp=yes, ProtectSystem=strict, User=_dsh_ssh; real private tmp at $EVIDENCE_PATH_090",
+      "credentialRoot": "$EVIDENCE_PATH_002 drwx------ _dsh_ssh:_dsh_ssh",
+      "socket": "$EVIDENCE_PATH_045 drwxr-x--- _dsh_ssh:dsh-ssh-clients, broker.sock srw-rw----",
+      "manifest": "$EVIDENCE_PATH_003 root-owned; helper import bindings removed (destination-isolation-required observed live); transfer.maxBytes 512MiB for fault-injection payload",
       "brokerHello": "protocol 3, brokerUid 996, environments vps-app/vps-lib/vps-xfer/vps-xfer2, sshCapability.eligible",
       "confinementProbe": "dsh-test under bwrap --unshare-all: credential root EACCES, broker socket connect closed with 0 bytes"
     },
@@ -112,8 +112,8 @@
       "remote-ssh.live.e2e": "19/19 passed",
       "remote-journey.live.e2e": "4/4 passed on production broker: path; helper-destination remote_copy refused transfer-pair-not-allowed (narrowing live-verified); seeds via remote_bash"
     },
-    "chrootIsolation": "sftp to vps-xfer and vps-xfer2 each see only their own /import inside chroot /srv/dsh/xfer{,2}; /srv nonexistent in chroot; cross-account visibility impossible",
-    "faultsScaffolding": "root-side dsh-fault-watcher.service (systemd-run transient) consumes /tmp/dsh-fault-trigger: broker-ssh -> pkill -9 -u _dsh_ssh -f vps-build; broker-daemon -> systemctl kill -s SIGKILL",
+    "chrootIsolation": "sftp to vps-xfer and vps-xfer2 each see only their own $EVIDENCE_PATH_039 inside chroot $EVIDENCE_PATH_091{,2}; $EVIDENCE_PATH_092 nonexistent in chroot; cross-account visibility impossible",
+    "faultsScaffolding": "root-side dsh-fault-watcher.service (systemd-run transient) consumes $EVIDENCE_PATH_093: broker-ssh -> pkill -9 -u _dsh_ssh -f vps-build; broker-daemon -> systemctl kill -s SIGKILL",
     "liveFoundDefects": [
       "UpdateHostKeys: ssh -G normalizes \"no\" to \"false\"; verifier accepted both (51d8f99)",
       "SFTP transports inherited ControlMaster auto -> per-session generation isolation broken; each session now spawns ssh with ControlMaster=no ControlPath=none (adcf4df)",

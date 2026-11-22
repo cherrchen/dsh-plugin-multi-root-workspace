@@ -1,4 +1,4 @@
-/** remote-1 wire semantics on the real attested transport. */
+/** remote-2 wire semantics on the real attested transport. */
 import { mkdtempSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -29,16 +29,31 @@ nativeTest('hello binds store, epoch and digest; a digest mismatch is an explici
   client.close()
 })
 
+nativeTest('rejects an older wire version at hello', async () => {
+  const id = endpoint()
+  servers.push(await listen(id))
+  const channel = await connectNative(id.remoteEndpoint!)
+  try {
+    const reply = Promise.withResolvers<unknown>()
+    receive(channel, value => reply.resolve(value))
+    channel.write(JSON.stringify({ protocol: 'remote-1', domain: 'remote', store: id.id, id: '11111111-1111-4111-8111-111111111111',
+      epoch: null, method: 'hello', args: ['d'.repeat(64)] }) + '\n')
+    await expect(reply.promise).resolves.toMatchObject({ code: 'remote-protocol-mismatch' })
+  } finally {
+    channel.destroy()
+  }
+})
+
 nativeTest('an unknown domain gets an explicit error reply and the channel survives', async () => {
   const id = endpoint()
   servers.push(await listen(id))
   const channel = await connectNative(id.remoteEndpoint!)
   const replies: unknown[] = []
   receive(channel, value => replies.push(value))
-  channel.write(JSON.stringify({ protocol: 'remote-1', domain: 'storage', store: id.id, id: '11111111-1111-4111-8111-111111111111', epoch: null, method: 'remote-snapshot', args: ['/x'] }) + '\n')
+  channel.write(JSON.stringify({ protocol: 'remote-2', domain: 'storage', store: id.id, id: '11111111-1111-4111-8111-111111111111', epoch: null, method: 'remote-snapshot', args: ['/x'] }) + '\n')
   await new Promise(resolve => setTimeout(resolve, 50))
   expect(replies[0]).toMatchObject({ type: 'error', code: 'unknown-domain' })
-  channel.write(JSON.stringify({ protocol: 'remote-1', domain: 'remote', store: id.id, id: '22222222-2222-4222-8222-222222222222', epoch: null, method: 'hello', args: ['d'.repeat(64)] }) + '\n')
+  channel.write(JSON.stringify({ protocol: 'remote-2', domain: 'remote', store: id.id, id: '22222222-2222-4222-8222-222222222222', epoch: null, method: 'hello', args: ['d'.repeat(64)] }) + '\n')
   await new Promise(resolve => setTimeout(resolve, 50))
   expect(replies[1]).toMatchObject({ type: 'reply', value: { epoch: 'ep-1' } })
   channel.destroy()
@@ -56,15 +71,15 @@ nativeTest('mutation request-ids dedupe; reuse with different args destroys', as
   receive(raw, value => replies.push(value))
   const write = (body: object) => raw.write(JSON.stringify(body) + '\n')
   const uuid = '33333333-3333-4333-8333-333333333333'
-  write({ protocol: 'remote-1', domain: 'remote', store: id.id, id: '44444444-4444-4444-8444-444444444444', epoch: null, method: 'hello', args: ['d'.repeat(64)] })
+  write({ protocol: 'remote-2', domain: 'remote', store: id.id, id: '44444444-4444-4444-8444-444444444444', epoch: null, method: 'hello', args: ['d'.repeat(64)] })
   await new Promise(resolve => setTimeout(resolve, 50))
-  write({ protocol: 'remote-1', domain: 'remote', store: id.id, id: uuid, epoch: 'ep-1', method: 'remote-add', args: ['/p', { environmentId: 'e', rootId: 'r' }] })
-  write({ protocol: 'remote-1', domain: 'remote', store: id.id, id: uuid, epoch: 'ep-1', method: 'remote-add', args: ['/p', { environmentId: 'e', rootId: 'r' }] })
+  write({ protocol: 'remote-2', domain: 'remote', store: id.id, id: uuid, epoch: 'ep-1', method: 'remote-add', args: ['/p', { environmentId: 'e', rootId: 'r' }] })
+  write({ protocol: 'remote-2', domain: 'remote', store: id.id, id: uuid, epoch: 'ep-1', method: 'remote-add', args: ['/p', { environmentId: 'e', rootId: 'r' }] })
   await new Promise(resolve => setTimeout(resolve, 60))
   expect(calls.filter(m => m === 'remote-add')).toHaveLength(2)
   expect(calls).toContain('remote-snapshot')
   expect(replies.filter(r => (r as { type?: string }).type === 'reply')).toHaveLength(3)
-  write({ protocol: 'remote-1', domain: 'remote', store: id.id, id: uuid, epoch: 'ep-1', method: 'remote-add', args: ['/p', { environmentId: 'e', rootId: 'DIFFERENT' }] })
+  write({ protocol: 'remote-2', domain: 'remote', store: id.id, id: uuid, epoch: 'ep-1', method: 'remote-add', args: ['/p', { environmentId: 'e', rootId: 'DIFFERENT' }] })
   await new Promise(resolve => setTimeout(resolve, 60))
   expect(raw.destroyed).toBe(true)
   client.close()

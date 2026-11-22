@@ -363,6 +363,7 @@ export const pt = {
   'error.remote-unavailable': 'O plano de controle remoto está indisponível.',
   'error.authority-unavailable': 'O canal do registro de raízes local está indisponível ou ocupado; tente novamente em instantes.',
   'error.authority-disconnected': 'A conexão com o Host que detém o armazenamento do espaço de trabalho caiu; o resultado é desconhecido, atualize antes de tentar novamente.',
+  'error.access-key-reconcile-required': "Não foi possível confirmar a reversão da chave de acesso. Verifique o host SSH original.",
   'error.authority-timeout': 'A solicitação ao Host que detém o armazenamento do espaço de trabalho expirou; o resultado é desconhecido, atualize antes de tentar novamente.',
   'error.authority-cancelled': 'A operação foi cancelada.',
   'error.invalid-arguments': 'Os argumentos da solicitação são inválidos.',

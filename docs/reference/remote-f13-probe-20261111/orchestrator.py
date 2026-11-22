@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
-"""Controlled F13 probe against a temporary broker instance on .87.
+"""Controlled F13 probe against a temporary broker instance on initiator-host.
 
 Does not touch the production broker: separate manifest/config/socket/audit
-under /etc/dsh-*-f13 and /tmp/f13-review. Runs the real remote-broker.js as the
+under /etc/dsh-*-f13 and /tmp/dsh-evidence. Runs the real remote-broker.js as the
 dedicated broker account and a protocol-3 client as the Host account (uid 1000).
 """
 import json
@@ -13,7 +13,7 @@ import subprocess
 import sys
 import time
 
-BASE = '/tmp/f13-review'
+BASE = '/tmp/dsh-evidence'
 CONFIG_DIR = '/etc/dsh-ssh-broker-f13'
 MANIFEST_DIR = '/etc/dsh-remote-f13'
 CONFIG = os.path.join(CONFIG_DIR, 'broker.json')
@@ -85,7 +85,7 @@ try:
     os.chmod(SOCK, 0o660)
 
     result = subprocess.run(
-        ['runuser', '-u', 'dsh-test', '--', 'python3', '/tmp/f13-review-src/client.py', SOCK],
+        ['runuser', '-u', 'dsh-test', '--', 'python3', '/tmp/dsh-evidence-src/client.py', SOCK],
         capture_output=True, text=True, timeout=120,
     )
     with open(os.path.join(BASE, 'client.out'), 'w', encoding='utf-8') as handle:

@@ -7,35 +7,40 @@
     "dshVersion": "0.2.2-rc.1",
     "pluginVersion": "0.1.17-ssh.1",
     "composition": "web (dsh-base + dsh-web-app + plugin tarball via `dsh plugin add`), scratch DSH_HOME, restricted patch identical in shape to the Linux deployment",
-    "scope": "GUI-host rendering/RPC evidence under a scripted model endpoint; the credential broker is the live .87 service reached through a forwarded socket behind a local uid-996 front-end. This record is not deployment certification and does not cover the macOS-initiator matrix item.",
+    "scope": "GUI-host rendering/RPC evidence under a scripted model endpoint; the credential broker is the live initiator-host service reached through a forwarded socket behind a local uid-996 front-end. This record is not deployment certification and does not cover the macOS-initiator matrix item.",
     "artifacts": {
-      "screenshot": "remote-gui-host-evidence-20261111.png",
-      "screenshotSha256": "9532b01b8ffc58fc34749ae113ab8c03db4950ef5107c0475924600501ea1d42",
       "modelRequestLog": "remote-gui-model-requests-20261111.txt",
       "scriptedModel": "remote-gui-scripted-model-20261111.mjs",
       "rpcCapture": "remote-gui-rpc-20261111.json",
       "rpcCaptureNote": "captured after temporarily retargeting the test profile to the local macOS broker (5-environment manifest, digest 7e2c3c91...); the profile was restored afterwards; see the 2026-11-11 review R3",
-      "panelFinalScreenshot": "remote-gui-panel-final-20261111.png",
       "panelFinalScreenshotSha256": "8d449399776b79df976f5c3dd750881283d630d8c7feeeb0a55458d0c9efb0ca",
       "panelFinalText": "remote-gui-panel-final-20261111.txt"
     }
   },
   "deployment": {
-    "manifestPath": "/private/etc/dsh-remote/manifest.json",
+    "manifestPath": "$EVIDENCE_PATH_034",
     "manifestOwner": "root:wheel 0644, every ancestor root-owned non-writable (production check, loadDeploymentManifest without test bypass)",
     "manifestDigest": "bd7141c4d0b5 (matches broker hello.manifestDigest)",
     "bindings": 6,
-    "sessionPrimary": "/Users/example/Documents/deepseek-harness/default-workspace",
-    "brokerSocketChain": "Host connects /private/var/run/dsh-gui/broker.sock (srw-rw---- uid996:staff, dir drwxr-s--- uid996:staff) → local relay process running as uid 996 → ssh -L TCP 18777 → .87 bridge process running as dsh-test uid 1000 → /run/dsh-ssh-broker/broker.sock",
-    "credentialRoot": "/private/var/lib/dsh-ssh-broker drwx------ uid 996; accessSync(R_OK) from the Host account returns EACCES",
-    "note": "The attestation's kernel facts are real: socket file owned by uid 996 in a uid-996 directory with no world access, credential root unreadable from the Host uid. The broker protocol terminates on .87; SO_PEERCRED there sees the uid-1000 bridge."
+    "sessionPrimary": "$EVIDENCE_PATH_035",
+    "brokerSocketChain": "Host connects $EVIDENCE_PATH_036 (srw-rw---- uid996:staff, dir drwxr-s--- uid996:staff) → local relay process running as uid 996 → ssh -L TCP 18777 → initiator-host bridge process running as dsh-test uid 1000 → $EVIDENCE_PATH_001",
+    "credentialRoot": "$EVIDENCE_PATH_037 drwx------ uid 996; accessSync(R_OK) from the Host account returns EACCES",
+    "note": "The attestation's kernel facts are real: socket file owned by uid 996 in a uid-996 directory with no world access, credential root unreadable from the Host uid. The broker protocol terminates on initiator-host; SO_PEERCRED there sees the uid-1000 bridge."
   },
   "attestation": {
-    "helloObserved": { "protocol": 3, "brokerUid": 996, "manifestDigest": "bd7141c4d0b5", "sshCapabilityEligible": true },
+    "helloObserved": {
+      "protocol": 3,
+      "brokerUid": 996,
+      "manifestDigest": "bd7141c4d0b5",
+      "sshCapabilityEligible": true
+    },
     "result": "attested — remote-tools row mounted verifier, tools and capability projection"
   },
   "tools": {
-    "enabledCatalogTail": ["remote_bash", "remote_copy"],
+    "enabledCatalogTail": [
+      "remote_bash",
+      "remote_copy"
+    ],
     "evidence": "scripted model endpoint recorded the real /v1/messages request; tools array ends with remote_bash + remote_copy only while remoteEnvironments.enabled=true",
     "disabledCatalogTail": [],
     "disabledObservation": "after setting remoteEnvironments.enabled=false and restarting dsh web, the recorded tools array contains no remote_* entries; the panel renders \"远端控制面不可用：disabled\" while local primary/additional-root sections stay functional"
@@ -44,7 +49,7 @@
     "driver": "real Chromium (Google Chrome, remote-debugging CDP), page http://127.0.0.1:3080, session view → Workspace Folders dialog",
     "initialDialog": "远端环境 section listed vps-app and vps-xfer as 未登记/当前能力：不可用 with a 登记 action",
     "wire": {
-      "list": "{\"method\":\"list\",\"payload\":{\"sessionId\":\"session-c7881a16-…\"}} → {\"ok\":true,\"value\":{\"primaryRoot\":\"/Users/example/Documents/deepseek-harness/default-workspace\",\"mode\":\"workspace-write\",\"roots\":[]}}",
+      "list": "{\"method\":\"list\",\"payload\":{\"sessionId\":\"session-c7881a16-…\"}} → {\"ok\":true,\"value\":{\"primaryRoot\":\"$EVIDENCE_PATH_035\",\"mode\":\"workspace-write\",\"roots\":[]}}",
       "addRemote": "{\"method\":\"addRemote\",\"payload\":{\"sessionId\":\"session-c7881a16-…\",\"environmentId\":\"vps-xfer\",\"rootId\":\"import\"}} → 200 with endpoints[] where vps-app.state=registered capabilities{read,write,exec,send:true,receive:false} and status.state=ready",
       "removeRemote": "{\"method\":\"removeRemote\",\"payload\":{\"sessionId\":\"…\",\"environmentId\":\"vps-xfer\",\"rootId\":\"import\"}} → vps-xfer state=unregistered, all capabilities false, reason=remote-unregistered; subsequent remotes call confirms the persisted state",
       "skillsChanges": "long-poll generation channel live (20s pending responses observed)"
@@ -52,5 +57,6 @@
     "afterRegister": "vps-app 已登记 当前能力：读取, 写入, 执行, 发送 / vps-xfer 已登记 当前能力：读取, 写入, 接收, 发送",
     "afterRemove": "vps-xfer returns to 未登记-equivalent projection server-side (state unregistered)"
   },
-  "conclusion": "A real GUI host (DSH Web, Chromium) boots the restricted profile, passes broker attestation over a kernel-enforced uid-996 socket boundary, mounts remote_bash/remote_copy into the model-facing tool catalog, renders manifest-bound remote entries in Workspace Folders through the plugin Connection RPC, and registers/updates/revokes them over the same channel. Disabling remoteEnvironments removes all remote capability while local roots and native services keep working."
+  "conclusion": "A real GUI host (DSH Web, Chromium) boots the restricted profile, passes broker attestation over a kernel-enforced uid-996 socket boundary, mounts remote_bash/remote_copy into the model-facing tool catalog, renders manifest-bound remote entries in Workspace Folders through the plugin Connection RPC, and registers/updates/revokes them over the same channel. Disabling remoteEnvironments removes all remote capability while local roots and native services keep working.",
+  "redactionNote": "Machine paths are placeholders. Screenshots were removed because they contained unredacted paths."
 }

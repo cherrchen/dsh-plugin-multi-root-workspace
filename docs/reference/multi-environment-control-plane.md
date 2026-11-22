@@ -2,7 +2,7 @@
 
 > **当前开放范围（2026-11-21）**：公开构建仅提供个人 SSH。下文的团队与硬化模式及 Broker 部署步骤是历史设计和内部验证记录。当前启用与旧配置处理见 [SSH 远端环境参考](./ssh-remote-environments.md)。
 
-本文记录 [G1a](../plans/active/2026-11-06-multi-environment-gates.md) 的控制面合同与实验部署，覆盖部署清单、远端记录域、`remote-1` 协议及 Host 准入接口。架构合同见 [ADR-0030](../decisions/ADR-0030-environment-and-root-identity.md)，关卡状态和验证结果见[路线图总账](../plans/active/2026-09-12-multi-root-workspace.md#多执行环境-g1a-控制面2026-11-07)。
+本文记录 [G1a](../plans/active/2026-11-06-multi-environment-gates.md) 的控制面合同与实验部署，覆盖部署清单、远端记录域、`remote-2` 协议及 Host 准入接口。架构合同见 [ADR-0030](../decisions/ADR-0030-environment-and-root-identity.md)，关卡状态和验证结果见[路线图总账](../plans/active/2026-09-12-multi-root-workspace.md#多执行环境-g1a-控制面2026-11-07)。
 
 ## 开关与状态
 
@@ -16,8 +16,8 @@
 | `platform-deferred` | 原生 Windows 发起端（ADR-0030 无限期延后），不读清单。 |
 | `config-invalid` | 缺少模式所需的配置路径，或清单解析与文件保护检查失败。 |
 | `storage-failed` | owner 打开或写入远端域失败，或 v1 存储失败。 |
-| `owner-without-remote-protocol` | follower 连不上 `remote-1`（旧 owner 或 owner 未开启实验），或通道已关闭。 |
-| `epoch-mismatch` / `config-digest-mismatch` | `remote-1` 与 v1 不属同一 epoch，或两个 Host 的清单摘要不同。 |
+| `owner-without-remote-protocol` | follower 连不上 `remote-2`（旧 owner 或 owner 未开启实验），或通道已关闭。 |
+| `epoch-mismatch` / `config-digest-mismatch` | `remote-2` 与 v1 不属同一 epoch，或两个 Host 的清单摘要不同。 |
 | `ready` | 唯一允许远端准入的状态。 |
 
 ## 部署清单
@@ -80,9 +80,9 @@ Host 启动时用 `node:fs` 直接读取（不经 `ctx.fs` 或工作区读路径
 
 独立域 `multi_root_workspace_remote`（version 1，`backup-and-skip`），表 `grants`，键为 primary key，值 `{ grants: RemoteGrant[] }`；记录严格，带 `access`/`mode` 或未知键即无效。`RemoteGrant` 只含 `environmentId`、`rootId`、`displayPath`、`verifiedTarget {kind: object|path, value}`、`configVersion`、`bindingDigest`、`addedAt` 和 `grantId`（新登记的 UUID，旧记录以 `addedAt` 识别），不存连接、密钥或准入句柄。只有 v1 lease 的 owner 在同一介质上打开它；旧版本只读 v1 域，不受影响。读取时按当前清单判定：绑定消失为 `revoked`，绑定摘要变化为 `withheld`（须在可信控制面重新登记），否则 `registered`。远端记录从不进入 `setAdditionalRoots`、scope、方言、指令或 Skills。
 
-## `remote-1` 协议入口
+## `remote-2` 协议入口
 
-v1 线协议不变。远端请求走同一介质派生的**第二**监听端点 `/tmp/dsh-registry-<uid>/<store 前 48 位>.r1.sock`，沿用内核 peer 认证与帧预算；旧 owner 没有该端点，follower 即记 `owner-without-remote-protocol`。请求带 `protocol: "remote-1"`、`domain`、`store`、`id`、`epoch`、`method`、`args`；`domain` 不是 `remote` 时显式回 `unknown-domain` 且通道保留。`hello` 携带清单摘要，回复与 v1 相同的 epoch；后续请求也携带当期 `manifestDigest`，由 owner 重新加载后核对。摘要不符回 `config-digest-mismatch`。方法：`remote-snapshot`、`remote-add [primary, {environmentId, rootId}]`、`remote-remove`、`remote-admit [primary, {purpose, endpoints, manifestDigest}]`；`remote-admit` 的应答端点带 `localRoot {rootId, path, access}` 记录（远端端点为 `null`），即 owner 对 `local` 端点的活注册表判定。请求时限按方法：`remote-add`/`remote-remove` 60 秒（覆盖 owner 的端点验证），`remote-snapshot`/`remote-admit`/`hello` 5 秒。非 `hello` 超时只拒绝该请求为 `authority-timeout`（结果未知，mutation 须先再同步），pending 条目删除、迟到应答忽略、通道保留；`hello` 超时仍销毁通道。mutation 的请求 ID 去重与 v1 相同；回复丢失时 follower 以 `authority-disconnected` 报结果未知，不重放。v1 断开、接管或换 epoch 时 `remote-1` 通道随之关闭，须重新 hello。
+v1 线协议不变。远端请求走同一介质派生的**第二**监听端点 `/tmp/dsh-registry-<uid>/<store 前 48 位>.r1.sock`，沿用内核 peer 认证与帧预算；旧 owner 未提供该协议时 follower 即记 `owner-without-remote-protocol`。混合使用上一版 `remote-1` 与当前 `remote-2` 会在握手时拒绝远端通道。需同版重启各 Host，本地 v1 Registry 继续工作。请求带 `protocol: "remote-2"`、`domain`、`store`、`id`、`epoch`、`method`、`args` 与可选的 `expiresAt`；`domain` 不是 `remote` 时显式回 `unknown-domain` 且通道保留。`hello` 携带清单摘要，回复与 v1 相同的 epoch；后续请求也携带当期 `manifestDigest`，由 owner 重新加载后核对。摘要不符回 `config-digest-mismatch`。方法：`remote-snapshot`、`remote-add [primary, {environmentId, rootId}]`、`remote-remove`、`remote-admit [primary, {purpose, endpoints, manifestDigest}]`；`remote-admit` 的应答端点带 `localRoot {rootId, path, access, incarnation}` 记录（远端端点为 `null`），即 owner 对 `local` 端点的活注册表判定。另有 `remote-withhold [primary, ref, incarnation]`，仅撤回仍匹配该登记代次的根。owner 发出的变更通知只触发重新准入。请求时限按方法：`remote-add`/`remote-remove` 60 秒（覆盖 owner 的验证预算），`remote-snapshot`/`remote-admit`/`hello` 5 秒。owner 将变更预算限制在 45 秒或客户端期限，取较短者。客户端断开或预算耗尽时停止验证，并在提交前再次检查。已经进入存储提交的请求可能只丢失应答。非 `hello` 超时只拒绝该请求为 `authority-timeout`（结果未知，mutation 须先再同步），pending 条目删除、迟到应答忽略、通道保留；`hello` 超时仍销毁通道。mutation 的请求 ID 去重与 v1 相同；回复丢失时 follower 以 `authority-disconnected` 报结果未知，不重放。v1 断开、接管或换 epoch 时 `remote-2` 通道随之关闭，须重新 hello。
 
 ## Host 侧接口与拒绝码
 
@@ -91,17 +91,17 @@ v1 线协议不变。远端请求走同一介质派生的**第二**监听端点 
 1. 控制面非 `ready` 即 `remote-unavailable`。
 2. 主根取 `primaryKey(session.header.cwd)`；模式取 `ctx.sandboxPolicy.resolve({ session })`，取不到为 `session-policy-unavailable`（不以工作区读写补缺）。有效模式：只读→只读，工作区读写与完全访问→工作区读写。
 3. 发起侧先收窄：只读会话的 write/exec 及目的端为远端的 transfer 为 `mode-denies`；被 `toolAccess` 封顶的工具同类操作为 `tool-capped`。
-4. owner 在同一 `serialize` 队列内准入（与 v1 准入同序，先重分类注册根再判定）：`config-digest-mismatch`、`endpoint-not-registered`、`endpoint-revoked`、`endpoint-withheld`、`action-not-allowed`、`transfer-pair-not-allowed`、`local-root-unavailable`（`local` 端点不是 owner 的 `available` 注册根）、`invalid-arguments`（read/write/exec 恰一个远端端点；transfer 为 `[源, 目的]`，可含 `{environmentId: "local", rootId}`，至少一端远端，且两端远端绑定分别声明 export/import 配对）。回复 epoch 与当前通道不符为 `stale-epoch`。
-5. body 收到冻结的操作身份（operationId、purpose、toolName、sessionId、primaryRoot、epoch、authorizationFingerprint、effectiveMode）；`authorizationFingerprint` 涵盖该主根和用途以及实际参与准入的登记 ID、绑定摘要与目标证明，`local` 端点的 `localRoot [rootId, path, access]` 同样入指纹。远端端点同时携带环境摘要供连接管理器核对。`endpoints` 在 body 结束后读取即抛错。排序轨迹以 debug 日志记录 operationId、阶段、epoch 与决定，不含路径内容、密钥或输出。
+4. owner 在同一 `serialize` 队列内准入（与 v1 准入同序，请求涉及本地端点时先重分类注册根）：`config-digest-mismatch`、`endpoint-not-registered`、`endpoint-revoked`、`endpoint-withheld`、`action-not-allowed`、`transfer-pair-not-allowed`、`local-root-unavailable`（`local` 端点不是 owner 的 `available` 注册根）、`invalid-arguments`（read/write/exec 恰一个远端端点；transfer 为 `[源, 目的]`，可含 `{environmentId: "local", rootId}`，至少一端远端，且两端远端绑定分别声明 export/import 配对）。回复 epoch 与当前通道不符为 `stale-epoch`。
+5. body 收到冻结的操作身份（operationId、purpose、toolName、sessionId、primaryRoot、epoch、authorizationFingerprint、effectiveMode）；`authorizationFingerprint` 涵盖该主根和用途以及实际参与准入的登记 ID、绑定摘要与目标证明，`local` 端点的 `localRoot [rootId, path, access, incarnation]` 同样入指纹。远端端点同时携带环境摘要供连接管理器核对。`endpoints` 在 body 结束后读取即抛错。排序轨迹以 debug 日志记录 operationId、阶段、epoch 与决定，不含路径内容、密钥或输出。
 
-`addRemote(primary, {environmentId, rootId})` 只接受这两个键；先在队列外调用经 `setRemoteEndpointVerifier()` 注入的校验器（broker 行挂载时安装 `SshEndpointVerifier`，未挂载固定为 `endpoint-unverifiable`；因控制面未 `ready` 而早退的挂载不占用重挂载键，`ready` 翻转或下一次远端变更时按现状重挂），平台不符为 `platform-mismatch`，入队后绑定摘要变化为 `binding-changed`，清单未授权为 `binding-not-authorized`。`removeRemote` 与 `remoteList` 在 follower 上经 `remote-1` 转发。
+`addRemote(primary, {environmentId, rootId})` 只接受这两个键；先在队列外调用经 `setRemoteEndpointVerifier()` 注入的校验器（broker 行挂载时安装 `SshEndpointVerifier`，未挂载固定为 `endpoint-unverifiable`；因控制面未 `ready` 而早退的挂载不占用重挂载键，`ready` 翻转或下一次远端变更时按现状重挂），平台不符为 `platform-mismatch`，入队后绑定摘要变化为 `binding-changed`，清单未授权为 `binding-not-authorized`。`removeRemote` 与 `remoteList` 在 follower 上经 `remote-2` 转发。
 
 ## `remote_bash` 合同（G3，可选 broker 行挂载）
 
 `src/remote/exec.ts` 的 `runRemoteCommand` 与 `src/remote/exec-tool.ts` 的 `remoteBashTool` 由可选的 broker 证明行统一挂载（测试组合直接注册同一注册函数）。参数 `{environmentId, rootId, cwdRelative?, command, timeoutMs}`；工具名、Session 与取消信号只取自调度。后端（G4 以后由连接管理器提供，测试为 fake）声明部署控制的 shell、环境变量、时限与 stdout/stderr 上限，实现 `confine` / `currentGeneration` / 同步 `spawn`。
 
 1. **准入 A**：`purpose: exec` 的远端准入；校验后端存在（`backend-unavailable`）、`cwdRelative`（空或相对 POSIX，无 `.`/`..`/空段/NUL/反斜杠，`invalid-cwd`）与时限（`invalid-timeout`）；后端 `verifyCwd` 以只读探针复核活动根身份，与准入携带的 `verifiedTarget` 不符即 `endpoint-redirected`；以 `workspace-write`、端点 displayPath 和真实 sessionId 调用 `confine`，非 `full` 为 `sandbox-unverified`。
-2. **准入 B**：同一请求重新准入，比对 epoch、授权指纹、端点身份（displayPath、bindingDigest、verifiedTarget）、有效模式与后端代次，任一不同为 `admission-changed` 并丢弃 argv；`spawn` 只在 B 的回调内调用。A、B 之间的撤权使 B 拒绝且不调用 `spawn`。
+2. **准入 B**：启动前再次探测远端根，再以同一请求重新准入，比对 epoch、授权指纹、端点身份（displayPath、bindingDigest、verifiedTarget）、有效模式与后端代次，任一不同为 `admission-changed` 并丢弃 argv；`spawn` 只在 B 的回调内调用。A、B 之间的撤权使 B 拒绝且不调用 `spawn`。根身份确认变化时将该登记代次持久标记为 withheld，显式重新登记后才可使用。子目录重定向仅拒绝本次请求。
 3. **结果**：`not-started{code}`；`admitted-may-start`（spawn 抛错或 `started` 失败）；`exited`（观察到直接退出、托管范围未确认）与 `scope-exited`（`waitForExit` 确认）；`unknown{reconcileId}`（启动后断线）。超时与取消各只 `terminate()` 一次并标 `termination`；输出按上限截断并标 `truncated`；从不重连或重跑。
 
 SSH 兼容门禁（`classifySshCapability`、`SUPPORTED_SSH_RELEASES`、宿主锚定的 `loadHostSshPackages`）的检查器落点见[基线参考](./multi-environment-baseline.md#ssh-兼容门禁落地清单)。
@@ -159,7 +159,7 @@ broker 运行**自己的** root 保护依赖树——与 Host/Agent 任何一方
 # root 执行；目录随后属 root、不可被 Host/broker 写
 mkdir -p /opt/dsh-broker && cd /opt/dsh-broker
 pnpm init
-pnpm add --save-exact /path/to/dsh-plugin-multi-root-workspace-0.1.24-ssh.1.tgz \
+pnpm add --save-exact /path/to/dsh-plugin-multi-root-workspace-0.1.24-beta.1.tgz \
   @deepseek-ai/dsh@0.2.2-rc.5 @deepseek-ai/cordis@4.1.0 \
   @deepseek-ai/dsh-ssh@0.2.2-rc.5 @deepseek-ai/dsh-fs-ssh@0.2.2-rc.5 \
   @deepseek-ai/dsh-subprocess-ssh@0.2.2-rc.5 @deepseek-ai/dsh-sandbox-ssh@0.2.2-rc.5
@@ -234,7 +234,7 @@ Host <env-alias>
 
 现行入口探针记录 Full-access 解析的守卫拒绝，观察 raw/LSP-like/job-like spawn 接缝，并实机审计磁盘重载会话与第二 profile；不会为了反向对照而启动不受限命令。2026-11-11 起有 Linux 实机结果（`.87`，`linux/x64`，DSH `0.2.2-rc.1`）：磁盘重放的会话仍受限、篡改磁盘的 `danger-full-access` 声明被守卫拒、同 UID 第二 profile 的受限进程同样被 socket 拒而其预设表可含 `danger-full-access`——证明每个承载 Agent 入口的 profile 都必须受限（原始记录 `docs/reference/remote-entry-isolation-evidence-20261111.json`）。静态文本清点仅作清单对照；旧协议 2 JSON 仅保留作历史反例。
 
-1. 停止把新任务派到该 profile，并在插件详情关闭"SSH 远端环境"开关（或在该行配置显式 `enabled: false`）。开关关闭即拒绝新调用，解除端点校验器，取消并等待已进入的工具调用，远端控制面恢复 `disabled`（无 `remote-1` 监听、无远端域），然后可安全停止 broker 连接。已提交的文件应保留。记录 `unknown` 和暂存残留，按操作 ID 对账，确认前禁止重放。
+1. 停止把新任务派到该 profile，并在插件详情关闭"SSH 远端环境"开关（或在该行配置显式 `enabled: false`）。开关关闭即拒绝新调用，解除端点校验器，取消并等待已进入的工具调用，远端控制面恢复 `disabled`（无 `remote-2` 监听、无远端域），然后可安全停止 broker 连接。已提交的文件应保留。记录 `unknown` 和暂存残留，按操作 ID 对账，确认前禁止重放。
 2. 若连面板可见性也要移除，删除 Registry 行的 `remoteEnvironments` 配置（连同 broker 块一起），重启原 profile。若该部署不再提供远端操作，停止 broker 服务。保留本地 v1 记录及独立的远端存储域供核对。
 3. 确认原生工具及本地根仍可用、远端工具和能力投影已消失，历史远端引用调用失败。需要重新启用时，重新证明凭据隔离及清单一致性，再按当前授权登记端点。
 

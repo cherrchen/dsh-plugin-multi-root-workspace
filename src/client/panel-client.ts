@@ -82,6 +82,7 @@ export function errorKeyOf(code: string): Key {
  */
 /** Codes whose host message names the actual cause the fixed copy cannot. */
 const DETAIL_CODES = new Set([
+  'access-key-reconcile-required',
   // `verifiedAddTarget` alone throws it for three unrelated failures (no
   // verifier, incomplete confinement, probe timeout) — the message splits them.
   'endpoint-unverifiable',

@@ -7,7 +7,7 @@ Already up to date
 . prepare: $ node scripts/clean-lib.mjs && tsdown
 . prepare: [clean-lib] removed 56 JavaScript artifact(s); lib/types/ is left alone
 . prepare: ℹ tsdown v0.22.14 powered by rolldown v1.2.8
-. prepare: ℹ config file: <checkout>/tsdown.config.ts
+. prepare: ℹ config file: $EVIDENCE_PATH_063
 . prepare: ℹ [@dsh-electron/dsh-plugin-multi-root-workspace] entry: src/auto-review/entry.ts, src/index.ts, src/compat.ts, src/fs.ts, src/sandbox.ts, src/scope.ts, src/registry.ts, src/providers.ts, src/instructions.ts, src/skills.ts, src/ops-compatibility.ts, src/review-context.ts, src/command.ts, src/lsp.ts, src/workspace-files.ts, src/process-fence.ts, src/windows-runner.ts, src/remote/broker/main.ts, src/remote/tools.ts
 . prepare: ℹ [@dsh-electron/dsh-plugin-multi-root-workspace] target: es2024
 . prepare: ℹ [@dsh-electron/dsh-plugin-multi-root-workspace/client] entry: src/client/index.ts
@@ -124,7 +124,7 @@ $ tsc -p tsconfig.host.json && tsc -p tsconfig.client.json && node scripts/build
 $ node scripts/clean-lib.mjs && tsdown
 [clean-lib] removed 57 JavaScript artifact(s); lib/types/ is left alone
 ℹ tsdown v0.22.14 powered by rolldown v1.2.8
-ℹ config file: <checkout>/tsdown.config.ts
+ℹ config file: $EVIDENCE_PATH_063
 ℹ [@dsh-electron/dsh-plugin-multi-root-workspace] entry: src/auto-review/entry.ts, src/index.ts, src/compat.ts, src/fs.ts, src/sandbox.ts, src/scope.ts, src/registry.ts, src/providers.ts, src/instructions.ts, src/skills.ts, src/ops-compatibility.ts, src/review-context.ts, src/command.ts, src/lsp.ts, src/workspace-files.ts, src/process-fence.ts, src/windows-runner.ts, src/remote/broker/main.ts, src/remote/tools.ts
 ℹ [@dsh-electron/dsh-plugin-multi-root-workspace] target: es2024
 ℹ [@dsh-electron/dsh-plugin-multi-root-workspace/client] entry: src/client/index.ts
@@ -219,13 +219,13 @@ $ node scripts/check-kernel-runner.mjs
 ===== final-test.txt =====
 $ vitest run --reporter=default --reporter=json --outputFile=.dsh-smoke/ssh-review-20261110/vitest-final.json
 
- RUN  v4.1.12 <checkout>
+ RUN  v4.1.12 $EVIDENCE_PATH_064
 
  ✓ tests/command.spec.ts (69 tests) 2063ms
  ✓ tests/client-navigator.spec.tsx (23 tests) 582ms
  ✓ tests/registry.spec.ts (80 tests) 4188ms
      ✓ keeps a historical over-limit store fully classified and granted, refusing only new adds  456ms
-2:13:50 PM [vite] (ssr) warning: "./${"pipeline"}" is not exported under the conditions ["node", "development", "import"] from package <checkout>/node_modules/@deepseek-ai/dsh-tools (see exports field in <checkout>/node_modules/@deepseek-ai/dsh-tools/package.json)
+2:13:50 PM [vite] (ssr) warning: "./${"pipeline"}" is not exported under the conditions ["node", "development", "import"] from package $EVIDENCE_PATH_065 (see exports field in $EVIDENCE_PATH_066)
   Plugin: builtin:vite-resolve
  ✓ tests/client-panel.spec.tsx (76 tests) 3125ms
  ✓ tests/remote-multiprocess.e2e.ts (5 tests) 4804ms
@@ -322,7 +322,7 @@ $ vitest run --reporter=default --reporter=json --outputFile=.dsh-smoke/ssh-revi
  ✓ tests/prompt-context.spec.ts (14 tests) 10ms
  ✓ tests/connection-rpc.spec.ts (2 tests) 5ms
 stdout | tests/smoke-cleanup.spec.ts > smoke scratch cleanup ownership > leaves the whole home to its explicit parent, including unrelated residue
-[smoke] deferred scratch home cleanup to parent after exit: /var/folders/31/m13kcsfx08lg3ld8kc5gh8cm0000gn/T/smoke-cleanup-A3ZWye
+[smoke] deferred scratch home cleanup to parent after exit: $EVIDENCE_PATH_067
 
  ✓ tests/smoke-cleanup.spec.ts (5 tests | 2 skipped) 6ms
  ✓ tests/plugin-detail.spec.ts (3 tests) 9ms
@@ -380,12 +380,12 @@ stdout | tests/smoke-cleanup.spec.ts > smoke scratch cleanup ownership > leaves 
    Start at  14:13:45
    Duration  30.98s (transform 3.10s, setup 0ms, import 14.53s, tests 127.95s, environment 5.34s)
 
-JSON report written to <checkout>/.dsh-smoke/ssh-review-20261110/vitest-final.json
+JSON report written to $EVIDENCE_PATH_068
 
 
 ===== final-lint-delta.txt =====
 
- RUN  v4.1.12 <checkout>
+ RUN  v4.1.12 $EVIDENCE_PATH_064
 
  ✓ tests/remote-profile-guard.spec.ts (13 tests) 21ms
  ✓ tests/remote-copy.spec.ts (35 tests) 116ms
@@ -395,30 +395,30 @@ JSON report written to <checkout>/.dsh-smoke/ssh-review-20261110/vitest-final.js
    Start at  14:19:01
    Duration  381ms (transform 217ms, setup 0ms, import 316ms, tests 137ms, environment 0ms)
 
-JSON report written to <checkout>/.dsh-smoke/ssh-review-20261110/vitest-lint-delta.json
+JSON report written to $EVIDENCE_PATH_069
 
 
 ===== final-smoke-compose.txt =====
 $ node scripts/smoke-compose.mjs
-[smoke:compose] scratch home: /var/folders/31/m13kcsfx08lg3ld8kc5gh8cm0000gn/T/dsh-multi-root-smoke/compose-15446
-dsh: initialized profile mr-baseline at /var/folders/31/m13kcsfx08lg3ld8kc5gh8cm0000gn/T/dsh-multi-root-smoke/compose-15446/profiles/mr-baseline
+[smoke:compose] scratch home: $EVIDENCE_PATH_070
+dsh: initialized profile mr-baseline at $EVIDENCE_PATH_071
 Already up to date
 
 Done in 414ms using pnpm v11.28.5
-[dsh-runtime] first `dsh plugin add <checkout>` exited 0 — no build-approval stop
+[dsh-runtime] first `dsh plugin add $EVIDENCE_PATH_064` exited 0 — no build-approval stop
 
 [smoke:compose] 54 passed, 0 failed, 0 skipped
 
 
 ===== final-smoke-behavior.txt =====
 $ node scripts/smoke-behavior.mjs
-[smoke:behavior] scratch home: /var/folders/31/m13kcsfx08lg3ld8kc5gh8cm0000gn/T/dsh-multi-root-smoke/behavior-15476
-[smoke:behavior] fixture: <checkout>/.dsh-smoke/behavior-15476
-dsh: initialized profile mr-baseline at /var/folders/31/m13kcsfx08lg3ld8kc5gh8cm0000gn/T/dsh-multi-root-smoke/behavior-15476/profiles/mr-baseline
+[smoke:behavior] scratch home: $EVIDENCE_PATH_072
+[smoke:behavior] fixture: $EVIDENCE_PATH_073
+dsh: initialized profile mr-baseline at $EVIDENCE_PATH_074
 Already up to date
 
 Done in 256ms using pnpm v11.28.5
-[dsh-runtime] first `dsh plugin add <checkout>` exited 0 — no build-approval stop
+[dsh-runtime] first `dsh plugin add $EVIDENCE_PATH_064` exited 0 — no build-approval stop
 (node:15476) ExperimentalWarning: stripTypeScriptTypes is an experimental feature and might change at any time
 (Use `node --trace-warnings ...` to show where the warning was created)
 
@@ -427,18 +427,18 @@ Done in 256ms using pnpm v11.28.5
 
 ===== final-smoke-journey.txt =====
 $ node scripts/smoke-journey.mjs
-[smoke:journey] scratch home: /var/folders/31/m13kcsfx08lg3ld8kc5gh8cm0000gn/T/dsh-multi-root-smoke/journey-15843
-[smoke:journey] fixture: <checkout>/.dsh-smoke/journey-15843
-[dsh-runtime] first `dsh plugin add <checkout>` exited 0 — no build-approval stop
+[smoke:journey] scratch home: $EVIDENCE_PATH_075
+[smoke:journey] fixture: $EVIDENCE_PATH_076
+[dsh-runtime] first `dsh plugin add $EVIDENCE_PATH_064` exited 0 — no build-approval stop
 dsh web: http://127.0.0.1:51993/?token=<redacted>
-[dsh-runtime] first `dsh plugin add <checkout>` exited 0 — no build-approval stop
+[dsh-runtime] first `dsh plugin add $EVIDENCE_PATH_064` exited 0 — no build-approval stop
 
 [smoke:journey] 76 passed, 0 failed, 0 skipped
 
 
 ===== final-pack-check.txt =====
 $ node scripts/check-pack.mjs
-[pack:check] /var/folders/31/m13kcsfx08lg3ld8kc5gh8cm0000gn/T/dsh-pack-2E12mt/dsh-electron-dsh-plugin-multi-root-workspace-0.1.17-ssh.1.tgz
+[pack:check] $EVIDENCE_PATH_077
 [pack:check] 222 members:
   package/CHANGELOG.en.md
   package/CHANGELOG.md
@@ -688,11 +688,11 @@ $ node scripts/check-pack.mjs
 
 ===== final-smoke-packed.txt =====
 $ node scripts/smoke-packed.mjs
-[smoke:packed] packed artifact: /var/folders/31/m13kcsfx08lg3ld8kc5gh8cm0000gn/T/dsh-pack-kDH2zr/dsh-electron-dsh-plugin-multi-root-workspace-0.1.17-ssh.1.tgz
-[smoke:packed] scratch home root: /var/folders/31/m13kcsfx08lg3ld8kc5gh8cm0000gn/T/dsh-packed-16148
-[smoke:behavior] scratch home: /var/folders/31/m13kcsfx08lg3ld8kc5gh8cm0000gn/T/dsh-packed-16148/behavior-16198
-[smoke:behavior] fixture: <checkout>/.dsh-smoke/behavior-16198
-dsh: initialized profile mr-baseline at /var/folders/31/m13kcsfx08lg3ld8kc5gh8cm0000gn/T/dsh-packed-16148/behavior-16198/profiles/mr-baseline
+[smoke:packed] packed artifact: $EVIDENCE_PATH_078
+[smoke:packed] scratch home root: $EVIDENCE_PATH_079
+[smoke:behavior] scratch home: $EVIDENCE_PATH_080
+[smoke:behavior] fixture: $EVIDENCE_PATH_081
+dsh: initialized profile mr-baseline at $EVIDENCE_PATH_082
 Already up to date
 
 Done in 264ms using pnpm v11.28.5
@@ -702,7 +702,7 @@ Progress: resolved 0, reused 1, downloaded 0, added 0
 Packages: +4
 ++++
 Packages are copied from the content-addressable store to the virtual store.
-  Content-addressable store is at: /Users/example/Library/pnpm/store/v11
+  Content-addressable store is at: $EVIDENCE_PATH_083
   Virtual store is at:             node_modules/.pnpm
 Progress: resolved 23, reused 4, downloaded 0, added 4, done
 
@@ -712,8 +712,8 @@ dependencies:
 [ERR_PNPM_IGNORED_BUILDS] Ignored build scripts: koffi@3.3.7
 
 Run "pnpm approve-builds" to pick which dependencies should be allowed to run scripts.
-dsh: initialized profile mr-plugin at /var/folders/31/m13kcsfx08lg3ld8kc5gh8cm0000gn/T/dsh-packed-16148/behavior-16198/profiles/mr-plugin
-Command failed with exit code 1: pnpm add /var/folders/31/m13kcsfx08lg3ld8kc5gh8cm0000gn/T/dsh-pack-kDH2zr/dsh-electron-dsh-plugin-multi-root-workspace-0.1.17-ssh.1.tgzdsh: plugin command failed; diagnostics: /var/folders/31/m13kcsfx08lg3ld8kc5gh8cm0000gn/T/dsh-packed-16148/behavior-16198/profiles/mr-plugin/.plugin-manager/logs/operation-Fh3lbO/pnpm.log
+dsh: initialized profile mr-plugin at $EVIDENCE_PATH_084
+Command failed with exit code 1: pnpm add $EVIDENCE_PATH_085: plugin command failed; diagnostics: $EVIDENCE_PATH_086
 [dsh-runtime] applied the documented recovery: `koffi` allowBuild set to `true` in the scratch profile; re-running the same add
 [dsh-runtime] install succeeded after the allowBuilds recovery
 [dsh-runtime] @dsh-electron/dsh-plugin-multi-root-workspace was installed as a dependency but NOT activated in dsh.profile.bundles — the build-approval-interrupted first add left it already present, so the recovered add's reconcile skipped it; re-registering through a real `remove` + `add` cycle
@@ -730,7 +730,7 @@ Progress: resolved 0, reused 1, downloaded 0, added 0
 Packages: +4
 ++++
 Packages are copied from the content-addressable store to the virtual store.
-  Content-addressable store is at: /Users/example/Library/pnpm/store/v11
+  Content-addressable store is at: $EVIDENCE_PATH_083
   Virtual store is at:             node_modules/.pnpm
 Progress: resolved 23, reused 4, downloaded 0, added 4, done
 node_modules/koffi install$ node ./cnoke.cjs -P . -D src/koffi --prebuild --release
@@ -745,7 +745,7 @@ Done in 949ms using pnpm v11.28.5
 (Use `node --trace-warnings ...` to show where the warning was created)
 
 [smoke:behavior] 136 passed, 0 failed, 0 skipped
-[smoke] deferred scratch home cleanup to parent after exit: /var/folders/31/m13kcsfx08lg3ld8kc5gh8cm0000gn/T/dsh-packed-16148/behavior-16198
+[smoke] deferred scratch home cleanup to parent after exit: $EVIDENCE_PATH_080
 [smoke:packed] child closed; removing scratch home
 [smoke:packed] the packed artifact passed the behavior battery
 
@@ -771,7 +771,7 @@ AssertionError
 
 ===== final-installer-preflight.txt =====
 anchor=lib/remote-broker.js; expected=0; actual=0
-anchor=/var/empty/dsh-no-deps/lib/entry.js; expected=1; actual=1
+anchor=$EVIDENCE_PATH_087; expected=1; actual=1
 unresolvable from broker entry: @deepseek-ai/dsh, @deepseek-ai/cordis, @deepseek-ai/dsh-ssh, @deepseek-ai/dsh-fs-ssh, @deepseek-ai/dsh-subprocess-ssh, @deepseek-ai/dsh-sandbox-ssh
 installer syntax and isolated dependency preflight checks passed; no installer provisioning executed
 
@@ -798,7 +798,7 @@ Documentation checks passed.
 
 ===== final-latest-pack-check.txt =====
 $ node scripts/check-pack.mjs
-[pack:check] /var/folders/31/m13kcsfx08lg3ld8kc5gh8cm0000gn/T/dsh-pack-yUguvA/dsh-electron-dsh-plugin-multi-root-workspace-0.1.17-ssh.1.tgz
+[pack:check] $EVIDENCE_PATH_088
 [pack:check] 222 members:
   package/CHANGELOG.en.md
   package/CHANGELOG.md
@@ -1076,7 +1076,7 @@ Documentation checks passed.
 
 ===== ready-pack-check.txt =====
 $ node scripts/check-pack.mjs
-[pack:check] /var/folders/31/m13kcsfx08lg3ld8kc5gh8cm0000gn/T/dsh-pack-ujStjy/dsh-electron-dsh-plugin-multi-root-workspace-0.1.17-ssh.1.tgz
+[pack:check] $EVIDENCE_PATH_089
 [pack:check] 222 members:
   package/CHANGELOG.en.md
   package/CHANGELOG.md

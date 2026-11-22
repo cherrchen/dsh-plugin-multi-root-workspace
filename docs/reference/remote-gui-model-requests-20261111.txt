@@ -1,5 +1,5 @@
 # Scripted model endpoint request log (tool catalog only)
-# source: /tmp/dsh-model-requests.log on the GUI host
+# source: $EVIDENCE_PATH_038 on the GUI host
 # source sha256: 10282426fedf4fe8c9e0cca8361e84255ba5fb77929860c17e304ff4993636d1
 # request bodies omitted; the TOOLS line is the raw parsed tool-name list
 

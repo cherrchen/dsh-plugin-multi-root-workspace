@@ -5,33 +5,33 @@
   "host": {
     "machine": "initiator-host",
     "platform": "darwin arm64",
-    "node": "/usr/local/opt/dsh-broker/bin/node (copied from v24.18.0, system path — TCC blocks daemon exec under /Users/*)",
+    "node": "$EVIDENCE_PATH_050 (copied from v24.18.0, system path — TCC blocks daemon exec under $EVIDENCE_PATH_051)",
     "remoteLogin": "enabled via launchd ssh.plist (systemsetup requires Full Disk Access)"
   },
   "deployment": {
     "installer": "scripts/ssh-broker/install.sh Darwin branch, run as root with DSH_SSH_BROKER_JS/BROKER_MANIFEST/BROKER_NODE",
     "brokerAccount": "_dsh_ssh uid=502 gid=703",
     "clientGroup": "dsh-ssh-clients gid=702 (Host account example-account is member)",
-    "credentialRoot": "/usr/local/var/dsh-ssh-broker drwx------ _dsh_ssh:_dsh_ssh",
+    "credentialRoot": "$EVIDENCE_PATH_052 drwx------ _dsh_ssh:_dsh_ssh",
     "hostReadProbe": "ls credentialRoot -> EACCES; cat .ssh/id_ed25519 -> EACCES (from the Host account)",
-    "socket": "/usr/local/var/run/dsh-ssh-broker/broker.sock srw-rw---- _dsh_ssh:dsh-ssh-clients (parent drwxr-x--- _dsh_ssh:dsh-ssh-clients)",
-    "config": "/etc/dsh-ssh-broker/broker.json 0640 root:_dsh_ssh, auditMaxBytes 8MiB auditKeep 4",
-    "manifest": "/private/etc/dsh-remote/manifest.json root:_dsh_ssh 0644, every ancestor root-owned (production loader, no testing bypass), digest 7e2c3c91ed844a19308f380963b4e2d587a7f4ec3e7c72ba5d5b2eeca04c4651",
-    "service": "launchd system/com.dsh.ssh-broker state=running as _dsh_ssh, RunAtLoad+KeepAlive, ProgramArguments /usr/local/opt/dsh-broker/bin/node lib/remote-broker.js --config /etc/dsh-ssh-broker/broker.json",
-    "dependencyTree": "/usr/local/opt/dsh-broker root-owned npm --omit=dev tree; install.sh preflight resolved @deepseek-ai/dsh, cordis and all four SSH peers",
-    "sshClient": "per-alias IdentityFile+IdentitiesOnly+StrictHostKeyChecking+BatchMode+ForwardAgent no+ControlMaster auto/600s+UpdateHostKeys no; out-of-band known_hosts for .87/.93/127.0.0.1",
+    "socket": "$EVIDENCE_PATH_053 srw-rw---- _dsh_ssh:dsh-ssh-clients (parent drwxr-x--- _dsh_ssh:dsh-ssh-clients)",
+    "config": "$EVIDENCE_PATH_011 0640 root:_dsh_ssh, auditMaxBytes 8MiB auditKeep 4",
+    "manifest": "$EVIDENCE_PATH_034 root:_dsh_ssh 0644, every ancestor root-owned (production loader, no testing bypass), digest 7e2c3c91ed844a19308f380963b4e2d587a7f4ec3e7c72ba5d5b2eeca04c4651",
+    "service": "launchd system/com.dsh.ssh-broker state=running as _dsh_ssh, RunAtLoad+KeepAlive, ProgramArguments $EVIDENCE_PATH_050 lib/remote-broker.js --config $EVIDENCE_PATH_011",
+    "dependencyTree": "$EVIDENCE_PATH_054 root-owned npm --omit=dev tree; install.sh preflight resolved @deepseek-ai/dsh, cordis and all four SSH peers",
+    "sshClient": "per-alias IdentityFile+IdentitiesOnly+StrictHostKeyChecking+BatchMode+ForwardAgent no+ControlMaster auto/600s+UpdateHostKeys no; out-of-band known_hosts for initiator-host/target-host/127.0.0.1",
     "authorizedTargets": "macOS broker public key authorized on dshbuild+dshxfer@203.0.113.93, dshxfer2@203.0.113.87 and local example-account (macOS target leg)"
   },
   "installerFixes": [
     {
       "id": "darwin-group-ids",
       "bug": "next_id listed UniqueID on /Groups, but group records carry PrimaryGroupID — the empty result produced user/group records with no GID, so id() failed and the script aborted",
-      "fix": "next_id takes the id attribute per collection (UniqueID for /Users, PrimaryGroupID for /Groups) and always emits a number"
+      "fix": "next_id takes the id attribute per collection (UniqueID for $EVIDENCE_PATH_055, PrimaryGroupID for /Groups) and always emits a number"
     },
     {
       "id": "darwin-daemon-node-path",
-      "bug": "DSH_SSH_BROKER_NODE pointed into /Users/example/.nvm; the privacy framework denies system daemons exec inside any user home (launchd: access(X_OK) EACCES -> exit EX_CONFIG), so the broker never started",
-      "fix": "node copied to /usr/local/opt/dsh-broker/bin/node; the install.sh header now documents that DSH_SSH_BROKER_NODE must resolve outside /Users/*"
+      "bug": "DSH_SSH_BROKER_NODE pointed into $EVIDENCE_PATH_056; the privacy framework denies system daemons exec inside any user home (launchd: access(X_OK) EACCES -> exit EX_CONFIG), so the broker never started",
+      "fix": "node copied to $EVIDENCE_PATH_050; the install.sh header now documents that DSH_SSH_BROKER_NODE must resolve outside $EVIDENCE_PATH_051"
     }
   ],
   "hello": {
@@ -45,34 +45,34 @@
     {
       "environment": "mac-local",
       "target": "example-account@127.0.0.1 (macOS target leg)",
-      "open": "hello {platform:\"darwin\", workspace:/Users/example/dsh-ssh-target-workspace, executable:/usr/local/opt/dsh-broker/bin/node, protocol:3}",
-      "confine": "seatbelt profile: (allow default)(deny file-write*)(allow file-write* /dev/null + workspace subpath + /private/tmp + T)",
+      "open": "hello {platform:\"darwin\", workspace:$EVIDENCE_PATH_307, executable:$EVIDENCE_PATH_308, protocol:3}",
+      "confine": "seatbelt profile: (allow default)(deny file-write*)(allow file-write* $EVIDENCE_PATH_014 + workspace subpath + $EVIDENCE_PATH_057 + T)",
       "spawn": "process 1, confined argv executed",
-      "stdout": "Darwin arm64 / /Users/example/dsh-ssh-target-workspace / example-account / 501",
+      "stdout": "Darwin arm64 / $EVIDENCE_PATH_040 / example-account / 501",
       "exit": "exitCode 0, scope:true (confinement confirmed)"
     },
     {
       "environment": "vps-app",
       "target": "dshbuild@203.0.113.93 (macOS initiator -> Linux target)",
-      "open": "hello {platform:\"linux\", workspace:/srv/dsh/work/app, executable:/opt/node-v24/bin/node, protocol:3}",
+      "open": "hello {platform:\"linux\", workspace:$EVIDENCE_PATH_309, executable:$EVIDENCE_PATH_310, protocol:3}",
       "confine": "bwrap --ro-bind / --dev --unshare-pid --die-with-parent --bind workspace",
       "spawn": "process 1",
-      "stdout": "Linux x86_64 / /srv/dsh/work/app / dshbuild / 1000",
+      "stdout": "Linux x86_64 / $EVIDENCE_PATH_007 / dshbuild / 1000",
       "exit": "exitCode 0, scope:true"
     },
     {
       "environment": "vps-xfer",
       "target": "dshxfer@203.0.113.93 (chroot sftp)",
       "openSftp": "SFTP v3 + OpenSSH extensions (hardlink, fsync, posix-rename, ...)",
-      "realpath": "/import",
-      "lstat": "/import uid 1001 gid 1001 (chroot account)"
+      "realpath": "$EVIDENCE_PATH_039",
+      "lstat": "$EVIDENCE_PATH_039 uid 1001 gid 1001 (chroot account)"
     },
     {
       "environment": "vps-xfer2",
       "target": "dshxfer2@203.0.113.87 (chroot sftp, cross-machine)",
       "openSftp": "SFTP v3 + OpenSSH extensions",
-      "realpath": "/import",
-      "lstat": "/import uid 1001 gid 1001"
+      "realpath": "$EVIDENCE_PATH_039",
+      "lstat": "$EVIDENCE_PATH_039 uid 1001 gid 1001"
     }
   ],
   "hostAttestation": {
@@ -88,14 +88,14 @@
   "negative": [
     "open environmentId nope-nope -> refused:unknown-environment",
     "spawn with well-formed but unissued ticket -> refused:confinement-ticket-invalid",
-    "spawn cwd /Users/example outside confined workspaceRoot -> refused:confinement-ticket-cwd",
+    "spawn cwd $EVIDENCE_PATH_058 outside confined workspaceRoot -> refused:confinement-ticket-cwd",
     "confine policy mode danger-full-access -> protocol schema rejection: expected one of \"read-only\"|\"workspace-write\" (connection dropped; full-access cannot be expressed on the wire)"
   ],
   "audit": {
-    "path": "/usr/local/var/dsh-ssh-broker/audit.jsonl",
+    "path": "$EVIDENCE_PATH_059",
     "shape": "-rw------- _dsh_ssh:_dsh_ssh",
     "observed": "every dispatched op logged with connection/method/environment/outcome: ok for open/confine, refused:unknown-environment, refused:confinement-ticket-invalid, refused:confinement-ticket-cwd, rejected for protocol violations",
-    "rotation": "auditMaxBytes 8MiB auditKeep 4 configured (Linux rotation behavior already verified on .87)"
+    "rotation": "auditMaxBytes 8MiB auditKeep 4 configured (Linux rotation behavior already verified on initiator-host)"
   },
   "windows": {
     "target": [
@@ -113,7 +113,7 @@
     "second macOS machine as a distinct-network target (loopback example-account@127.0.0.1 exercised the full ssh+helper+seatbelt path locally)"
   ],
   "notes": [
-    "the .87 deployment manifest intentionally does not declare mac-local; each deployment's Host<->broker digest pair stays internally consistent",
+    "the initiator-host deployment manifest intentionally does not declare mac-local; each deployment's Host<->broker digest pair stays internally consistent",
     "the model-facing profile remains closed by default pending maintainer sign-off; the 2026-11-11 external review of the full evidence set passed"
   ]
 }

@@ -1,6 +1,6 @@
 # SSH 远端环境（个人模式）
 
-> 实验性、默认关闭。本文件是 ADR-0049 的 Host 侧运行参考；控制面语义（准入、状态机、remote-1 协议）见 [multi-environment-control-plane.md](./multi-environment-control-plane.md)。
+> 实验性、默认关闭。本文件是 ADR-0049 的 Host 侧运行参考；控制面语义（准入、状态机、remote-2 协议）见 [multi-environment-control-plane.md](./multi-environment-control-plane.md)。
 
 ## 启用条件
 
@@ -19,7 +19,7 @@ Host 将显式的 `team`、`hardened` 或其他不支持的模式视为停用。
 - 两个文件都必须是当前 uid 拥有的普通文件，非符号链接，权限至多 0600，父目录不得由 group/other 写，位置须在所有绑定的本地主根之外。连接文件缺失时，整个 personal 配置视为空；v2 连接文件存在时，绑定文件必须可读并通过保护检查。
 - 两个文件共用 `<basename>.lock` 的内核租约与 CAS，当前 revision 取两份文件的最大值。读取 v1 合并文件时剥离环境里的 `workspace`，保留已保存的绑定路径与权限。首次写入先准备绑定文件，再原子替换为 v2 连接文件。在这之后，每个变更只原子替换它所属的文件。
 - 凭据根由 `remoteEnvironments.credentialRoot` 指定，默认 `$DSH_HOME/storages/multi_root_workspace.ssh`。目录必须为当前 uid 所有且权限为 0700，否则返回 `credential-root-unsafe`。内部有 `credentials.json`、`keys/<id>` 与公钥、`secrets/<id>`、生成的 `ssh_config` 与 `known_hosts` 以及 `askpass.sh`。凭据记录的生成、导入、保存密码与删除经 `credentials.json.lock` 内核租约（与清单文件同一机制）串行化并在租约内重读，多个 Host 实例并发变更不丢记录。
-- 每次远端 snapshot/list/admit/add/remove 前，`refreshPersonal()` 检查两个文件的保护和内容。两份文件与其所在目录的 stat 身份（dev/ino/size/mtime/mode/uid）全部未变时沿用上一次已校验的读入；任一字段变化、文件缺失或父目录权限被放宽时立即重读并重做全部保护检查。有效配置原位发布，保留 owner 的授权域与现有 `remote-1` 连接。后续请求各自携带并校验当期清单摘要。配置损坏、语义非法或保护失效时，控制面进入 `config-invalid`，清空清单和摘要并拒绝远端准入，修复后可重新加载。
+- 每次远端 snapshot/list/admit/add/remove 前，`refreshPersonal()` 检查两个文件的保护和内容。两份文件与其所在目录的 stat 身份（dev/ino/size/mtime/mode/uid）全部未变时沿用上一次已校验的读入；任一字段变化、文件缺失或父目录权限被放宽时立即重读并重做全部保护检查。有效配置原位发布，保留 owner 的授权域与现有 `remote-2` 连接。后续请求各自携带并校验当期清单摘要。配置损坏、语义非法或保护失效时，控制面进入 `config-invalid`，清空清单和摘要并拒绝远端准入，修复后可重新加载。
 - personal 环境授权身份包含主机名、端口、账号、平台、主机钥、凭据引用（含已安装访问密钥）、Helper 与执行/传输策略。连接新建或身份变化生成新的身份 ID。显示名只影响展示。尚未包含目标和凭据身份的旧 personal 登记升级后变为 `withheld`，须重新登记一次。
 - personal Helper 在目录核验或获准执行时取该绑定的远端目录作为工作区；连接按环境和目录分别缓存。旧 Helper 绑定首次升级会因其清单内容变化而需要重新登记。
 
@@ -60,15 +60,15 @@ Host dsh-<environmentId>
 
 生成的路径按 ssh_config 规则引用和转义，拒绝换行/NUL；支持凭据根含空格。OpenSSH 的 `-G` 会移除引号，因此 Host 仅在完整字段与已知托管 known_hosts 路径一致时将其保留为单个文件，不用预期路径覆盖其他解析结果。
 
-`sshConfigLink` 在 `~/.ssh/config` **首行**写入 `Include "<credentialRoot>/ssh_config"`（先备份为 `config.dsh-backup-<时间戳>`，幂等）。`~/.ssh/config` 是符号链接（dotfiles 托管常见）时，备份与写入落在其解析出的目标文件上——符号链接本身保留、绝不替换成普通文件，备份落在目标文件旁；悬空符号链接直接向目标路径写入。未链接而使用 managed 环境时连接报 `ssh-config-not-linked`。
+`sshConfigLink` 在 `~/.ssh/config` **首行**写入 `Include "<credentialRoot>/ssh_config"`（先备份为 `config.dsh-backup-<时间戳>`，幂等）。`~/.ssh/config` 是符号链接（dotfiles 托管常见）时，备份与写入落在其解析出的目标文件上——符号链接本身保留、绝不替换成普通文件，备份落在目标文件旁；多层符号链接一直解析到最终目标，最终目标缺失时在该处创建。未链接而使用 managed 环境时连接报 `ssh-config-not-linked`。
 
 SFTP 使用独立的 SSH 子进程，同样在命令行强制 `StrictHostKeyChecking=yes`、`ForwardAgent=no`、`UpdateHostKeys=no`，并关闭 ControlMaster/ControlPath；用户别名配置不能放宽这些参数。ssh-config 别名的 `sshEnvironmentTest` 与 `sshHelperInstall` 在命令行强制同一组安全选项（测试连接另加 `BatchMode=yes` 与 `ConnectTimeout=10`）；托管来源从生成的 `ssh_config` 获得同样的值。
 
 ## Helper 安装与密码访问密钥引导
 
-- Helper：远端执行 `npm install --prefix ~/.dsh-helper/<ver> @deepseek-ai/dsh-ssh@<Host 同版>`，随后一次远端 node 探测计算整个 `node_modules` 文件集的确定性摘要（按相对路径排序的「路径 + 内容」sha256，覆盖 `helper.js` 的全部同包兄弟文件与所有 npm 依赖），并把远端 `lib/*` 逐文件哈希与 Host 本机包逐一比对——不一致即 `helper-hash-mismatch` 拒绝记录。连接使用 `helper-entry.mjs` 作为 `helperPath`：每次启动先重算该文件集摘要（常规文件按内容、符号链接按 readlink 目标、其他目录项按类型标记），与记录不符即以 78 退出并拒绝加载上游 helper；`helper.sha256` 记录远端 `lib/helper.js` 自身的 SHA-256——上游 `hello.hash` 校验的正是被加载的 helper.js 字节，而非入口脚本——记录另带 `integrity: 1`。没有 `integrity` 的旧单文件摘要记录在打开时被拒绝（`helper-outdated`），须重新安装 Helper。远端 node 探测容忍缺失（`command -v node || true`），缺 node 或路径非绝对时报 `helper-node-missing`；node/`$HOME`/摘要三个秒级探测在连接瞬断时自动重试一次，`npm install` 不重试；外部命令失败的报错携带退出码/信号与 stderr（截断），不再只剩裸 `Command failed:`。
+- Helper 安装使用与 Host 同版的 `@deepseek-ai/dsh-ssh`。Host 逐个比对包内 `lib/*`，并记录安装后 `node_modules` 文件集摘要 `treeSha256`。打开新连接前，Host 先验证远端入口脚本与由该摘要重建的脚本一致。入口脚本启动时重新验证文件集，再加载 Helper。上游 hello 仍以 `helper.sha256` 校验 `helper.js`。早于 `integrity: 2` 的 personal Helper 需要重新安装。该检查信任 SSH 对端和首次 npm 安装，后续校验由 Helper 入口执行。
 - 编辑连接：派生的 `accessKeyId` 由 Host 从已保存记录保留，前端无需回传；仅 environmentId、hostname/port/user、credentialId 与已确认主机指纹均未变化时继承。改变身份后必须重新安装访问密钥，不能通过保存请求移植旧密钥。
-- 密码引导：为该环境生成访问密钥后，以 `SSH_ASKPASS`（凭据根内 0700 脚本，只读取 `DSH_SSH_SECRET_FILE`）+ `SSH_ASKPASS_REQUIRE=force` + `BatchMode=no` 用密码登录一次，把公钥追加到远端 `authorized_keys`；此后连接一律走访问密钥。整个操作先做 revision 预检（过期 revision 在任何密钥生成与远端写入之前拒绝 `personal-config-conflict`）；安装后记录的 CAS 仍冲突时，只要环境仍存在且托管凭据与目标未变，就以新读到的 revision 重试一次并复用已安装的密钥，否则移除刚生成的密钥——不留无主访问密钥或远端授权。
+- 密码引导先做 revision 预检，然后固定已确认的主机公钥、账号及一次性密码副本。远端按公钥精确、串行地更新 `authorized_keys`。保存冲突时，目标身份和访问密钥引用均未变化才允许复用密钥重试一次。仍失败则用同一目标回滚远端条目，再删除本地密钥。如果远端无法确认回滚或读不出持久状态，返回 `access-key-reconcile-required`，保留该密钥记录及核对编号。
 - 私钥导入：带口令的私钥经 `SSH_ASKPASS`/`SSH_ASKPASS_REQUIRE=force`（凭据根内私有临时目录中的 0600 口令文件 + 0700 脚本，用完即删）把旧口令交给 `ssh-keygen -p` 解密后重新保存，口令不进入命令行参数；材料或口令被拒报 `credential-import-failed` 并清除半成品密钥文件。
 
 ## 实时开关
@@ -79,9 +79,9 @@ personal 子树首次等到控制面就绪再挂载，常规配置保存更新�
 
 设置写入走 Host 的 `settings` 服务；旧版 `configure` 路径没有 `setSource` 推送，行必须通过 `settings.describe()` 读取实时值，否则只有重启后 loader 重新组合才生效（本页“实时开关”回归覆盖）。
 
-## follower 与 remote-1
+## follower 与 remote-2
 
-Registry 的 owner 是唯一打开远程域和 `remote-1` 监听的 Host。若另一个 DSH 实例持有 lease，但它的 profile 没有挂载 `multi-root-remote-tools`（例如桌面端主插件仍是 mainline），follower 的 `connectFollower` 会收到 `registry authority is not ready`；面板显示 `remote.status.ownerWithoutRemotePlane` 的可操作提示。重启 follower 不能改变 owner；需要退出另一个实例，或让启用 SSH 的 profile 成为唯一 Host。
+Registry 的 owner 是唯一打开远程域和 `remote-2` 监听的 Host。若另一个 DSH 实例持有 lease，但它的 profile 没有挂载 `multi-root-remote-tools`（例如桌面端主插件仍是 mainline），follower 的 `connectFollower` 会收到 `registry authority is not ready`；面板显示 `remote.status.ownerWithoutRemotePlane` 的可操作提示。重启 follower 不能改变 owner；需要退出另一个实例，或让启用 SSH 的 profile 成为唯一 Host。
 
 ## GUI 管理面板（个人模式）
 
@@ -132,10 +132,10 @@ exec 与 transfer 独立授权：执行前用 helper 的只读受限 stat/realpa
 
 ## 在飞命令撤权与清理
 
-`remote_bash` 从 spawn 返回 handle 起观察取消、超时与授权变化，包括启动确认阶段。本 Host 的撤权通知立即触发重新准入，并每 250ms 向 Registry owner 轮询。启动前后都比较 epoch、有效模式、实际用到的登记指纹和连接代次。同一授权移除后重加会产生新的登记 ID，无关登记写入保留当前指纹。明确拒绝立即终止。临时不可用、摘要不一致和 IPC 中断在一次复核的 1 秒预算内重试，到期仍无法确认则以撤权终止。
+`remote_bash` 从 spawn 返回 handle 起观察取消、超时与授权变化，包括启动确认阶段。owner 通知各 Host 重新准入，并保留每秒一次的复核以观察会话模式变化等无通知情况。本地根重分类只用于含本地端点的准入。持续无法取得结论时，单轮复核在 5.5 秒截止后终止命令。
 
 终止原因返回 `termination: revoked | cancelled | timeout`。在 `terminateGraceMs` 内仍无法确认结果则返回 `unknown` 和 reconcileId，不无限等待、不重新执行。启动确认尚未到达时传输断开同样立即返回 `unknown`：不等待一个不会再来的确认，也不发送 terminate，因为启动是否发生本身未知。通知和轮询只是失效检测，不能代替每次新操作的正式准入；网络和调度延迟下不承诺撤权瞬间远端停止。
 
 ## 传输截止时间
 
-`transfer.timeoutMs` 是一次复制的总 I/O 预算，包含准入、连接/握手、预检、读取/写入、回读校验和发布。并发调用可共享环境的 SFTP 通道与 opening。取消与超时都只结束当前调用的等待：未应答的线上请求获得一段有界宽限（超时 1 秒、取消取剩余预算），宽限内收到应答则共享代次保持可用，其他调用继续使用通道；宽限耗尽仍未应答才废弃该代次。迟到的 opening 由管理器统一处理。清理使用独立且共享的 1 秒预算。失效代次按 residual/unknown 报告，避免按路径清理。CREATE 或 LINK 发出后缺少应答时返回 unknown 和 reconcileId。LINK 已确认时，清理失败仍返回 committed 与残留状态。
+`transfer.timeoutMs` 是一次复制的总 I/O 预算，涵盖准入、握手、读写、校验和发布。个人模式每个复制端点独占 SFTP 通道，取消或超时只影响该次复制。传输清理使用独立的一秒预算，清理结束后回收通道。CREATE 或 LINK 缺少应答时返回 unknown 和 reconcileId。LINK 已确认时，清理失败仍返回 committed 与残留状态。

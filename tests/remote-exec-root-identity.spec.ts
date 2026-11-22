@@ -161,5 +161,8 @@ describe.skipIf(process.platform === 'win32')('the pinned dev:ino is re-checked 
     expect(result).toMatchObject({ status: 'not-started', code: 'endpoint-redirected' })
     expect(h.probes.length).toBeGreaterThanOrEqual(1)
     expect(h.commands).toHaveLength(0)
+    expect((await stack.registry.remoteList(fixture.workspace)).grants[0]?.state).toBe('withheld')
+    await stack.registry.addRemote(fixture.workspace, { environmentId: 'build-01', rootId: 'app' })
+    expect((await stack.registry.remoteList(fixture.workspace)).grants[0]?.state).toBe('registered')
   })
 })

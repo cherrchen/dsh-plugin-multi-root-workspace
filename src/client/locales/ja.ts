@@ -363,6 +363,7 @@ export const ja = {
   'error.remote-unavailable': 'リモートコントロールプレーンを現在利用できません。',
   'error.authority-unavailable': 'ローカル Registry のチャネルが利用できないかビジーです。しばらくしてから再試行してください。',
   'error.authority-disconnected': 'ワークスペースストアを保持する Host との接続が切断されました。操作の結果は不明です。再読み込みしてから再試行してください。',
+  'error.access-key-reconcile-required': "アクセスキーのロールバックを確認できませんでした。元の SSH ホストを確認してください。",
   'error.authority-timeout': 'ワークスペースストアを保持する Host へのリクエストがタイムアウトしました。操作の結果は不明です。再読み込みしてから再試行してください。',
   'error.authority-cancelled': '操作はキャンセルされました。',
   'error.invalid-arguments': 'リクエストの引数が無効です。',

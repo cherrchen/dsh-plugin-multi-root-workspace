@@ -175,7 +175,8 @@ describe('the model-facing capability projection', () => {
   it('explains a degraded control plane and a read-only session', () => {
     const degraded = renderRemoteCapabilities({ bindings, environments: manifest.environments, mode: 'workspace-write', status: { state: 'config-invalid', reason: 'bad manifest' } })
     expect(degraded).toContain('remote-unavailable')
-    expect(degraded).toContain('bad manifest')
+    expect(degraded).toContain('config-invalid')
+    expect(degraded).not.toContain('bad manifest')
     const readOnly = renderRemoteCapabilities({ bindings, environments: manifest.environments, mode: 'read-only', status: { state: 'ready' } })
     expect(readOnly).toContain('This session is read-only')
     expect(renderRemoteCapabilities({ bindings, environments: manifest.environments, mode: 'workspace-write', status: { state: 'ready' } }))

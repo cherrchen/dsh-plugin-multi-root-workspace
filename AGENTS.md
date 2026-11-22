@@ -113,7 +113,7 @@ Issue #32 multi-environment work is in progress on `feat/ssh-workspace`, default
 
 The personal SSH Settings channel serves plugin-wide connection management. Workspace Root bindings and registration require a live session. The management dialog has Connections and SSH keys tabs, plus a dedicated Add connection dialog. The `remote-tools` row mounts the personal SSH provider tools only after the user enables the experimental switch, the SSH capability gate passes, and the remote plane is ready. The four SSH packages are optional peers with the full allowlist range. They load through `src/compat/ssh-packages.ts` behind `classifySshCapability` and never affect the local compatibility verdict. Keep `SUPPORTED_SSH_RELEASES` a suffix of `SUPPORTED_DSH_RELEASES`. `pack:check` rejects static SSH imports and packaged SSH broker entry points.
 
-The branch includes main's `v0.1.23` tree, uses DSH `0.2.2-rc.5` for development, and has unreleased version `0.1.24-ssh.1`. When merging main, carry version-floor evidence forward, synchronize panel keys across all eight dictionaries, and synchronize the eight root READMEs.
+The branch includes main's `v0.1.23` tree, uses DSH `0.2.2-rc.5` for development, and has unreleased version `0.1.24-beta.1`. When merging main, carry version-floor evidence forward, synchronize panel keys across all eight dictionaries, and synchronize the eight root READMEs.
 
 Twelve invariants that must survive future changes:
 

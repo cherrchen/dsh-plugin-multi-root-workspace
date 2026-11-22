@@ -363,6 +363,7 @@ export const en = {
   'error.remote-unavailable': 'The remote control plane is unavailable.',
   'error.authority-unavailable': 'The local registry channel is unavailable or busy; retry shortly.',
   'error.authority-disconnected': 'The connection to the Host holding the workspace store dropped; the outcome is unknown, refresh before retrying.',
+  'error.access-key-reconcile-required': "The access key rollback could not be confirmed. Check the original SSH host.",
   'error.authority-timeout': 'The request to the Host holding the workspace store timed out; the outcome is unknown, refresh before retrying.',
   'error.authority-cancelled': 'The operation was cancelled.',
   'error.invalid-arguments': 'The request arguments are invalid.',

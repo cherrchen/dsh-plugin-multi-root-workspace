@@ -73,7 +73,8 @@ English: [ssh-remote-environments.en.md](./ssh-remote-environments.en.md)
 - **`owner-without-remote-protocol` / 面板提示另一实例持有存储**：另一个未开启 SSH 远端功能的 DSH 实例（例如未启用该插件的 Desktop 端）正持有 `$DSH_HOME` 的存储锁。退出那个实例后再刷新。
 - **`endpoint-unverifiable`** — 确认 Host 使用受支持的 DSH 版本，并已安装四个版本匹配的 SSH 可选包。
 - **`ssh-config-not-linked`**（个人模式）：存在托管凭据的环境但尚未把插件生成的配置链接进 `~/.ssh/config`，在「远端连接」中点击 **链接到 ~/.ssh/config**。
-- **`helper-outdated`**：记录的 Helper 早于整集完整性校验，在对应连接卡片上重新 **安装 Helper**。
+- **`access-key-reconcile-required`**：安装或回滚的结果无法确认。使用错误消息中的密钥编号，在原 SSH 主机上核对 `authorized_keys` 后再重试。
+- **`helper-outdated`**：记录的 Helper 早于 Host 侧入口完整性校验，在对应连接卡片上重新 **安装 Helper**。
 - **`unknown` 返回与 `reconcileId`**：远端命令启动后连接断开或文件发布应答丢失时，工具不会自动重试（避免重复执行或覆盖文件），请凭返回的 `reconcileId` 到远端对账后再决定后续操作。
 
 关于协议字段、全部错误码与架构细节，参见技术参考 [SSH 远端环境参考](../../reference/ssh-remote-environments.md) 与 [多执行环境控制面参考](../../reference/multi-environment-control-plane.md)。

@@ -73,7 +73,8 @@ Turn off **SSH remote environments** in the plugin settings to shut down the rem
 - **`owner-without-remote-protocol`**: another DSH instance without the SSH remote plane enabled (for example, an unpatched Desktop instance) holds the `$DSH_HOME` storage lease. Quit that instance and refresh.
 - **`endpoint-unverifiable`** — Check that the Host uses a supported DSH release and has all four matching SSH packages installed.
 - **`ssh-config-not-linked`** (Personal mode): a managed credential environment exists, but the generated config is not yet linked into `~/.ssh/config`. Click **Link ~/.ssh/config** under **Remote connections**.
-- **`helper-outdated`**: the recorded helper predates full file-set integrity verification; click **Install helper** again on that connection card.
+- **`access-key-reconcile-required`**: installation or rollback could not be confirmed. Use the key ID in the error message to check `authorized_keys` on the original SSH host before retrying.
+- **`helper-outdated`**: the recorded helper predates host-side entry verification; click **Install helper** again on that connection card.
 - **`unknown` result with `reconcileId`**: connection dropped after a remote command started or after sending a file publish request. Tools never auto-retry to avoid duplicate execution or overwrites; reconcile on the remote host or in the Broker audit log using `reconcileId`.
 
 For protocol schemas, full refusal codes, and architectural invariants, see the [SSH remote environments reference](../../reference/ssh-remote-environments.md) and the [control plane reference](../../reference/multi-environment-control-plane.md).

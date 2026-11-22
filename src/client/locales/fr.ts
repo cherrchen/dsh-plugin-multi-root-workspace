@@ -363,6 +363,7 @@ export const fr = {
   'error.remote-unavailable': 'Le plan de contrôle distant est actuellement indisponible.',
   'error.authority-unavailable': 'Le canal du registre local est indisponible ou occupé ; réessayez dans un instant.',
   'error.authority-disconnected': 'La connexion au Host qui détient le stockage de l’espace de travail a été interrompue ; le résultat est inconnu, actualisez avant de réessayer.',
+  'error.access-key-reconcile-required': "L’annulation de la clé d’accès n’a pas pu être confirmée. Vérifiez l’hôte SSH d’origine.",
   'error.authority-timeout': 'La requête au Host qui détient le stockage de l’espace de travail a expiré ; le résultat est inconnu, actualisez avant de réessayer.',
   'error.authority-cancelled': 'L’opération a été annulée.',
   'error.invalid-arguments': 'Les arguments de la requête sont invalides.',

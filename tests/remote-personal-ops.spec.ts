@@ -5,6 +5,7 @@
  * attestation shape, plane reload, and secrets never leaving RPC answers.
  * Every external command goes through the injected ExecFile seam.
  */
+import { createHash as hashServerKey } from 'node:crypto'
 import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -425,7 +426,7 @@ describe.skipIf(process.platform === 'win32')('personal endpoint behaviours (R1/
     expect(helper?.helperPath).toContain('helper-entry.mjs')
     expect(helper?.protocol).toBe(3)
     expect(commands.some(cmd => cmd.includes('npm install'))).toBe(true)
-    expect(loadPersonalConfig(personalPath).environments[0]!.helper?.integrity).toBe(1)
+    expect(loadPersonalConfig(personalPath).environments[0]!.helper?.integrity).toBe(2)
   })
 
   it('R6: a failed access-key install removes the orphan key; env remove cleans its access key', async () => {
@@ -438,13 +439,16 @@ describe.skipIf(process.platform === 'win32')('personal endpoint behaviours (R1/
         writeFileSync(`${String(args.at(-1))}.pub`, 'ssh-ed25519 AAAAPUB\n', { mode: 0o644 })
         return { stdout: '', stderr: '' }
       }
-      if (file === 'ssh' && failInstall) throw new Error('remote refused the key')
+      if (file === 'ssh' && failInstall && String(args.at(-1)).includes('printf')) throw new Error('remote refused the key')
       return { stdout: '', stderr: '' }
     }
     await handlePersonalEndpoint(undefined as never as Context, registry, '/w',
       { endpoint: 'sshCredentialPassword', sessionId: 's', label: 'pw', password: 's3cr3t' }, { exec })
     const saved = loadPersonalConfig(personalPath)
-    const env = { ...MANAGED, credential: { kind: 'managed' as const, credentialId: '' } }
+    const serverKey = 'AAAA'
+    const fingerprint = hashServerKey('sha256').update(Buffer.from(serverKey, 'base64')).digest('base64').replace(/=+$/, '')
+    writeFileSync(join(credentialRoot, 'known_hosts'), `build.internal ssh-ed25519 ${serverKey}\n`, { mode: 0o600 })
+    const env = { ...MANAGED, hostKey: 'SHA256:' + fingerprint, credential: { kind: 'managed' as const, credentialId: '' } }
     env.credential = { kind: 'managed', credentialId: JSON.parse(readFileSync(join(credentialRoot, 'credentials.json'), 'utf8'))[0].id }
     writeConfig(personalPath, { ...saved, environments: [env] })
     await expect(handlePersonalEndpoint(undefined as never as Context, registry, '/w',
@@ -505,7 +509,7 @@ describe.skipIf(process.platform === 'win32')('operations argv/env and hash chec
     expect(captured!.args).toContain('BatchMode=no')
     expect(captured!.args).toContain('PubkeyAuthentication=no')
     expect(captured!.args).toContain('dsh-dev-box')
-    expect(captured!.args.at(-1)).toBe('umask 077; mkdir -p ~/.ssh && cat >> ~/.ssh/authorized_keys')
+    expect(captured!.args.at(-1)).toContain('mv -f "$tmp" authorized_keys')
     expect(captured!.env).toMatchObject({ SSH_ASKPASS_REQUIRE: 'force', DISPLAY: 'dsh', DSH_SSH_SECRET_FILE: join(credentialRoot, 'secrets', 'id1') })
     expect(captured!.input).toBe('ssh-ed25519 AAAAPUB\n')
   })
@@ -534,7 +538,8 @@ describe.skipIf(process.platform === 'win32')('operations argv/env and hash chec
     const result = await installHelper(exec, SSH_CONFIG_ENV, credentialRoot, { sshVersion: '0.2.2-rc.2', hostHelperPath: hostHelper })
     expect(result.nodePath).toBe('/usr/local/bin/node')
     expect(result.helperPath).toBe('/home/builder/.dsh-helper/0.2.2-rc.2/helper-entry.mjs')
-    expect(result.integrity).toBe(1)
+    expect(result.integrity).toBe(2)
+    expect(result.treeSha256).toBe('c'.repeat(64))
     // helper.sha256 stays the helper.js artifact digest — upstream's
     // hello.hash identifies the launched helper.js, never the entry script.
     expect(result.sha256).toBe(hash('helper.js'))

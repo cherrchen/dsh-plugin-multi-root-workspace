@@ -362,6 +362,7 @@ export const zh = {
   'error.remote-unavailable': '远端控制面当前不可用。',
   'error.authority-unavailable': '本地注册表通道不可用或繁忙，请稍后重试。',
   'error.authority-disconnected': '与持有工作区存储的 Host 的连接已断开，操作结果未知，请刷新后重试。',
+  'error.access-key-reconcile-required': "无法确认访问密钥安装的回滚结果，请在原 SSH 主机上核对。",
   'error.authority-timeout': '对持有工作区存储的 Host 的请求超时，操作结果未知，请刷新后重试。',
   'error.authority-cancelled': '操作已取消。',
   'error.invalid-arguments': '请求参数无效。',

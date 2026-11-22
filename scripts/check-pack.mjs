@@ -26,7 +26,7 @@ import { join, posix, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { gunzipSync } from 'node:zlib'
 import { parse } from 'yaml'
-import { staticSshImports } from './lib/static-ssh-imports.mjs'
+import { importSpecifiers, staticSshImports } from './lib/static-ssh-imports.mjs'
 
 /** Repository root (this file lives in `scripts/`). */
 const REPO_ROOT = resolve(fileURLToPath(new URL('..', import.meta.url)))
@@ -140,16 +140,6 @@ function moduleTarget(name, pkg) {
   const entry = pkg.exports?.[subpath] ?? (subpath === '.' ? pkg.main : undefined)
   const file = typeof entry === 'string' ? entry : entry?.default
   return file === undefined ? undefined : `package/${file.replace(/^\.\//, '')}`
-}
-
-/** Every specifier a packed ESM file references. */
-function importSpecifiers(source) {
-  const found = []
-  for (const match of source.matchAll(/(?:import|export)[^'"]*?\bfrom\s*['"]([^'"]+)['"]|import\s*['"]([^'"]+)['"]|import\(\s*['"]([^'"]+)['"]\s*\)/g)) {
-    const specifier = match[1] ?? match[2] ?? match[3]
-    if (specifier !== undefined) found.push(specifier)
-  }
-  return found
 }
 
 /** `a.js`, `a.json`, or `a/index.js`-style resolution inside the member set. */

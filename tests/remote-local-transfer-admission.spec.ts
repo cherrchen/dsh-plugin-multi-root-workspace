@@ -97,7 +97,7 @@ describe.skipIf(process.platform === 'win32')('local transfer endpoints are admi
       admitted = operation.endpoints.find(entry => entry.environmentId === 'local')?.localRoot
     })
     expect(remoteRequest).toHaveBeenCalledWith('remote-admit', expect.anything())
-    expect(admitted).toEqual({ rootId: ALIAS, path: status!.path, access: status!.access })
+    expect(admitted).toEqual({ rootId: ALIAS, path: status!.path, access: status!.access, incarnation: status!.id })
 
     // The issued authority comes from the owner-admitted record; the local
     // projection agrees — same path, same access, state available.

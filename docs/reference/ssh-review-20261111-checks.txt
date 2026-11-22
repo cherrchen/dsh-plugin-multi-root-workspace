@@ -18,7 +18,7 @@ run with a one-shot wider sandbox so the kernel peer check is meaningful.
 command: `pnpm test --reporter=json --outputFile=.review-tmp/vitest-head.json`
 result: **1562 passed / 131 skipped / 0 failed** (1693 tests; 106 files passed, 8 skipped, 114 total)
 raw report: `ssh-review-20261111-vitest.json`
-sha256: dd9e96700b00a51b04eb73b76b1b007847a2a7bf33ea2761ad1978800c0325b3
+sha256: c27af6524f6fa35d663e4a9cbb16ab66c6cbc88100d8ea92fda8828cf76ff9c0
 
 `pnpm registry:probe --required` passes outside the sandbox; it fails the
 required check inside the Agent sandbox with:
@@ -64,10 +64,10 @@ not acceptance evidence.
   audit, disk reload + tamper refusal, second-profile live audit.
 - `docs/reference/remote-gui-host-evidence-20261111.json` + `.png`:
   DSH Web/Chromium panel registration/removal over the plugin RPC channel;
-  screenshot sha256 verified against the record.
+  The historical screenshot was removed during path redaction.
 - `docs/reference/remote-macos-matrix-evidence-20261111.json`:
   macOS launchd broker, macOS target under seatbelt, Linux targets, and
   Windows-target manifest rejection (`tests/remote-manifest.spec.ts` 42/42).
-- F13 `.87` socket probe and `remote-broker.live` 6/6 are maintainer live
+- F13 `initiator-host` socket probe and `remote-broker.live` 6/6 are maintainer live
   records; the probe script/output was not archived in the repository. Code
   and unit tests were reviewed and pass.

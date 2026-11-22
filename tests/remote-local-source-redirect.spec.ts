@@ -176,7 +176,7 @@ describe('remote_copy refuses a redirected local source root', () => {
     }
   })
 
-  it('local→remote refuses local-root-redirected and writes nothing remotely', async () => {
+  it.skipIf(process.platform === 'win32')('local→remote refuses local-root-redirected and writes nothing remotely', async () => {
     fixture = createFixtureWorkspace('source-copy')
     const { canonical } = redirect()
     const s = stack([{ aliasId: 'data', path: canonical, state: 'available', access: 'inherit' }])

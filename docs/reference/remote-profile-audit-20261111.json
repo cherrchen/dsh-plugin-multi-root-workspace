@@ -1,9 +1,9 @@
 {
   "capturedAt": "2026-11-11T13:10:00Z",
   "host": "initiator-host (203.0.113.87)",
-  "home": "/home/dsh-test/probe-home",
-  "profilesDirectory": "/home/dsh-test/probe-home/profiles",
-  "command": "runuser -u dsh-test -- env DSH_HOME=/home/dsh-test/probe-home PRIMARY=/home/dsh-test/work/primary DSH_CLI=/srv/dsh-plugin-repo/node_modules/@deepseek-ai/dsh/lib/bin.js /opt/node-v24/bin/node /tmp/audit-profile.mjs <profile>",
+  "home": "$EVIDENCE_PATH_060",
+  "profilesDirectory": "$EVIDENCE_PATH_061",
+  "command": "runuser -u dsh-test -- env DSH_HOME=$EVIDENCE_PATH_060 PRIMARY=$EVIDENCE_PATH_005 DSH_CLI=$EVIDENCE_PATH_009 $EVIDENCE_PATH_043 $EVIDENCE_PATH_062 <profile>",
   "profiles": [
     {
       "profile": "remote-exp",

@@ -4,7 +4,7 @@
 import { createServer } from 'node:http'
 import { appendFileSync } from 'node:fs'
 
-const LOG = '/tmp/dsh-model-requests.log'
+const LOG = '/tmp/dsh-evidence-requests.log'
 const frame = p => `data: ${JSON.stringify(p)}\n\n`
 const event = p => `event: ${p.type}\ndata: ${JSON.stringify(p)}\n\n`
 
@@ -16,7 +16,7 @@ const server = createServer((req, res) => {
     try {
       const parsed = JSON.parse(body)
       if (Array.isArray(parsed.tools)) appendFileSync(LOG, `TOOLS:${JSON.stringify(parsed.tools.map(t => t.function?.name ?? t.name))}\n`)
-      appendFileSync('/tmp/dsh-model-body-last.json', body)
+      appendFileSync('/tmp/dsh-evidence-body.json', body)
     } catch {}
     const url = req.url ?? ''
     if (req.method === 'GET' && /models/.test(url)) {

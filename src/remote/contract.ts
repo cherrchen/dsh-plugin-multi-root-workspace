@@ -37,6 +37,7 @@ export interface AdmittedLocalRoot {
   readonly rootId: string
   readonly path: string
   readonly access: 'primary' | RootAccess
+  readonly incarnation: string
 }
 
 /** One endpoint carried by an `admit` decision; local endpoints have no remote identity. */
@@ -48,6 +49,7 @@ export interface AdmittedRemoteEndpoint {
   readonly bindingDigest: string | null
   readonly environmentDigest: string | null
   readonly configVersion: string | null
+  readonly incarnation?: string
   /** The owner's local authority for a `local` endpoint; `null` on remote endpoints. */
   readonly localRoot: AdmittedLocalRoot | null
 }

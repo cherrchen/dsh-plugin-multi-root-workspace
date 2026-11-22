@@ -13,16 +13,16 @@
     leasePath: !!js dshHomePath('storages/multi_root_workspace.lock')
     remoteEnvironments:
       enabled: true
-      manifestPath: /etc/dsh-remote/manifest.json
+      manifestPath: $EVIDENCE_PATH_003
 - insert:
   - id: multi-root-remote-tools
     name: '@dsh-electron/dsh-plugin-multi-root-workspace/remote-tools'
     config:
       broker:
         config:
-          socketPath: /run/dsh-ssh-broker/broker.sock
+          socketPath: $EVIDENCE_PATH_001
           brokerUid: 996
-          credentialRoot: /var/lib/dsh-ssh-broker
+          credentialRoot: $EVIDENCE_PATH_002
           fullAccessDisabled: true
           confinementProbe:
             verified: true

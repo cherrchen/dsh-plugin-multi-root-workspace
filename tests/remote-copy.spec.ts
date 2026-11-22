@@ -193,7 +193,7 @@ const remoteToRemote = (over: Partial<RemoteCopyRequest> = {}) => request({
 const run = (s: ReturnType<typeof stack>, req: RemoteCopyRequest, deps: RemoteCopyDeps = s.deps) =>
   runRemoteCopy(s.registry, deps, req, 'remote_copy', new AbortController().signal)
 
-describe('runRemoteCopy local → remote(sftp)', () => {
+describe.skipIf(process.platform === 'win32')('runRemoteCopy local → remote(sftp)', () => {
   it('commits a staged copy end to end', async () => {
     fixture = createFixtureWorkspace('remote-copy')
     writeFileSync(join(fixture.workspace, 'source.txt'), 'hello-remote')
@@ -533,7 +533,7 @@ describe('runRemoteCopy remote(sftp) → remote(sftp)', () => {
   })
 })
 
-describe('remote destination path safety', () => {
+describe.skipIf(process.platform === 'win32')('remote destination path safety', () => {
   const local = () => {
     fixture = createFixtureWorkspace('remote-safety')
     writeFileSync(join(fixture.workspace, 'source.txt'), 'payload')
@@ -646,7 +646,7 @@ describe('remote destination path safety', () => {
 
 
 describe('total transfer I/O deadline and cancellation', () => {
-  it.each(['realpath', 'write', 'read', 'fsync', 'hardlink', 'remove', 'close'] as const)('bounds a stalled %s without publishing again', async method => {
+  it.skipIf(process.platform === 'win32').each(['realpath', 'write', 'read', 'fsync', 'hardlink', 'remove', 'close'] as const)('bounds a stalled %s without publishing again', async method => {
     fixture = createFixtureWorkspace('copy-deadline')
     writeFileSync(join(fixture.workspace, 'source.txt'), 'bounded')
     const s = stack({ transfer: { maxBytes: 1024, timeoutMs: 40 } })
@@ -663,8 +663,8 @@ describe('total transfer I/O deadline and cancellation', () => {
 
   it.for(['upload', 'download', 'relay'] as const)('cancels a stalled %s without waiting for the response', async (direction, context) => {
     fixture = createFixtureWorkspace('copy-cancel')
-    if (direction === 'download' && process.platform === 'win32') {
-      context.skip('The local transfer sink is POSIX-only (ADR-0030)')
+    if (direction !== 'relay' && process.platform === 'win32') {
+      context.skip('Local transfer handles are POSIX-only (ADR-0030)')
     }
     writeFileSync(join(fixture.workspace, 'source.txt'), 'bounded')
     const s = stack()
@@ -694,7 +694,7 @@ describe('total transfer I/O deadline and cancellation', () => {
     expect(s.mem.readCalls).toBe(0)
   })
 
-  it('abandons a timed-out opening without closing a shared session returned later', async () => {
+  it.skipIf(process.platform === 'win32')('abandons a timed-out opening without closing a shared session returned later', async () => {
     fixture = createFixtureWorkspace('copy-open-timeout')
     writeFileSync(join(fixture.workspace, 'source.txt'), 'bounded')
     const s = stack({ transfer: { maxBytes: 1024, timeoutMs: 30 } })
@@ -710,7 +710,7 @@ describe('total transfer I/O deadline and cancellation', () => {
     expect(dispose).not.toHaveBeenCalled()
   })
 
-  it('cancels one upload with a pending write while another upload shares its SFTP channel', async () => {
+  it.skipIf(process.platform === 'win32')('cancels one upload with a pending write while another upload shares its SFTP channel', async () => {
     fixture = createFixtureWorkspace('copy-shared-cancel')
     writeFileSync(join(fixture.workspace, 'source.txt'), 'shared bytes')
     const s = stack({ uniqueOperationIds: true })
@@ -735,7 +735,7 @@ describe('total transfer I/O deadline and cancellation', () => {
     expect(s.mem.files.has('/import/dest.txt')).toBe(false)
   })
 
-  it('a timed-out write abandons only the waiter and breaks the shared session after a bounded grace', async () => {
+  it.skipIf(process.platform === 'win32')('a timed-out write abandons only the waiter and breaks the shared session after a bounded grace', async () => {
     fixture = createFixtureWorkspace('copy-shared-timeout')
     writeFileSync(join(fixture.workspace, 'source.txt'), 'shared bytes')
     const s = stack({ uniqueOperationIds: true, transfer: { maxBytes: 1024, timeoutMs: 50 } })
@@ -760,7 +760,7 @@ describe('total transfer I/O deadline and cancellation', () => {
     expect(dispose).toHaveBeenCalled()
   })
 
-  it('a timed-out request that answers inside the grace keeps the shared session', async () => {
+  it.skipIf(process.platform === 'win32')('a timed-out request that answers inside the grace keeps the shared session', async () => {
     fixture = createFixtureWorkspace('copy-shared-timeout-late')
     writeFileSync(join(fixture.workspace, 'source.txt'), 'shared bytes')
     const s = stack({ uniqueOperationIds: true, transfer: { maxBytes: 1024, timeoutMs: 50 } })

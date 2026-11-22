@@ -13,7 +13,7 @@ import { checkRemotePath } from './manifest.ts'
 import type { SshCall, SshSettingsCall, SshStateView } from './personal-contract.ts'
 import { loadPersonalConfig, savePersonalConfig, type PersonalConfig, type PersonalEnvironment } from './personal/config.ts'
 import { CredentialStore, defaultExec, type ExecFile } from './personal/credentials.ts'
-import { helperProtocol, HostKeyScans, installAccessKey, installHelper, testConnection } from './personal/operations.ts'
+import { helperProtocol, HostKeyScans, installAccessKey, installHelper, pinAccessKeyTarget, removeAccessKey, testConnection } from './personal/operations.ts'
 import { link, linkStatus, listSshConfigAliases, recordKnownHost, renderSshConfig } from './personal/ssh-files.ts'
 import { listRemoteDirectories } from './personal/remote-paths.ts'
 import { primaryKey } from '../roots.ts'
@@ -362,45 +362,58 @@ async function runPersonalEndpoint(
       if (config.revision !== call.revision) {
         throw new RemoteAdmissionError('personal-config-conflict', 'the SSH environment data changed; reload and retry')
       }
-      const accessKey = await store.generate(`env-${environment.environmentId}`, { purpose: 'access-key', environmentId: environment.environmentId })
+      if (environment.credential.accessKeyId !== undefined) return await after()
+      const managed = environment.credential
+      const sameTarget = (entry: PersonalEnvironment): boolean => entry.credential.kind === 'managed'
+        && entry.credential.credentialId === managed.credentialId
+        && entry.credential.accessKeyId === managed.accessKeyId
+        && entry.identityId === environment.identityId && entry.hostKey === environment.hostKey
+        && entry.endpoint.hostname === environment.endpoint.hostname && entry.endpoint.port === environment.endpoint.port
+        && entry.endpoint.user === environment.endpoint.user
+      const conflict = () => new RemoteAdmissionError('personal-config-conflict', 'the SSH environment changed during access-key install; reload and retry')
+      const pinned = pinAccessKeyTarget(environment, paths.credentialRoot, secretFile)
       try {
-        await installAccessKey(exec, environment, paths.credentialRoot, { publicKey: accessKey.publicKey ?? '' }, secretFile)
-      } catch (error) {
-        try { await store.remove(accessKey.id, () => false) } catch { /* best effort: no orphan key */ }
-        throw error
-      }
-      const attach = async (revision: number): Promise<SshStateView> => mutate(registry, primary, paths, revision, current => {
-        const entry = current.environments.find(candidate => candidate.environmentId === call.environmentId)
-        if (entry === undefined) throw new RemoteAdmissionError('environment-not-found', `unknown environment "${call.environmentId}"`)
-        if (entry.credential.kind !== 'managed') {
-          throw new RemoteAdmissionError('personal-config-conflict', 'the SSH environment changed during access-key install; reload and retry')
+        const accessKey = await store.generate(`env-${environment.environmentId}`, { purpose: 'access-key', environmentId: environment.environmentId })
+        const key = { publicKey: accessKey.publicKey ?? '' }
+        const attach = (revision: number) => mutate(registry, primary, paths, revision, current => {
+          const entry = current.environments.find(candidate => candidate.environmentId === call.environmentId)
+          if (entry === undefined || !sameTarget(entry)) throw conflict()
+          return {
+            ...current,
+            environments: current.environments.map(candidate => candidate !== entry ? candidate : {
+              ...candidate,
+              credential: { ...managed, accessKeyId: accessKey.id },
+            }),
+          }
+        })
+        try {
+          await installAccessKey(exec, environment, paths.credentialRoot, key, pinned.secretFile, pinned.knownHosts)
+          try { return await attach(call.revision) }
+          catch (error) {
+            if ((error as { code?: unknown }).code !== 'personal-config-conflict') throw error
+            const current = loadPersonalConfig(paths.personalPath)
+            const entry = current.environments.find(candidate => candidate.environmentId === call.environmentId)
+            if (entry === undefined || !sameTarget(entry)) throw error
+            return await attach(current.revision)
+          }
+        } catch (error) {
+          // Read durable state before rolling back: a write may have succeeded
+          // even if refreshing the view afterward failed.
+          try {
+            const attached = loadPersonalConfig(paths.personalPath).environments.some(entry =>
+              entry.credential.kind === 'managed' && entry.credential.accessKeyId === accessKey.id)
+            if (!attached) {
+              await removeAccessKey(exec, environment, paths.credentialRoot, key, pinned.secretFile, pinned.knownHosts)
+              await store.remove(accessKey.id, () => false)
+            }
+          } catch {
+            throw new RemoteAdmissionError('access-key-reconcile-required',
+              `access-key install could not be reconciled; inspect the original host for key dsh-${accessKey.id}`)
+          }
+          throw error
         }
-        return {
-          ...current,
-          environments: current.environments.map(candidate => candidate.environmentId !== call.environmentId ? candidate : {
-            ...candidate,
-            credential: { ...candidate.credential, accessKeyId: accessKey.id },
-          }),
-        }
-      })
-      try {
-        return await attach(call.revision)
-      } catch (error) {
-        // The remote grant and local key already exist: retry the record
-        // once against a fresh revision when the environment is still the
-        // same install target; otherwise remove the key and fail closed.
-        if (!(error instanceof RemoteAdmissionError) || error.code !== 'personal-config-conflict') throw error
-        const reloaded = loadPersonalConfig(paths.personalPath)
-        const current = reloaded.environments.find(entry => entry.environmentId === call.environmentId)
-        if (current !== undefined && current.credential.kind === 'managed'
-          && current.credential.credentialId === environment.credential.credentialId
-          && current.endpoint.hostname === environment.endpoint.hostname
-          && current.endpoint.port === environment.endpoint.port
-          && current.endpoint.user === environment.endpoint.user) {
-          return await attach(reloaded.revision)
-        }
-        try { await store.remove(accessKey.id, () => false) } catch { /* best effort: no orphan key */ }
-        throw error
+      } finally {
+        pinned.dispose()
       }
     }
     case 'sshBindingSave':

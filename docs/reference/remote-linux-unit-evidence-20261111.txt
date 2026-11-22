@@ -8,14 +8,14 @@ uid=0(root) gid=0(root) groups=0(root)
 
 ## unit status
 ● dsh-ssh-broker.service - DSH SSH credential broker (ADR-0039)
-     Loaded: loaded (/etc/systemd/system/dsh-ssh-broker.service; enabled; preset: enabled)
+     Loaded: loaded ($EVIDENCE_PATH_041; enabled; preset: enabled)
      Active: active (running) since Wed 2026-11-11 06:52:55 UTC; 6h ago
    Main PID: 2816756 (MainThread)
       Tasks: 11 (limit: 919)
      Memory: 71.4M (peak: 81.7M swap: 2.2M swap peak: 2.2M)
         CPU: 3min 14.490s
-     CGroup: /system.slice/dsh-ssh-broker.service
-             └─2816756 /opt/node-v24/bin/node /opt/dsh-broker/node_modules/@dsh-electron/dsh-plugin-multi-root-workspace/lib/remote-broker.js --config /etc/dsh-ssh-broker/broker.json
+     CGroup: $EVIDENCE_PATH_042
+             └─2816756 $EVIDENCE_PATH_043 $EVIDENCE_PATH_044 --config $EVIDENCE_PATH_011
 
 Nov 11 06:56:21 initiator-host node[2816756]: dsh-ssh-broker: [sftp-env] vps-xfer ready extensions posix-rename@openssh.com,statvfs@openssh.com,fstatvfs@openssh.com,hardlink@openssh.com,fsync@openssh.com,lsetstat@openssh.com,limits@openssh.com,expand-path@openssh.com,copy-data,home-directory,users-groups-by-id@openssh.com
 Nov 11 13:07:44 initiator-host node[2816756]: dsh-ssh-broker: [ssh-env] vps-app ready as dshbuild@203.0.113.93 protocol 3
@@ -35,7 +35,7 @@ ExecMainPID=2816756
 User=_dsh_ssh
 Group=dsh-ssh-clients
 SupplementaryGroups=_dsh_ssh
-ReadWritePaths=/var/lib/dsh-ssh-broker /run/dsh-ssh-broker
+ReadWritePaths=$EVIDENCE_PATH_002 $EVIDENCE_PATH_045
 PrivateTmp=yes
 ProtectSystem=strict
 NoNewPrivileges=no
@@ -56,11 +56,11 @@ Group=dsh-ssh-clients
 SupplementaryGroups=_dsh_ssh
 RuntimeDirectory=dsh-ssh-broker
 RuntimeDirectoryMode=0750
-ExecStart=/opt/node-v24/bin/node /opt/dsh-broker/node_modules/@dsh-electron/dsh-plugin-multi-root-workspace/lib/remote-broker.js --config /etc/dsh-ssh-broker/broker.json
+ExecStart=$EVIDENCE_PATH_043 $EVIDENCE_PATH_044 --config $EVIDENCE_PATH_011
 Restart=on-failure
 # The broker owns its credentials; it must be able to read its home and write
 # the socket/audit paths, and nothing else.
-ReadWritePaths=/var/lib/dsh-ssh-broker /run/dsh-ssh-broker
+ReadWritePaths=$EVIDENCE_PATH_002 $EVIDENCE_PATH_045
 ProtectSystem=strict
 PrivateTmp=yes
 NoNewPrivileges=no
@@ -69,19 +69,19 @@ NoNewPrivileges=no
 WantedBy=multi-user.target
 
 ## accounts
-_dsh_ssh:x:996:986::/var/lib/dsh-ssh-broker:/usr/sbin/nologin
-dsh-test:x:1000:1000::/home/dsh-test:/bin/bash
+_dsh_ssh:x:996:986::$EVIDENCE_PATH_304:$EVIDENCE_PATH_305
+dsh-test:x:1000:1000::$HOST_HOME:$EVIDENCE_PATH_306
 dsh-ssh-clients:x:987:_dsh_ssh,dsh-test
 
 ## paths
-/var/lib/dsh-ssh-broker mode=700 owner=_dsh_ssh:_dsh_ssh type=directory
-/var/lib/dsh-ssh-broker/.ssh mode=700 owner=_dsh_ssh:_dsh_ssh type=directory
-/run/dsh-ssh-broker mode=750 owner=_dsh_ssh:dsh-ssh-clients type=directory
-/run/dsh-ssh-broker/broker.sock mode=660 owner=_dsh_ssh:dsh-ssh-clients type=socket
-/etc/dsh-ssh-broker mode=750 owner=root:dsh-ssh-clients type=directory
-/etc/dsh-ssh-broker/broker.json mode=640 owner=root:_dsh_ssh type=regular file
-/etc/dsh-remote mode=755 owner=root:root type=directory
-/etc/dsh-remote/manifest.json mode=640 owner=root:dsh-ssh-clients type=regular file
+$EVIDENCE_PATH_002 mode=700 owner=_dsh_ssh:_dsh_ssh type=directory
+$EVIDENCE_PATH_046 mode=700 owner=_dsh_ssh:_dsh_ssh type=directory
+$EVIDENCE_PATH_045 mode=750 owner=_dsh_ssh:dsh-ssh-clients type=directory
+$EVIDENCE_PATH_001 mode=660 owner=_dsh_ssh:dsh-ssh-clients type=socket
+$EVIDENCE_PATH_047 mode=750 owner=root:dsh-ssh-clients type=directory
+$EVIDENCE_PATH_011 mode=640 owner=root:_dsh_ssh type=regular file
+$EVIDENCE_PATH_048 mode=755 owner=root:root type=directory
+$EVIDENCE_PATH_003 mode=640 owner=root:dsh-ssh-clients type=regular file
 
 ## credential root listing
 total 88
@@ -97,25 +97,25 @@ drwxr-xr-x 46 root     root             4096 Nov  8 06:51 ..
 drwx------  2 _dsh_ssh _dsh_ssh         4096 Nov 10 15:30 .ssh
 
 ## audit chain
--rw------- 1 _dsh_ssh dsh-ssh-clients 51321 Nov 11 13:07 /var/lib/dsh-ssh-broker/audit.jsonl
--rw------- 1 _dsh_ssh dsh-ssh-clients   393 Nov 11 05:07 /var/lib/dsh-ssh-broker/audit.jsonl.1
--rw------- 1 _dsh_ssh dsh-ssh-clients   452 Nov 11 05:07 /var/lib/dsh-ssh-broker/audit.jsonl.2
--rw------- 1 _dsh_ssh dsh-ssh-clients   964 Nov 11 05:07 /var/lib/dsh-ssh-broker/audit.jsonl.3
-/var/lib/dsh-ssh-broker/audit.jsonl mode=600 owner=_dsh_ssh:dsh-ssh-clients size=51321
-/var/lib/dsh-ssh-broker/audit.jsonl.1 mode=600 owner=_dsh_ssh:dsh-ssh-clients size=393
-/var/lib/dsh-ssh-broker/audit.jsonl.2 mode=600 owner=_dsh_ssh:dsh-ssh-clients size=452
-/var/lib/dsh-ssh-broker/audit.jsonl.3 mode=600 owner=_dsh_ssh:dsh-ssh-clients size=964
+-rw------- 1 _dsh_ssh dsh-ssh-clients 51321 Nov 11 13:07 $EVIDENCE_PATH_029
+-rw------- 1 _dsh_ssh dsh-ssh-clients   393 Nov 11 05:07 $EVIDENCE_PATH_030
+-rw------- 1 _dsh_ssh dsh-ssh-clients   452 Nov 11 05:07 $EVIDENCE_PATH_031
+-rw------- 1 _dsh_ssh dsh-ssh-clients   964 Nov 11 05:07 $EVIDENCE_PATH_032
+$EVIDENCE_PATH_029 mode=600 owner=_dsh_ssh:dsh-ssh-clients size=51321
+$EVIDENCE_PATH_030 mode=600 owner=_dsh_ssh:dsh-ssh-clients size=393
+$EVIDENCE_PATH_031 mode=600 owner=_dsh_ssh:dsh-ssh-clients size=452
+$EVIDENCE_PATH_032 mode=600 owner=_dsh_ssh:dsh-ssh-clients size=964
 
 ## private tmp
-drwx------ 3 root root 4096 Nov 11 06:52 /tmp/systemd-private-27a04639796944bb8defa56438713079-dsh-ssh-broker.service-dm6GK5
+drwx------ 3 root root 4096 Nov 11 06:52 $EVIDENCE_PATH_049
 
 ## broker config
 {
-  "manifestPath": "/etc/dsh-remote/manifest.json",
-  "socketPath": "/run/dsh-ssh-broker/broker.sock",
+  "manifestPath": "$EVIDENCE_PATH_003",
+  "socketPath": "$EVIDENCE_PATH_001",
   "clientUid": 1000,
   "brokerUid": 996,
-  "auditPath": "/var/lib/dsh-ssh-broker/audit.jsonl",
+  "auditPath": "$EVIDENCE_PATH_029",
   "auditMaxBytes": 8388608,
   "auditKeep": 4
 }
@@ -132,7 +132,7 @@ Nov 11 06:52:55 initiator-host systemd[1]: dsh-ssh-broker.service: Deactivated s
 Nov 11 06:52:55 initiator-host systemd[1]: Stopped dsh-ssh-broker.service - DSH SSH credential broker (ADR-0039).
 Nov 11 06:52:55 initiator-host systemd[1]: dsh-ssh-broker.service: Consumed 52.485s CPU time.
 Nov 11 06:52:55 initiator-host systemd[1]: Started dsh-ssh-broker.service - DSH SSH credential broker (ADR-0039).
-Nov 11 06:52:56 initiator-host node[2816756]: dsh-ssh-broker: dsh-ssh-broker: listening on /run/dsh-ssh-broker/broker.sock for uid 1000
+Nov 11 06:52:56 initiator-host node[2816756]: dsh-ssh-broker: dsh-ssh-broker: listening on $EVIDENCE_PATH_001 for uid 1000
 Nov 11 06:53:15 initiator-host node[2816756]: dsh-ssh-broker: dsh-ssh-broker: protocol violation on connection 1: invalid broker request or protocol version
 Nov 11 06:55:12 initiator-host node[2816756]: dsh-ssh-broker: [ssh-env] vps-app ready as dshbuild@203.0.113.93 protocol 3
 Nov 11 06:56:21 initiator-host node[2816756]: dsh-ssh-broker: [sftp-env] vps-xfer ready extensions posix-rename@openssh.com,statvfs@openssh.com,fstatvfs@openssh.com,hardlink@openssh.com,fsync@openssh.com,lsetstat@openssh.com,limits@openssh.com,expand-path@openssh.com,copy-data,home-directory,users-groups-by-id@openssh.com

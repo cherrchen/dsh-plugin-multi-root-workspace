@@ -138,15 +138,19 @@ export function link(credentialRoot: string, home: string = homedir()): LinkStat
   // resolved target so the link itself survives. A dangling link writes
   // through to the path it points at.
   let target = status.configPath
-  try {
-    if (lstatSync(status.configPath).isSymbolicLink()) {
-      try {
-        target = realpathSync(status.configPath)
-      } catch {
-        target = resolve(dirname(status.configPath), readlinkSync(status.configPath))
-      }
+  for (let depth = 0; ; depth++) {
+    let info
+    try { info = lstatSync(target) } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error
+      break
     }
-  } catch { /* no config file yet */ }
+    if (!info.isSymbolicLink()) {
+      target = realpathSync(target)
+      break
+    }
+    if (depth >= 40) throw new Error('SSH config has too many symbolic links')
+    target = resolve(dirname(target), readlinkSync(target))
+  }
   const targetMode = existsSync(target) ? statSync(target).mode & 0o777 : 0o600
   if (existsSync(target)) {
     const stamp = new Date().toISOString().replace(/[:.]/g, '-')

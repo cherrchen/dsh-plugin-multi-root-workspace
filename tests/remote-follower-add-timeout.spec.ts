@@ -1,5 +1,5 @@
 /**
- * The remote-1 client budgets requests per method: `remote-add`/`remote-remove`
+ * The remote-2 client budgets requests per method: `remote-add`/`remote-remove`
  * wait out the owner's endpoint verification (~60 s vs. the ~30 s probe
  * budget), so a follower add no longer dies on the old uniform 5 s timer.
  * A request that DOES time out rejects alone — `authority-timeout`, the result
@@ -47,12 +47,12 @@ async function mount(manifestPath: string): Promise<RegistryStack> {
   return stack
 }
 
-describe.skipIf(process.platform === 'win32')('follower remote-add outlives the remote-1 request budget', () => {
+describe.skipIf(process.platform === 'win32')('follower remote-add outlives the remote-2 request budget', () => {
   it('a ~6 s owner verification still commits the follower add', { timeout: 20_000 }, async () => {
     const owner = await mount(manifestFile())
     expect(owner.registry.remoteStatus.state).toBe('ready')
     // The owner-side verifier takes ~6 s — well under its ~30 s probe budget,
-    // and under the mutation budget the remote-1 client now grants it.
+    // and under the mutation budget the remote-2 client now grants it.
     owner.registry.setRemoteEndpointVerifier({
       verify: async () => {
         await delay(6_000)
@@ -79,11 +79,33 @@ describe.skipIf(process.platform === 'win32')('follower remote-add outlives the 
     expect(follower.registry.remoteStatus.state).toBe('ready')
     await expect(follower.registry.remoteList(fixture.workspace)).resolves.toMatchObject({ grants: [{ state: 'registered' }] })
   })
+  it('disconnected follower verification cannot commit a late grant', async () => {
+    const owner = await mount(manifestFile())
+    const entered = Promise.withResolvers<AbortSignal>()
+    const finished = Promise.withResolvers<{ platform: 'linux'; target: { kind: 'path'; value: string } }>()
+    owner.registry.setRemoteEndpointVerifier({
+      verify: async (_environment, _binding, signal) => {
+        entered.resolve(signal)
+        return await finished.promise
+      },
+    })
+    const follower = await mount(manifestFile())
+    const pending = follower.registry.addRemote(fixture.workspace, REF)
+    const rejection = expect(pending).rejects.toMatchObject({ code: 'authority-disconnected' })
+    const signal = await entered.promise
+    stacks.pop()
+    await follower.dispose()
+    await rejection
+    await expect.poll(() => signal.aborted).toBe(true)
+    finished.resolve({ platform: 'linux', target: { kind: 'path', value: '/work/app' } })
+    await expect(owner.registry.remoteList(fixture.workspace)).resolves.toMatchObject({ grants: [] })
+  })
+
 })
 
 const availability = await nativeHostAvailability()
 
-describe('a timed-out remote-1 request fails alone', () => {
+describe('a timed-out remote-2 request fails alone', () => {
   const dirs: string[] = [], servers: RemoteServer[] = []
   afterEach(() => { while (servers.length) servers.pop()!.close(); while (dirs.length) rmSync(dirs.pop()!, { recursive: true, force: true }) })
   function endpoint() {

@@ -4,7 +4,7 @@
  * Every external command goes through the injectable `ExecFile` seam.
  */
 import { createHash, randomBytes } from 'node:crypto'
-import { readdirSync, readFileSync, statSync } from 'node:fs'
+import { mkdtempSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 import { createRequire } from 'node:module'
 import type { ExecFile } from './credentials.ts'
@@ -90,6 +90,7 @@ export function sshArgs(environment: PersonalEnvironment, credentialRoot: string
     // The user's own alias via ~/.ssh/config. Managed aliases get these from
     // the generated ssh_config; the user's alias config must not weaken them.
     return ['-o', 'StrictHostKeyChecking=yes', '-o', 'ForwardAgent=no', '-o', 'UpdateHostKeys=no',
+      '-o', 'ControlMaster=no', '-o', 'ControlPath=none',
       ...extra, environment.credential.alias]
   }
   return ['-F', join(credentialRoot, 'ssh_config'), ...extra, managedHostAlias(environment.environmentId)]
@@ -134,8 +135,8 @@ export interface HelperInstallResult {
   readonly nodePath: string
   readonly helperPath: string
   readonly sha256: string
-  /** Set-artifact integrity generation (1 = `helper-entry.mjs` verifies the installed file set). */
-  readonly integrity: 1
+  readonly integrity: 2
+  readonly treeSha256: string
 }
 
 /** Single-quote a value for a remote command string. */
@@ -291,39 +292,105 @@ export async function installHelper(
   }
   const entry = renderHelperEntry(installed.tree)
   await exec('ssh', [...args, `umask 077; cat > ${shellQuote(entryAbs)}`], { input: entry, timeoutMs: 30_000 })
-  return { nodePath, helperPath: entryAbs, sha256: helperSha, integrity: 1 }
+  return { nodePath, helperPath: entryAbs, sha256: helperSha, integrity: 2, treeSha256: installed.tree }
+}
+
+/** Verify the installed entry against Host-owned metadata before opening it. */
+export async function verifyHelperEntry(
+  exec: (file: string, args: readonly string[]) => Promise<{ stdout: string }>,
+  host: string, nodePath: string, entryPath: string, treeSha256: string,
+): Promise<void> {
+  const expected = createHash('sha256').update(renderHelperEntry(treeSha256)).digest('hex')
+  const probe = 'const fs=require("node:fs"), crypto=require("node:crypto"); const p=process.argv[1]; if(!fs.lstatSync(p).isFile()) process.exit(78); process.stdout.write(crypto.createHash("sha256").update(fs.readFileSync(p)).digest("hex"))'
+  const { stdout } = await exec('ssh', [
+    '-o', 'BatchMode=yes', '-o', 'StrictHostKeyChecking=yes', '-o', 'ForwardAgent=no', '-o', 'UpdateHostKeys=no',
+    '-o', 'ControlMaster=no', '-o', 'ControlPath=none', '--', host,
+    `${shellQuote(nodePath)} -e ${shellQuote(probe)} ${shellQuote(entryPath)}`,
+  ])
+  if (stdout.trim() !== expected) throw new RemoteOperationError('helper-hash-mismatch', 'the remote Helper entry differs from the Host-pinned artifact')
 }
 
 /**
- * Password credentials: log in once with the stored password (askpass,
- * pubkey auth disabled), append a freshly generated per-environment access
- * key to the remote authorized_keys, then every later connection uses it.
+ * Pin the exact confirmed server key and password before a two-phase remote
+ * edit. Later local config changes cannot redirect an install or its rollback.
  */
-export async function installAccessKey(
+export function pinAccessKeyTarget(environment: PersonalEnvironment, credentialRoot: string, secretFile: string): {
+  readonly knownHosts: string; readonly secretFile: string; dispose(): void
+} {
+  const { hostname, port } = environment.endpoint
+  const lookup = port === 22 ? hostname : `[${hostname}]:${port}`
+  const entries = readFileSync(join(credentialRoot, 'known_hosts'), 'utf8').split('\n').flatMap(line => {
+    const [hosts, type, payload] = line.trim().split(/\s+/)
+    if (hosts !== lookup || type === undefined || payload === undefined) return []
+    const fingerprint = createHash('sha256').update(Buffer.from(payload, 'base64')).digest('base64').replace(/=+$/, '')
+    return `SHA256:${fingerprint}` === environment.hostKey ? [`${lookup} ${type} ${payload}`] : []
+  })
+  if (entries.length !== 1) throw new RemoteOperationError('host-identity-unverifiable', 'the confirmed access-key server key is unavailable or ambiguous')
+  const temp = mkdtempSync(join(credentialRoot, 'access-key-'))
+  const dispose = () => rmSync(temp, { recursive: true, force: true })
+  try {
+    const pinnedSecret = join(temp, 'password')
+    const knownHosts = join(temp, 'known_hosts')
+    writeFileSync(pinnedSecret, readFileSync(secretFile), { mode: 0o600 })
+    writeFileSync(knownHosts, entries[0]! + '\n', { mode: 0o600 })
+    return { knownHosts, secretFile: pinnedSecret, dispose }
+  } catch (error) {
+    dispose()
+    throw error
+  }
+}
+
+// Both edits take the same lock so two plugin Hosts cannot lose each other's
+// entries. Write a new file alongside the old one before replacing it.
+const AUTHORIZED_KEYS_EDIT = [
+  'umask 077; mkdir -p "$HOME/.ssh" && cd "$HOME/.ssh" || exit 1',
+  'IFS= read -r key && [ -n "$key" ] || exit 1',
+  'for i in 1 2 3 4 5; do mkdir .dsh-authorized-keys.lock 2>/dev/null && break; [ "$i" != 5 ] || exit 1; sleep 1; done',
+  `tmp=; trap '[ -z "$tmp" ] || rm -f "$tmp"; rmdir .dsh-authorized-keys.lock' EXIT`,
+  `trap 'exit 1' HUP INT TERM`,
+  '[ ! -L authorized_keys ] && { [ ! -e authorized_keys ] || [ -f authorized_keys ]; } || exit 1',
+  'tmp=$(mktemp .dsh-authorized-keys.XXXXXXXX) || exit 1',
+  `if [ -f authorized_keys ]; then DSH_EDIT_KEY="$key" awk '$0 != ENVIRON["DSH_EDIT_KEY"]' authorized_keys > "$tmp" || exit 1; fi`,
+].join('; ')
+
+async function editAccessKey(
   exec: ExecFile,
   environment: PersonalEnvironment,
   credentialRoot: string,
   accessKey: { publicKey: string },
   secretFile: string,
+  operation: 'install' | 'remove',
+  knownHosts?: string,
 ): Promise<void> {
   renderAskpass(credentialRoot)
-  const args = [
-    '-F', join(credentialRoot, 'ssh_config'),
-    '-o', 'BatchMode=no',
-    '-o', 'PubkeyAuthentication=no',
-    '-o', 'PreferredAuthentications=password,keyboard-interactive',
-    '-o', 'NumberOfPasswordPrompts=1',
-    managedHostAlias(environment.environmentId),
-    'umask 077; mkdir -p ~/.ssh && cat >> ~/.ssh/authorized_keys',
-  ]
-  await exec('ssh', args, {
+  const { hostname, port, user } = environment.endpoint
+  const target = knownHosts === undefined
+    ? ['-F', join(credentialRoot, 'ssh_config'), managedHostAlias(environment.environmentId)]
+    : ['-F', '/dev/null', '-o', 'StrictHostKeyChecking=yes', '-o', 'ForwardAgent=no', '-o', 'UpdateHostKeys=no',
+      '-o', 'ControlMaster=no', '-o', 'ControlPath=none', '-o', 'GlobalKnownHostsFile=/dev/null',
+      '-o', `UserKnownHostsFile="${knownHosts.replace(/%/g, '%%').replace(/[\\"]/g, '\\$&')}"`, '-p', String(port), '-l', user, '--', hostname]
+  const install = operation === 'install' ? '; printf "%s\\n" "$key" >> "$tmp" || exit 1' : ''
+  await exec('ssh', [
+    '-o', 'BatchMode=no', '-o', 'PubkeyAuthentication=no',
+    '-o', 'PreferredAuthentications=password,keyboard-interactive', '-o', 'NumberOfPasswordPrompts=1',
+    ...target, `${operation === 'remove' ? '[ -e "$HOME/.ssh/authorized_keys" ] || exit 0; ' : ''}${AUTHORIZED_KEYS_EDIT}${install}; mv -f "$tmp" authorized_keys`,
+  ], {
     input: `${accessKey.publicKey}\n`,
-    env: {
-      SSH_ASKPASS: join(credentialRoot, 'askpass.sh'),
-      SSH_ASKPASS_REQUIRE: 'force',
-      DISPLAY: 'dsh',
-      DSH_SSH_SECRET_FILE: secretFile,
-    },
-    timeoutMs: 60_000,
+    env: { SSH_ASKPASS: join(credentialRoot, 'askpass.sh'), SSH_ASKPASS_REQUIRE: 'force', DISPLAY: 'dsh', DSH_SSH_SECRET_FILE: secretFile },
+    timeoutMs: 30_000,
   })
+}
+
+export async function installAccessKey(
+  exec: ExecFile, environment: PersonalEnvironment, credentialRoot: string, accessKey: { publicKey: string }, secretFile: string,
+  knownHosts?: string,
+): Promise<void> {
+  await editAccessKey(exec, environment, credentialRoot, accessKey, secretFile, 'install', knownHosts)
+}
+
+export async function removeAccessKey(
+  exec: ExecFile, environment: PersonalEnvironment, credentialRoot: string, accessKey: { publicKey: string }, secretFile: string,
+  knownHosts: string,
+): Promise<void> {
+  await editAccessKey(exec, environment, credentialRoot, accessKey, secretFile, 'remove', knownHosts)
 }

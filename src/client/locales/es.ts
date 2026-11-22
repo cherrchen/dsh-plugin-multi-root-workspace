@@ -363,6 +363,7 @@ export const es = {
   'error.remote-unavailable': 'El plano de control remoto no está disponible en este momento.',
   'error.authority-unavailable': 'El canal del registro local no está disponible o está ocupado; vuelva a intentarlo en breve.',
   'error.authority-disconnected': 'Se ha perdido la conexión con el Host que posee el almacén del espacio de trabajo; el resultado es desconocido, actualice y vuelva a intentarlo.',
+  'error.access-key-reconcile-required': "No se pudo confirmar la reversión de la clave de acceso. Comprueba el host SSH original.",
   'error.authority-timeout': 'La solicitud al Host que posee el almacén del espacio de trabajo agotó el tiempo de espera; el resultado es desconocido, actualice y vuelva a intentarlo.',
   'error.authority-cancelled': 'La operación se ha cancelado.',
   'error.invalid-arguments': 'Los argumentos de la solicitud no son válidos.',

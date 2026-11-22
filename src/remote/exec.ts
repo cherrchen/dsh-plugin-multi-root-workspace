@@ -98,6 +98,7 @@ function checkCwdRelative(cwdRelative: string): boolean {
 }
 
 interface Prep {
+  readonly operationId: string
   readonly epoch: string | undefined
   readonly authorizationFingerprint: string
   readonly effectiveMode: string
@@ -126,7 +127,21 @@ export async function runRemoteCommand(
     session: request.session, toolName, purpose: 'exec' as const, endpoints: [endpoint],
   })
 
-  // Admission A: admit, then verify and prepare. A denial means no confine ran.
+  const checkCwd = async (backend: RemoteExecutionBackend, cwd: string, admitted: AdmittedRemoteEndpoint): Promise<string | undefined> => {
+    if (backend.verifyCwd === undefined) return undefined
+    try {
+      await backend.verifyCwd(cwd, admitted.displayPath, signal, admitted.verifiedTarget)
+    } catch (error) {
+      const code = typeof (error as { code?: unknown }).code === 'string' ? (error as { code: string }).code : 'cwd-unverifiable'
+      if (code === 'endpoint-redirected' && admitted.incarnation !== undefined && request.session !== undefined) {
+        await registry.withholdRemote(request.session.header.cwd, endpoint, admitted.incarnation).catch(() => {})
+      }
+      return signal.aborted ? 'cancelled' : code
+    }
+    return undefined
+  }
+
+  // Admission A: admit, then prepare. A denial means no confine ran.
   let prep: Prep | RemoteCommandResult
   try {
     prep = await registry.withRemoteOperation(admission(), async operation => {
@@ -142,11 +157,8 @@ export async function runRemoteCommand(
       }
       const remoteCwd = cwdRelative === '' ? admitted.displayPath : posix.join(admitted.displayPath, cwdRelative)
       const argv = [...deployment.shell, request.command]
-      if (backend.verifyCwd !== undefined) {
-        try { await backend.verifyCwd(remoteCwd, admitted.displayPath, signal, admitted.verifiedTarget) } catch (error) {
-          return denied(typeof (error as { code?: unknown }).code === 'string' ? (error as { code: string }).code : 'cwd-unverifiable')
-        }
-      }
+      const cwdError = await checkCwd(backend, remoteCwd, admitted)
+      if (cwdError !== undefined) return denied(cwdError)
       let confined: Awaited<ReturnType<RemoteExecutionBackend['confine']>>
       try {
         confined = await backend.confine(argv, {
@@ -155,6 +167,7 @@ export async function runRemoteCommand(
       } catch { return denied('confine-failed') }
       if (confined.enforcement !== 'full') return denied('sandbox-unverified')
       return {
+        operationId: operation.identity.operationId,
         epoch: operation.identity.authorityEpoch, authorizationFingerprint: operation.identity.authorizationFingerprint,
         effectiveMode: operation.identity.effectiveMode,
         endpoint: admitted, generation: confined.generation, argv: confined.argv, remoteCwd, deployment,
@@ -165,6 +178,12 @@ export async function runRemoteCommand(
     throw error
   }
   if ('status' in prep) return prep
+
+  const backend = backendFor(request.environmentId, prep.endpoint.displayPath, prep.endpoint.environmentDigest ?? undefined)
+  if (backend !== undefined) {
+    const cwdError = await checkCwd(backend, prep.remoteCwd, prep.endpoint)
+    if (cwdError !== undefined) return notStarted({ ...base, operationId: prep.operationId }, cwdError)
+  }
 
   // Admission B: the FINAL launch admission. The identical request re-enters
   // the owner's ordering point; a revocation since A denies here and spawn is
@@ -194,8 +213,8 @@ export async function runRemoteCommand(
           cwd: prep!.remoteCwd, env: prep!.deployment.env, generation: prep!.generation,
         }, { stdout: stdout.append, stderr: stderr.append })
         return { launched: { operationId: operation.identity.operationId, handle, stdout, stderr } }
-      } catch (error) {
-        return { result: { ...base, operationId: operation.identity.operationId, status: 'admitted-may-start' as const, reason: error instanceof Error ? error.message : String(error) } }
+      } catch {
+        return { result: { ...base, operationId: operation.identity.operationId, status: 'admitted-may-start' as const, reason: 'remote launch acknowledgement was not confirmed' } }
       }
     })
   } catch (error) {
@@ -229,7 +248,7 @@ export async function runRemoteCommand(
   const checkGrant = async () => {
     if (!active || checking || termination !== undefined) return
     checking = true
-    const timer = setTimeout(() => terminateOnce('revoked'), 1_000)
+    const timer = setTimeout(() => terminateOnce('revoked'), 5_500)
     try {
       while (active && termination === undefined && !signal.aborted) {
         try {
@@ -245,13 +264,13 @@ export async function runRemoteCommand(
             terminateOnce('revoked')
             return
           }
-          await delay(50)
+          await delay(250)
         }
       }
     } finally { clearTimeout(timer); checking = false }
   }
   const unsubscribe = registry.onRemoteChange(() => { void checkGrant() })
-  const poll = setInterval(() => { void checkGrant() }, 250)
+  const poll = setInterval(() => { void checkGrant() }, 1_000)
   const timer = setTimeout(() => terminateOnce('timeout'), request.timeoutMs)
   const onAbort = () => terminateOnce('cancelled')
   signal.addEventListener('abort', onAbort, { once: true })
@@ -263,7 +282,7 @@ export async function runRemoteCommand(
   try {
     try { await Promise.race([handle.started, lossBeforeStart, deadline.promise]) } catch (error) {
       if (error instanceof RemoteConnectionLost) throw error
-      return { ...base, operationId, status: 'admitted-may-start', reason: error instanceof Error ? error.message : String(error) }
+      return { ...base, operationId, status: 'admitted-may-start', reason: 'remote launch acknowledgement was not confirmed' }
     }
     const exit = await Promise.race([exited, deadline.promise])
     const confirmed = await Promise.race([handle.waitForExit(prep.deployment.terminateGraceMs), deadline.promise])
@@ -279,7 +298,7 @@ export async function runRemoteCommand(
     if (error instanceof RemoteConnectionLost) {
       return {
         ...base, operationId, status: 'unknown', reconcileId: operationId,
-        reason: error.message,
+        reason: 'remote execution or cleanup acknowledgement was lost',
         ...(termination === undefined ? {} : { termination }),
       }
     }

@@ -65,7 +65,15 @@ export function lazySshExecBackend(
           `the granted root identity changed: expected ${expected.kind} "${expected.value}", probed ${verified.target.kind} "${verified.target.value}"`,
         )
       }
-      if (cwd !== root) await verifier.verify(environment, { path: cwd }, signal, root)
+      if (cwd !== root) {
+        try { await verifier.verify(environment, { path: cwd }, signal, root) }
+        catch (error) {
+          if (error instanceof EndpointVerifyError && error.code === 'endpoint-redirected') {
+            throw new EndpointVerifyError('target-escapes-root', 'the requested command directory was redirected')
+          }
+          throw error
+        }
+      }
     },
     spawn(argv, options, sink) {
       // The preparation admission always runs first; without it there is no

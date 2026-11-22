@@ -99,7 +99,7 @@ describe('SshEnvironmentManager refusal ordering', () => {
     await expect(manager.open('vps-app')).rejects.toMatchObject({ code: 'helper-outdated' })
     expect(calls.filter(call => call.startsWith('ssh -G'))).toHaveLength(0)
     const upgraded = new SshEnvironmentManager({
-      manifest: manifest([environment({ helper: { sha256: 'a'.repeat(64), protocol: 1, integrity: 1 as const } })]),
+      manifest: manifest([environment({ helper: { sha256: 'a'.repeat(64), protocol: 1, integrity: 2 as const, treeSha256: 'b'.repeat(64) } })]),
       logger, gate: eligible, custody: 'personal', exec, readFile: () => KEY_LINE,
     })
     // Past the integrity gate, the next refusal is the personal workspace check.
@@ -188,4 +188,31 @@ describe('shared SFTP openings', () => {
       connect.mockRestore()
     }
   })
+})
+
+
+it('gives simultaneous copies separate SFTP channels', async () => {
+  const connection = environment({ transfer: { maxBytes: 1024, timeoutMs: 10_000 } })
+  const manager = new SshEnvironmentManager({
+    manifest: manifest([connection]), logger, gate: eligible, custody: 'personal', exec, readFile: () => KEY_LINE,
+  })
+  const clients: { dispose: ReturnType<typeof vi.fn> }[] = []
+  const connect = vi.spyOn(SftpClient, 'connect').mockImplementation(() => {
+    const client = { init: async () => ({ version: 3, extensions: { 'hardlink@openssh.com': '1', 'fsync@openssh.com': '1' } }), dispose: vi.fn() }
+    clients.push(client)
+    return client as never
+  })
+  try {
+    const signal = new AbortController().signal
+    const first = await manager.openTransferSftp('vps-app', signal)
+    const second = await manager.openTransferSftp('vps-app', signal)
+    expect(second.generation).not.toBe(first.generation)
+    await first.dispose()
+    expect(first.live()).toBe(false)
+    expect(second.live()).toBe(true)
+    expect(clients[1]!.dispose).not.toHaveBeenCalled()
+  } finally {
+    await manager.disposeAll()
+    connect.mockRestore()
+  }
 })

@@ -18,8 +18,9 @@
  * have published is `unknown` and never replayed.
  */
 import { createHash, randomUUID } from 'node:crypto'
-import { closeSync, constants, fstatSync, lstatSync, openSync, readSync, realpathSync } from 'node:fs'
-import { dirname } from 'node:path'
+import { realpathSync } from 'node:fs'
+import { join } from 'node:path'
+import { openMetadataRoot, type NativeHandle } from '../worktrees/native-io.ts'
 import {
   SftpClient,
   SftpConnectionLost,
@@ -92,6 +93,9 @@ export interface RemoteConnectionManager {
   readonly deployment: DeploymentManifest
   openSftp(environmentId: string, signal?: AbortSignal): Promise<{ client: SftpClient; generation: string }>
   sftpGenerationOf(environmentId: string): string
+  openTransferSftp?(environmentId: string, signal: AbortSignal, expectedDigest?: string): Promise<{
+    client: SftpClient; generation: string; live(): boolean; dispose(): Promise<void>
+  }>
 }
 
 export interface RemoteCopyDeps {
@@ -327,7 +331,8 @@ function sameEndpoint(left: AdmittedRemoteEndpoint, right: AdmittedRemoteEndpoin
     && (left.localRoot === null || left.localRoot === undefined
       ? right.localRoot === null || right.localRoot === undefined
       : right.localRoot !== null && right.localRoot !== undefined
-        && left.localRoot.rootId === right.localRoot.rootId && left.localRoot.path === right.localRoot.path && left.localRoot.access === right.localRoot.access)
+        && left.localRoot.rootId === right.localRoot.rootId && left.localRoot.path === right.localRoot.path && left.localRoot.access === right.localRoot.access
+        && left.localRoot.incarnation === right.localRoot.incarnation)
 }
 
 function sameAdmission(left: Admitted, right: Admitted): boolean {
@@ -395,6 +400,7 @@ async function openSftpEndpoint(ctx: CopyContext, environment: RemoteEnvironment
   const { deps, io } = ctx
   let client: SftpClient | undefined
   let generation = 'stale'
+  let owned: { live(): boolean; dispose(): Promise<void> } | undefined
   if (deps.sftpFor !== undefined) {
     const injected = deps.sftpFor(environment)
     client = injected?.client
@@ -402,12 +408,20 @@ async function openSftpEndpoint(ctx: CopyContext, environment: RemoteEnvironment
   } else {
     const openingSignal = new AbortController()
     const opened = await io.run(
-      () => {
+      async () => {
         const live = environmentOf(deps.manager, environment.environmentId)
         if (environmentDigest(live) !== admission.environmentDigest) {
           throw new RemoteCopyError('admission-changed', 'the transfer environment changed before opening SFTP')
         }
-        return deps.manager.openSftp(environment.environmentId, openingSignal.signal)
+        if (deps.manager.openTransferSftp === undefined) return await deps.manager.openSftp(environment.environmentId, openingSignal.signal)
+        const endpoint = await deps.manager.openTransferSftp(environment.environmentId, openingSignal.signal, admission.environmentDigest ?? undefined)
+        if (openingSignal.signal.aborted) {
+          await endpoint.dispose()
+          openingSignal.signal.throwIfAborted()
+        }
+        owned = endpoint
+        ctx.disposeEndpoints.push(() => endpoint.dispose())
+        return endpoint
       },
       () => openingSignal.abort(),
     ).catch((error: unknown) => {
@@ -422,7 +436,8 @@ async function openSftpEndpoint(ctx: CopyContext, environment: RemoteEnvironment
     root: admission.displayPath,
     ...io.clients(client),
     generation,
-    generationNow: () => deps.generationFor?.(environment.environmentId) ?? deps.manager.sftpGenerationOf(environment.environmentId),
+    generationNow: () => owned !== undefined ? (owned.live() ? generation : 'stale')
+      : deps.generationFor?.(environment.environmentId) ?? deps.manager.sftpGenerationOf(environment.environmentId),
   }
 }
 
@@ -431,11 +446,10 @@ async function openSftpEndpoint(ctx: CopyContext, environment: RemoteEnvironment
 /* -------------------------------------------------------------------------- */
 
 interface BoundLocalSource {
-  readonly fd: number
+  readonly handle: NativeHandle
   readonly size: number
   readonly mtimeMs: number
   readonly ctimeMs: number
-  readonly path: string
 }
 
 /**
@@ -445,7 +459,7 @@ interface BoundLocalSource {
  */
 function localRoot(registry: MultiRootRegistry, session: RemoteOperationSession, rootId: string, admitted: AdmittedLocalRoot | null | undefined): string {
   const primary = session.header.cwd
-  if (rootId === 'primary') return primary
+  if (rootId === 'primary') return admitted?.path ?? primary
   const status = registry.list(primary).find(entry => entry.aliasId === rootId)
   if (status === undefined || status.state !== 'available') {
     throw new RemoteCopyError('local-root-unavailable', `local root "${rootId}" is not an available registered root of this primary`)
@@ -456,40 +470,46 @@ function localRoot(registry: MultiRootRegistry, session: RemoteOperationSession,
     }
     return status.path
   }
-  if (admitted.rootId !== rootId || !samePath(admitted.path, status.path) || admitted.access !== status.access) {
+  if (admitted.rootId !== rootId || !samePath(admitted.path, status.path) || admitted.access !== status.access || admitted.incarnation !== status.id) {
     throw new RemoteCopyError('admission-changed', `the admitted local root "${rootId}" does not match this host's projection`)
   }
   return admitted.path
 }
 
-/** Open the source bound to a single verified inode; refusal leaves no fd open. */
+/** Walk from a pinned directory handle, refusing symlinks at every component. */
 function openLocalSource(root: string, relativePath: string, maxBytes: number, registered: boolean): BoundLocalSource {
+  if (process.platform === 'win32') throw new RemoteCopyError('local-platform-unsupported', 'local transfer requires POSIX directory handles')
   let rootReal: string
-  try { rootReal = realpathSync(root) } catch (error) {
-    if (registered) throw new RemoteCopyError('local-root-unavailable', `the granted local root is unavailable: ${root}`)
-    throw error
+  try { rootReal = realpathSync(root) } catch {
+    throw new RemoteCopyError('local-root-unavailable', 'the granted local root is unavailable')
   }
-  // A registered root must still resolve to its recorded canonical path — a
-  // directory swapped for a symlink or another target is `redirected`, the
-  // same verdict the sink classification uses.
   if (registered && !samePath(rootReal, root)) {
-    throw new RemoteCopyError('local-root-redirected', `the granted local root now resolves to "${rootReal}", not "${root}"`)
+    throw new RemoteCopyError('local-root-redirected', 'the granted local root changed')
   }
-  const path = `${rootReal}/${relativePath}`
-  const fd = openSync(path, constants.O_RDONLY | ((constants as unknown as { O_NOFOLLOW?: number }).O_NOFOLLOW ?? 0))
+  const handles: NativeHandle[] = []
+  const descend = (segments: readonly string[]): NativeHandle => {
+    for (const name of segments) handles.push(handles.at(-1)!.directory().child(name))
+    return handles.at(-1)!
+  }
   try {
-    const opened = fstatSync(fd)
-    const seen = lstatSync(path)
-    if (!opened.isFile()) throw new RemoteCopyError('source-not-regular', `${relativePath} is not a regular file`)
-    if (opened.nlink !== 1) throw new RemoteCopyError('source-multilinked', `${relativePath} has ${opened.nlink} links`)
-    if (opened.dev !== seen.dev || opened.ino !== seen.ino) throw new RemoteCopyError('source-escapes-root', `${relativePath} changed between open and stat`)
-    const parentReal = realpathSync(dirname(path))
-    if (parentReal !== rootReal && !parentReal.startsWith(`${rootReal}/`)) {
-      throw new RemoteCopyError('source-escapes-root', `${relativePath} resolves outside the granted local root`)
+    handles.push(openMetadataRoot('/'))
+    const rootHandle = descend(rootReal.split('/').filter(Boolean))
+    if (rootHandle.info().kind !== 'directory' || !samePath(rootHandle.canonical(), rootReal)) {
+      throw new RemoteCopyError('local-root-redirected', 'the granted local root changed during open')
     }
-    if (opened.size > maxBytes) throw new RemoteCopyError('source-too-large', `${relativePath} is ${opened.size} bytes, limit is ${maxBytes}`)
-    return { fd, size: opened.size, mtimeMs: opened.mtimeMs, ctimeMs: opened.ctimeMs, path }
-  } catch (error) { closeSync(fd); throw error }
+    const handle = descend(relativePath.split('/'))
+    if (handle.info().kind !== 'file') throw new RemoteCopyError('source-not-regular', 'the local source is not a regular file')
+    if (!samePath(handle.canonical(), join(rootReal, relativePath))) {
+      throw new RemoteCopyError('source-escapes-root', 'the local source moved during open')
+    }
+    const { size, nlink, mtimeMs, ctimeMs } = handle.posixFileState!()
+    if (nlink !== 1) throw new RemoteCopyError('source-multilinked', 'the local source has multiple links')
+    if (size > maxBytes) throw new RemoteCopyError('source-too-large', 'the local source exceeds the transfer budget')
+    handles.pop()
+    return { handle, size, mtimeMs, ctimeMs }
+  } finally {
+    for (const handle of handles.reverse()) handle.close()
+  }
 }
 
 /* -------------------------------------------------------------------------- */
@@ -705,6 +725,7 @@ class RemoteStage {
 /* -------------------------------------------------------------------------- */
 
 interface CopyContext {
+  readonly disposeEndpoints: (() => Promise<void>)[]
   readonly registry: MultiRootRegistry
   readonly deps: RemoteCopyDeps
   readonly request: RemoteCopyRequest
@@ -717,19 +738,17 @@ interface CopyContext {
   readonly base: { readonly operationId: string; readonly from: string; readonly to: string }
 }
 
-function closeQuietly(fd: number): void { try { closeSync(fd) } catch { /* already closed */ } }
-
 async function copyLocalToRemote(ctx: CopyContext, destinationEnvironment: RemoteEnvironment): Promise<RemoteCopyResult> {
   const budget = budgetFor(destinationEnvironment)
   let source: BoundLocalSource
   try {
     const root = localRoot(ctx.registry, ctx.request.session, ctx.request.from.rootId, ctx.prepared.source.localRoot)
-    source = openLocalSource(root, ctx.request.from.relativePath, budget.maxBytes, ctx.request.from.rootId !== 'primary')
+    source = openLocalSource(root, ctx.request.from.relativePath, budget.maxBytes, ctx.request.from.rootId !== 'primary' || ctx.prepared.source.localRoot !== null)
   }
   catch (error) { return ctx.fail(codeOf(error), 'source') }
   let endpoint: RemoteEndpoint | undefined
   try { endpoint = await openSftpEndpoint(ctx, destinationEnvironment, ctx.prepared.destination) }
-  catch (error) { closeQuietly(source.fd); return ctx.fail(codeOf(error), 'preflight') }
+  catch (error) { source.handle.close(); return ctx.fail(codeOf(error), 'preflight') }
   const digest = new Digest()
   const target = posixJoin(endpoint.root, ctx.request.to.relativePath)
   let staging: RemoteStage | undefined
@@ -745,7 +764,7 @@ async function copyLocalToRemote(ctx: CopyContext, destinationEnvironment: Remot
       if (ctx.signal.aborted) throw new RemoteCopyError('cancelled', 'transfer aborted')
       if (Date.now() > deadline) throw new RemoteCopyError('transfer-timeout', `staging exceeded ${budget.timeoutMs}ms`)
       const chunk = Buffer.alloc(CHUNK)
-      const read = readSync(source.fd, chunk, 0, chunk.length, offset)
+      const read = source.handle.read(chunk, offset)
       if (read === 0) break
       digest.update(chunk.subarray(0, read))
       await staging.write(offset, chunk.subarray(0, read))
@@ -753,7 +772,7 @@ async function copyLocalToRemote(ctx: CopyContext, destinationEnvironment: Remot
     }
     await staging.finish()
     await ctx.stage('staging')
-    const after = fstatSync(source.fd)
+    const after = source.handle.posixFileState!()
     if (digest.bytes !== source.size || after.size !== source.size || after.mtimeMs !== source.mtimeMs || after.ctimeMs !== source.ctimeMs) {
       stagingStatus = await staging.cleanup()
       return ctx.fail('source-changed', 'staging', { bytes: digest.bytes, sha256: digest.sha256, staging: stagingStatus })
@@ -788,7 +807,7 @@ async function copyLocalToRemote(ctx: CopyContext, destinationEnvironment: Remot
     if (staging !== undefined) stagingStatus = await staging.cleanup().catch(() => 'unknown' as RemoteCopyStaging)
     return ctx.fail(error instanceof RemoteCopyError ? error.code : 'transfer-failed', 'staging', { bytes: digest.bytes, sha256: digest.sha256, staging: stagingStatus })
   } finally {
-    closeQuietly(source.fd)
+    source.handle.close()
     await staging?.close()
   }
 }
@@ -1007,22 +1026,26 @@ export async function runRemoteCopy(
   try { await stage('admission') } catch (error) { return fail(codeOf(error), 'admission') }
   if (signal.aborted) return fail('cancelled', 'admission')
   const ctx: CopyContext = {
-    registry, deps, request, toolName, signal, io, prepared, stage, fail,
+    registry, deps, request, toolName, signal, io, prepared, stage, fail, disposeEndpoints: [],
     base: { operationId, from: endpointLabel(request.from), to: endpointLabel(request.to) },
   }
-  if (sourceLocal) {
-    let destinationEnvironment: RemoteEnvironment
-    try { destinationEnvironment = environmentOf(deps.manager, request.to.environmentId) }
-    catch (error) { return fail(codeOf(error), 'admission') }
-    return await copyLocalToRemote(ctx, destinationEnvironment)
+  try {
+    if (sourceLocal) {
+      let destinationEnvironment: RemoteEnvironment
+      try { destinationEnvironment = environmentOf(deps.manager, request.to.environmentId) }
+      catch (error) { return fail(codeOf(error), 'admission') }
+      return await copyLocalToRemote(ctx, destinationEnvironment)
+    }
+    if (destinationLocal) {
+      let sourceEnvironment: RemoteEnvironment
+      try { sourceEnvironment = environmentOf(deps.manager, request.from.environmentId) }
+      catch (error) { return fail(codeOf(error), 'admission') }
+      return await copyRemoteToLocal(ctx, sourceEnvironment)
+    }
+    return await copyRemoteToRemote(ctx)
+  } finally {
+    await Promise.allSettled(ctx.disposeEndpoints.map(dispose => dispose()))
   }
-  if (destinationLocal) {
-    let sourceEnvironment: RemoteEnvironment
-    try { sourceEnvironment = environmentOf(deps.manager, request.from.environmentId) }
-    catch (error) { return fail(codeOf(error), 'admission') }
-    return await copyRemoteToLocal(ctx, sourceEnvironment)
-  }
-  return await copyRemoteToRemote(ctx)
 }
 
 /** Build the `remote_copy` tool registration — the optional broker-attested remote tools row registers it. */

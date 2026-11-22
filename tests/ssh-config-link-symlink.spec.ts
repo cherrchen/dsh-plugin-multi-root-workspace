@@ -4,7 +4,7 @@
  * the symlink itself survives untouched and `linkStatus` keeps working
  * through it. A dangling symlink writes through to the path it points at.
  */
-import { existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, statSync, symlinkSync, writeFileSync } from 'node:fs'
+import { existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, readlinkSync, readdirSync, rmSync, statSync, symlinkSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { describe, expect, it } from 'vitest'
@@ -63,6 +63,25 @@ describe.skipIf(process.platform === 'win32')('link() over a symlinked ~/.ssh/co
       expect(statSync(target).mode & 0o777).toBe(0o600)
       expect(result.linked).toBe(true)
       expect(linkStatus(credentialRoot, home).linked).toBe(true)
+    } finally {
+      rmSync(home, { recursive: true, force: true })
+    }
+  })
+
+  it('preserves both links and creates the final target of a dangling chain', () => {
+    const home = mkdtempSync(join(tmpdir(), 'r5-chain-'))
+    try {
+      mkdirSync(join(home, '.ssh'))
+      const config = join(home, '.ssh', 'config')
+      const intermediate = join(home, 'intermediate')
+      const target = join(home, 'dotfile')
+      symlinkSync('../intermediate', config)
+      symlinkSync('dotfile', intermediate)
+      const credentialRoot = join(home, 'managed')
+      link(credentialRoot, home)
+      expect(readlinkSync(config)).toBe('../intermediate')
+      expect(readlinkSync(intermediate)).toBe('dotfile')
+      expect(readFileSync(target, 'utf8')).toContain('Include')
     } finally {
       rmSync(home, { recursive: true, force: true })
     }
