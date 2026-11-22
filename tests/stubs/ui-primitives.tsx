@@ -33,6 +33,7 @@ function icon(name: string): (props: IconProps) => ReactNode {
 }
 
 export const IconChevronDownOutline14 = icon('chevron-down')
+export const IconChevronRightOutline14 = icon('chevron-right')
 export const IconChevronUpOutline14 = icon('chevron-up')
 export const IconCopyOutline16 = icon('copy')
 export const IconEditOutline16 = icon('edit')
@@ -52,6 +53,7 @@ export function Input(props: { readonly className?: string; readonly icon?: Reac
 
 // The *Regular family the open-in-app fork spells verbatim (0.1.7+ names).
 export const IconChevronDownOutlineRegular = icon('chevron-down')
+export const IconChevronRightOutlineRegular = icon('chevron-right')
 export const IconRightUpOutlineRegular = icon('right-up')
 export const IconFolderOpenOutlineRegular = icon('folder-open')
 export const IconWarningOutlineRegular = icon('warning')
