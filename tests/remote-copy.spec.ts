@@ -21,6 +21,7 @@ class MemSftp {
   failWrites = false
   hardlinkCalls = 0
   readCalls = 0
+  writes = 0
   private tick = 1_700_000_000
 
   directory(path: string): void {
@@ -58,6 +59,7 @@ class MemSftp {
   }
   async write(h: Buffer, off: number, data: Buffer) {
     if (this.failWrites) throw new SftpStatusError(4, 'Failure')
+    this.writes++
     const p = h.toString()
     const cur = this.files.get(p)!
     const grown = Buffer.alloc(Math.max(cur.data.length, off + data.length))
@@ -238,6 +240,28 @@ describe.skipIf(process.platform === 'win32')('runRemoteCopy local → remote(sf
     const result = await run(s, localToRemote(), deps as RemoteCopyDeps)
     expect(result).toMatchObject({ status: 'failed', code: 'source-changed', stage: 'staging' })
     expect([...s.mem.files.keys()].filter(k => k.includes('.dsh-staging'))).toHaveLength(0)
+  })
+
+  it('commits a source that exactly fills the byte budget', async () => {
+    fixture = createFixtureWorkspace('remote-copy-exact-fit')
+    const payload = Buffer.alloc(1024, 7)
+    writeFileSync(join(fixture.workspace, 'source.txt'), payload)
+    const s = stack({ transfer: { maxBytes: 1024, timeoutMs: 10_000 } })
+    const result = await run(s, localToRemote())
+    expect(result).toMatchObject({ status: 'committed', bytes: 1024, sha256: sha(payload), staging: 'removed' })
+    expect(s.mem.files.get('/import/dest.txt')!.data.equals(payload)).toBe(true)
+  })
+
+  it('refuses an upload that grows past the byte budget before any excess reaches staging', async () => {
+    fixture = createFixtureWorkspace('remote-copy-growth')
+    writeFileSync(join(fixture.workspace, 'source.txt'), Buffer.alloc(512, 'a'))
+    const s = stack({ transfer: { maxBytes: 1024, timeoutMs: 10_000 } })
+    const deps = { ...s.deps, onStage: async (stage: string) => { if (stage === 'preflight') writeFileSync(join(fixture.workspace, 'source.txt'), Buffer.alloc(4096, 'b')) } }
+    const result = await run(s, localToRemote(), deps as RemoteCopyDeps)
+    expect(result).toMatchObject({ status: 'failed', code: 'transfer-too-large', stage: 'staging', staging: 'removed' })
+    expect(s.mem.writes).toBe(0)
+    expect([...s.mem.files.keys()].filter(k => k.includes('.dsh-staging'))).toHaveLength(0)
+    expect(s.mem.files.has('/import/dest.txt')).toBe(false)
   })
 
   it('cancels when admission B returns a different epoch and removes staging', async () => {
@@ -467,6 +491,18 @@ describe('runRemoteCopy remote(sftp) → remote(sftp)', () => {
     const result = await run(s, remoteToRemote(), deps as RemoteCopyDeps)
     expect(result).toMatchObject({ status: 'failed', code: 'source-changed' })
     expect([...s.memB.files.keys()].filter(k => k.includes('.dsh-staging'))).toHaveLength(0)
+  })
+
+  it('refuses a relay that grows past the byte budget before any excess reaches staging', async () => {
+    fixture = createFixtureWorkspace('remote-relay-growth')
+    const s = stack({ transfer: { maxBytes: 1024, timeoutMs: 10_000 } })
+    s.mem.seed('/export/artifact.bin', Buffer.alloc(512, 'a'))
+    const deps = { ...s.deps, onStage: async (stage: string) => { if (stage === 'preflight') s.mem.touch('/export/artifact.bin', Buffer.alloc(4096, 'b')) } }
+    const result = await run(s, remoteToRemote(), deps as RemoteCopyDeps)
+    expect(result).toMatchObject({ status: 'failed', code: 'transfer-too-large', stage: 'staging', staging: 'removed' })
+    expect(s.memB.writes).toBe(0)
+    expect([...s.memB.files.keys()].filter(k => k.includes('.dsh-staging'))).toHaveLength(0)
+    expect(s.memB.files.has('/import-b/artifact.bin')).toBe(false)
   })
 
   it('reports source-connection-lost and cleans the destination staging', async () => {

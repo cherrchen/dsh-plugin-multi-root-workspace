@@ -602,11 +602,12 @@ class RemoteStage {
     readonly target: string,
     readonly parent: string,
     readonly path: string,
+    readonly maxBytes: number,
     handle: Buffer,
   ) { this.handle = handle }
 
   /** Preflight the target and create this operation's EXCL staging name. */
-  static async begin(endpoint: RemoteEndpoint, target: string, operationId: string): Promise<RemoteStage> {
+  static async begin(endpoint: RemoteEndpoint, target: string, operationId: string, maxBytes: number): Promise<RemoteStage> {
     if (target.slice(target.lastIndexOf('/') + 1).startsWith('.dsh-staging-')) {
       throw new RemoteCopyError('reserved-name', `${target} uses the transfer staging prefix`)
     }
@@ -625,12 +626,20 @@ class RemoteStage {
       if (error instanceof SftpConnectionLost) throw error
       throw new RemoteCopyError('staging-unavailable', `cannot create the remote staging object: ${error instanceof Error ? error.message : String(error)}`)
     }
-    return new RemoteStage(endpoint, target, parent, path, handle)
+    return new RemoteStage(endpoint, target, parent, path, maxBytes, handle)
   }
 
+  /**
+   * Append one chunk, bounded by the transfer budget. The bound applies to the
+   * cumulative stream, not just the source size at bind time: a source that
+   * grows after its stat must never push an excess byte onto the wire.
+   */
   async write(offset: number, data: Uint8Array): Promise<void> {
     if (this.handle === undefined) throw new RemoteCopyError('staging-closed', 'the remote staging handle is already closed')
     if (offset !== this.written) throw new RemoteCopyError('staging-changed', `non-contiguous staging write at offset ${offset}`)
+    if (this.written + data.length > this.maxBytes) {
+      throw new RemoteCopyError('transfer-too-large', `the transfer exceeded its ${this.maxBytes}-byte limit`)
+    }
     await this.endpoint.client.write(this.handle, offset, data)
     this.written += data.length
   }
@@ -755,7 +764,7 @@ async function copyLocalToRemote(ctx: CopyContext, destinationEnvironment: Remot
   let stagingStatus: RemoteCopyStaging = 'none'
   let committed = false
   try {
-    try { staging = await RemoteStage.begin(endpoint, target, ctx.prepared.operationId) }
+    try { staging = await RemoteStage.begin(endpoint, target, ctx.prepared.operationId, budget.maxBytes) }
     catch (error) { return ctx.fail(codeOf(error), 'preflight', error instanceof SftpConnectionLost ? { status: 'unknown', staging: 'unknown', reconcileId: ctx.prepared.operationId } : {}) }
     stagingStatus = 'residual'
     await ctx.stage('preflight')
@@ -920,7 +929,7 @@ async function copyRemoteToRemote(ctx: CopyContext): Promise<RemoteCopyResult> {
     try { source = await RemoteSource.bind(from, ctx.request.from.relativePath, budget.maxBytes) }
     catch (error) { return ctx.fail(codeOf(error), 'source') }
     await ctx.stage('source')
-    try { stage = await RemoteStage.begin(to, target, ctx.prepared.operationId) }
+    try { stage = await RemoteStage.begin(to, target, ctx.prepared.operationId, budget.maxBytes) }
     catch (error) { return ctx.fail(codeOf(error), 'preflight', error instanceof SftpConnectionLost ? { status: 'unknown', staging: 'unknown', reconcileId: ctx.prepared.operationId } : {}) }
     stagingStatus = 'residual'
     await ctx.stage('preflight')
