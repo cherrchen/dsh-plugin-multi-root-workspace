@@ -65,7 +65,7 @@ import type {} from './skills.ts'
 import type {} from './worktrees.ts'
 import { WorktreeError } from './worktrees/errors.ts'
 import type { MultiRootRegistry } from './registry.ts'
-import { effectiveDirectory } from './compat/session-directory.ts'
+import { effectiveDirectory, originDirectory } from './compat/session-directory.ts'
 import { persistedSessionExists } from './compat/session-existence.ts'
 import {
   availableRoots,
@@ -252,7 +252,9 @@ async function runCommand(ctx: Context, invocation: CommandInvocation, config: C
     return { kind: 'error', text: failureText(error) }
   }
   const policy = ctx.sandboxPolicy.resolve({ session: invocation.agent.session })
-  const primaryRoot = policy.workspaceRoot
+  // Every Registry call below acts on the Session origin: upstream's policy root
+  // follows the effective working directory and is not a key (ADR-0012).
+  const primaryRoot = originDirectory(ctx, invocation.agent.session) ?? policy.workspaceRoot
   const registry = ctx.multiRootRegistry
 
   try {

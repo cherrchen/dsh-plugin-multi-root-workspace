@@ -21,6 +21,26 @@ it('checks candidate chains across cwd changes without manufacturing a durable t
   expect(replayedInstructionTargets(events,start)).toEqual([resolve(start,'a'),resolve(end,'a')])
   expect(events).toHaveLength(3)
 })
+it('replays the current workspace-root/change event beside a pre-rename log',()=>{
+  const origin=resolve('origin'),legacy=resolve('legacy'),current=resolve('current')
+  const paths=replayedInstructionTargets([
+    {type:'working-directory/change',data:{cwd:legacy}},
+    {type:'tool/call',data:{callId:'r',name:'read',arguments:'{"file_path":"a"}'}},
+    {type:'workspace-root/change',data:{cwd:current}},
+    {type:'tool/result',data:{message:{source:{callId:'r'}}}},
+  ],origin)
+  expect(paths).toEqual([resolve(legacy,'a'),resolve(current,'a')])
+})
+it('prefers workspace-root/change over a later legacy spelling in the same log',()=>{
+  const start=resolve('start'),moved=resolve('moved'),stale=resolve('stale')
+  const paths=replayedInstructionTargets([
+    {type:'workspace-root/change',data:{cwd:moved}},
+    {type:'working-directory/change',data:{cwd:stale}},
+    {type:'tool/call',data:{callId:'r',name:'read',arguments:'{"file_path":"a"}'}},
+    {type:'tool/result',data:{message:{source:{callId:'r'}}}},
+  ],start)
+  expect(paths).toEqual([resolve(moved,'a')])
+})
 
 describe('replayedInstructionTargets — OPS live-evidence contract',()=>{
   const f='/tmp/p-a'

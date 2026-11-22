@@ -24,7 +24,7 @@ import { createUserMessage } from '@deepseek-ai/dsh-llm'
 import type { UserMessage } from '@deepseek-ai/dsh-llm'
 import { canonicalPath } from '@deepseek-ai/dsh-sandbox'
 import SandboxPolicyService from '@deepseek-ai/dsh-sandbox-policy'
-import { Session, SessionId, SESSION_FORMAT_VERSION } from '@deepseek-ai/dsh-session'
+import Sessions, { Session, SessionId, SESSION_FORMAT_VERSION } from '@deepseek-ai/dsh-session'
 import SessionProjectionRegistry from '@deepseek-ai/dsh-session-projection'
 import { MultiRootFileSystem } from '../src/fs.ts'
 import * as Instructions from '../src/instructions.ts'
@@ -91,6 +91,10 @@ async function mountWorld(config: Instructions.Config = {}, roots: readonly stri
   const ctx = new Context()
   fibers.push(
     await ctx.plugin(SessionProjectionRegistry),
+    // The row keys its Registry lookups on the live Session's origin, so the
+    // stack carries the real Session store: a fake workingDirectory can move
+    // the effective policy root, but never the identity.
+    await ctx.plugin(Sessions),
     await ctx.plugin(SandboxPolicyService, { mode: 'workspace-write', workspaceRoot: fixture.workspace }),
     await ctx.plugin(MultiRootScopeService),
   )
@@ -101,16 +105,10 @@ async function mountWorld(config: Instructions.Config = {}, roots: readonly stri
   await mountProviderGate(ctx)
   fibers.push(await ctx.plugin(Instructions, config))
 
-  // A real Session, because `ctx.sandboxPolicy.resolve({ session })` reads the
-  // session projection, not just the header.
-  const sessionId = SessionId(`sess-instructions-${counter += 1}`)
-  const session = Session.create(sessionId, undefined, {
-    version: SESSION_FORMAT_VERSION,
-    id: sessionId,
-    createdAt: 0,
-    isSeeded: false,
-    cwd: fixture.workspace,
-  })
+  // A real, live Session in the store: `ctx.sandboxPolicy.resolve({ session })`
+  // reads the session projection, and the Registry identity is the live
+  // Session's header cwd.
+  const session = ctx.sessions.create(SessionId(`sess-instructions-${counter += 1}`), { meta: { cwd: fixture.workspace } })
   const agent = { session } as unknown as Agent
   const setRoots = (paths: readonly string[]): void => {
     ctx.multiRootScope.setAdditionalRoots(

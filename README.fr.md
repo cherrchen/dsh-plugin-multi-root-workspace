@@ -60,10 +60,11 @@ Après l'installation, ajoutez une racine supplémentaire dans une session :
 | `0.2.0` | `0.2.0-rc.1`, `0.2.0-rc.2` |
 | `0.2.1` | `0.2.1-alpha.1`, `0.2.1-alpha.2`, `0.2.1-alpha.3`, `0.2.1-alpha.4`, `0.2.1-alpha.5`, `0.2.1-rc.1`, `0.2.1-rc.2`, `0.2.1-rc.3`, `0.2.1-rc.4`, `0.2.1-rc.5` |
 | `0.2.2` | `0.2.2-alpha.2`, `0.2.2-alpha.3`, `0.2.2-rc.1`, `0.2.2-rc.2`, `0.2.2-rc.3`, `0.2.2-rc.4`, `0.2.2-rc.5` |
+| `0.2.3` | `0.2.3-alpha.1`, `0.2.3-alpha.2` |
 
 Le plugin ne démarre pas — comme s'il n'était pas installé — lorsque la version de DSH n'est pas dans le tableau ou que les paquets `@deepseek-ai/dsh-*` ne sont pas tous sur la même version.
 
-**Compiler depuis les sources / contribuer** : Node.js `^22.19.0 || >=24`, pnpm `11.25.0` (à activer de préférence via corepack) ; la version DSH épinglée pour le développement est `0.2.2-rc.5` (Node ≥24.9).
+**Compiler depuis les sources / contribuer** : Node.js `^22.19.0 || >=24`, pnpm `11.25.0` (à activer de préférence via corepack) ; la version DSH épinglée pour le développement est `0.2.3-alpha.2` (Node ≥24.22.3).
 
 **Plateformes** : macOS (Seatbelt), Linux (bwrap / Landlock), Windows (root-set ACL runner).
 

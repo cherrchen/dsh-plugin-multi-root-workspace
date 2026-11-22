@@ -60,10 +60,11 @@ To add an additional root, run this in a session:
 | `0.2.0` | `0.2.0-rc.1`, `0.2.0-rc.2` |
 | `0.2.1` | `0.2.1-alpha.1`, `0.2.1-alpha.2`, `0.2.1-alpha.3`, `0.2.1-alpha.4`, `0.2.1-alpha.5`, `0.2.1-rc.1`, `0.2.1-rc.2`, `0.2.1-rc.3`, `0.2.1-rc.4`, `0.2.1-rc.5` |
 | `0.2.2` | `0.2.2-alpha.2`, `0.2.2-alpha.3`, `0.2.2-rc.1`, `0.2.2-rc.2`, `0.2.2-rc.3`, `0.2.2-rc.4`, `0.2.2-rc.5` |
+| `0.2.3` | `0.2.3-alpha.1`, `0.2.3-alpha.2` |
 
 The plugin does not start — as if it were not installed — when the DSH release is not in the table or the `@deepseek-ai/dsh-*` packages disagree on a version.
 
-**Building from source / contributing**: Node.js `^22.19.0 || >=24`, pnpm `11.25.0` (enable via corepack); the dev-pinned DSH is `0.2.2-rc.5` (Node ≥24.9).
+**Building from source / contributing**: Node.js `^22.19.0 || >=24`, pnpm `11.25.0` (enable via corepack); the dev-pinned DSH is `0.2.3-alpha.2` (Node ≥24.22.3).
 
 **Platforms**: macOS (Seatbelt), Linux (bwrap / Landlock), Windows (root-set ACL runner).
 

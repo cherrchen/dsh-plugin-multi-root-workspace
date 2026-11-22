@@ -34,7 +34,8 @@ describe('CI workflow gates', () => {
 
   it('keeps the 22 and 24 Node lanes and expands the plan in the read-only workflow', () => {
     for (const version of ['0.1.5-rc.2', '0.2.0', '0.2.1-rc.5']) expect(nodeForRelease(version)).toBe('22.19.0')
-    for (const version of ['0.2.2-rc.2', '0.2.2', '0.2.10', '1.0.0']) expect(nodeForRelease(version)).toBe('24.9.0')
+    for (const version of ['0.2.2-rc.2', '0.2.2']) expect(nodeForRelease(version)).toBe('24.9.0')
+    for (const version of ['0.2.3-alpha.2', '0.2.10', '1.0.0']) expect(nodeForRelease(version)).toBe('24.22.3')
     const ci = parse(read('.github/workflows/ci.yml'))
     expect(ci.on.workflow_dispatch).toBeNull()
     expect(ci.permissions).toEqual({ contents: 'read' })
@@ -47,7 +48,7 @@ describe('CI workflow gates', () => {
     expect(ci.jobs.releases.steps.find((step: { id?: string }) => step.id === 'contract').env.DSH_WINDOWS_CI)
       .toBe('${{ vars.DSH_WINDOWS_CI }}')
     const upgrade = read('.github/workflows/upgrade.yml')
-    expect(upgrade).toContain('node-version: 24.9.0')
+    expect(upgrade).toContain('node-version: 24.22.3')
     expect(upgrade.indexOf('run: pnpm kernel:probe')).toBeLessThan(upgrade.indexOf('run: pnpm test'))
   })
 

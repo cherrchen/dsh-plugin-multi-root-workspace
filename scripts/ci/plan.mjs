@@ -3,7 +3,27 @@ import { appendFileSync } from 'node:fs'
 import { fileURLToPath, pathToFileURL } from 'node:url'
 import { AUTO_REVIEW_CONTRACT_DATA } from '../lib/auto-review-development.mjs'
 
-export const nodeForRelease = version => /^(?:0\.1\.|0\.2\.[01](?:-|$))/u.test(version) ? '22.19.0' : '24.9.0'
+/**
+ * The Node version one exact DSH release requires.
+ *
+ * DSH 0.2.0/0.2.1 run on the 22.19 baseline like 0.1.*; 0.2.2 raises the floor
+ * to Node >= 24.9.0; from 0.2.3 the upstream engine floor is
+ * `^24.22.3 || >=26.13.1` (the first Node releases whose bundled undici carries
+ * the November 2026 security fixes), so every later line runs on 24.22.3.
+ * @param version - one exact release from the canonical contract.
+ * @returns the Node version that release is installed and verified on.
+ */
+export const nodeForRelease = version => {
+  const match = /^(\d+)\.(\d+)\.(\d+)/u.exec(version)
+  if (match === null) throw new Error(`not an exact release: ${version}`)
+  const [major, minor, patch] = [Number(match[1]), Number(match[2]), Number(match[3])]
+  if (major === 0 && minor <= 1) return '22.19.0'
+  if (major === 0 && minor === 2) {
+    if (patch <= 1) return '22.19.0'
+    if (patch === 2) return '24.9.0'
+  }
+  return '24.22.3'
+}
 
 export function planMatrix(windows) {
   const list = fileURLToPath(new URL('../list-dsh-releases.mjs', import.meta.url))

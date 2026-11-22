@@ -3,10 +3,12 @@ import type { Context } from '@deepseek-ai/cordis'
 import type { WorkspaceFiles, WorkspaceFileRange, WorkspaceFileScope } from '@deepseek-ai/dsh-api-workspace-files'
 import type { RemoteError } from '@deepseek-ai/dsh-typert-protocol'
 import { resolve as resolveLexically } from 'node:path'
+import type {} from '@deepseek-ai/dsh-session'
 import type {} from './compat.ts'
 import type {} from './providers.ts'
 import type { MultiRootRegistry } from './registry.ts'
 import { adaptPathWatch, resolveRelatedWorkspacePath } from './compat/workspace-files.ts'
+import { originDirectory } from './compat/session-directory.ts'
 import { canonicalRoot, isCanonicallyUnder } from './roots.ts'
 import { routeWorkspacePath } from './workspace-routing.ts'
 import { withRegistryRead } from './registry-operation.ts'
@@ -22,16 +24,19 @@ export function apply(ctx: Context): void {
     scope.effect(() => {
       const rowLifetime = new AbortController()
       const restoreList = wrapMethod(service, 'list', original => async function(this: WorkspaceFiles, request, path, signal) {
+        // Registry identity is the Session origin; the wire root stays the
+        // upstream path base (ADR-0012).
+        const origin = requestOrigin(scope, request)
         // A granted root or a registered-but-withheld set must still resolve
         // the selected path: the listing may target another granted root even
         // while the primary itself resolves inside a withheld boundary.
-        if (scope.multiRootScope.scopeOf(request.workspaceRoot).length === 0 && registeredRoots(scope, request.workspaceRoot).length === 0) {
+        if (scope.multiRootScope.scopeOf(origin).length === 0 && registeredRoots(scope, origin).length === 0) {
           return original.call(this, request, path, signal)
         }
-        const route = await routeWorkspacePath(scope, request.workspaceRoot, path, signal)
+        const route = await routeWorkspacePath(scope, origin, path, signal, request.workspaceRoot)
         // The withheld check belongs to the directory the requested path
         // selects, not to the session root.
-        if (route !== undefined && underWithheldRoot(scope, route.primaryRoot, route.absolutePath)) throw await outside(path)
+        if (route !== undefined && underWithheldRoot(scope, route.primaryRoot, route.absolutePath, request.workspaceRoot)) throw await outside(path)
         if (route === undefined || route.workspaceRoot === route.primaryRoot) return original.call(this, request, path, signal)
         const result = await original.call(this, { ...request, workspaceRoot: route.workspaceRoot }, route.absolutePath, signal)
         if (!scope.multiRootScope.scopeOf(route.primaryRoot).includes(route.workspaceRoot)) throw await outside(path)
@@ -72,7 +77,7 @@ export function apply(ctx: Context): void {
           if (baseFile !== undefined) {
             const routed = await routeRead(scope, request, baseFile, signal)
             if (routed === 'deny') throw await outside(baseFile)
-            const escaped = await relatedTailWithheld(scope, request.workspaceRoot, routed, path, signal)
+            const escaped = await relatedTailWithheld(scope, requestOrigin(scope, request), routed, path, signal)
             if (escaped !== undefined) throw await outside(escaped)
             const routedOptions = baseFile === routed.path ? options : { ...options as Record<string, unknown>, baseFile: routed.path }
             return call.call(this, routed.request, path, routedOptions, signal)
@@ -97,41 +102,42 @@ export function apply(ctx: Context): void {
         ? wrapMethod(legacy as WorkspaceFiles & LegacyReads, 'readRelated', original => (async function(this: WorkspaceFiles, request: WorkspaceFileScope, path: string, relativePath: string, signal: AbortSignal): Promise<unknown> {
             const routed = await routeRead(scope, request, path, signal)
             if (routed === 'deny') throw await outside(path)
-            const escaped = await relatedTailWithheld(scope, request.workspaceRoot, routed, relativePath, signal)
+            const escaped = await relatedTailWithheld(scope, requestOrigin(scope, request), routed, relativePath, signal)
             if (escaped !== undefined) throw await outside(escaped)
             return original.call(this, routed.request, routed.path, relativePath, signal)
           }) as unknown as typeof original)
         : undefined
       const restoreWatch = adaptPathWatch(service, originalChanges => async function*(this: WorkspaceFiles, request, path, signal) {
+        const origin = requestOrigin(scope, request)
         const check = async () => {
-          await withRegistryRead(scope, request.workspaceRoot, 'files', async () => {
+          await withRegistryRead(scope, origin, 'files', async () => {
             // The watch may target another granted root; check the directory
             // the path actually selects, not the session root.
-            const current = await routeWorkspacePath(scope, request.workspaceRoot, path, signal)
-            if (current !== undefined && underWithheldRoot(scope, current.primaryRoot, current.absolutePath)) throw await outside(path)
+            const current = await routeWorkspacePath(scope, origin, path, signal, request.workspaceRoot)
+            if (current !== undefined && underWithheldRoot(scope, current.primaryRoot, current.absolutePath, request.workspaceRoot)) throw await outside(path)
             const routed = await routeRead(scope, request, path, signal)
             if (routed === 'deny') throw await outside(path)
           })
         }
         if (scope.get('multiRootRegistry')?.shared) await check()
 
-        if (scope.multiRootScope.snapshot({ workspaceRoot: request.workspaceRoot, mode: 'read-only' }).additionalRoots.length === 0 && registeredRoots(scope, request.workspaceRoot).length === 0) {
+        if (scope.multiRootScope.snapshot({ workspaceRoot: origin, mode: 'read-only' }).additionalRoots.length === 0 && registeredRoots(scope, origin).length === 0) {
           for await (const frame of originalChanges.call(this, request, path, signal)) {
             if (scope.get('multiRootRegistry')?.shared) await check()
             yield frame
           }
           return
         }
-        const route = await withRegistryRead(scope, request.workspaceRoot, 'files', async () => {
-          const resolved = await routeWorkspacePath(scope, request.workspaceRoot, path, signal)
-          if (resolved !== undefined && underWithheldRoot(scope, resolved.primaryRoot, resolved.absolutePath)) throw await outside(path)
+        const route = await withRegistryRead(scope, origin, 'files', async () => {
+          const resolved = await routeWorkspacePath(scope, origin, path, signal, request.workspaceRoot)
+          if (resolved !== undefined && underWithheldRoot(scope, resolved.primaryRoot, resolved.absolutePath, request.workspaceRoot)) throw await outside(path)
           return resolved
         })
         if (route === undefined || route.workspaceRoot === route.primaryRoot) {
           // Directory targets are confined by the host's own check either
           // way; file watches are uncontained upstream, so a stale row
           // under a withheld root has to be refused here.
-          if (underWithheldRoot(scope, request.workspaceRoot, path)) throw await outside(path)
+          if (underWithheldRoot(scope, origin, path, request.workspaceRoot)) throw await outside(path)
           for await (const frame of originalChanges.call(this, request, path, signal)) {
             if (scope.get('multiRootRegistry')?.shared) await check()
             yield frame
@@ -162,7 +168,7 @@ export function apply(ctx: Context): void {
           if (typeof methods[key] !== 'function') continue
           admissionRestores.push(wrapMethod(methods, key, original => async function(this: unknown, ...args: unknown[]) {
             const request = args[0] as WorkspaceFileScope
-            return withRegistryRead(scope, request.workspaceRoot, 'files', async () => original.apply(this, args))
+            return withRegistryRead(scope, requestOrigin(scope, request), 'files', async () => original.apply(this, args))
           }))
         }
       }
@@ -179,11 +185,14 @@ export function apply(ctx: Context): void {
         ? wrapMethod(searchMethods, 'search', original => async function(
             this: unknown, rawScope: WorkspaceFileScope & { readonly primaryRoot?: string }, request: unknown, signal: AbortSignal,
           ): Promise<unknown> {
-            const primaryRoot = rawScope.primaryRoot ?? rawScope.workspaceRoot
+            // The browser's call carries no marker: its tree is the wire root
+            // while its Registry identity is the Session origin. A plugin-routed
+            // call carries the origin as the host-internal marker.
+            const primaryRoot = rawScope.primaryRoot ?? requestOrigin(scope, rawScope)
             const searchRoot = rawScope.workspaceRoot
             if (rawScope.primaryRoot === undefined) {
               return withRegistryRead(scope, primaryRoot, 'files', async () => {
-                if (rootWithheld(scope, primaryRoot)) throw await outside(searchRoot)
+                if (rootWithheld(scope, primaryRoot, searchRoot)) throw await outside(searchRoot)
                 return original.call(this, rawScope, request, signal)
               })
             }
@@ -243,19 +252,40 @@ type LegacyReads = {
  */
 async function routeRead(scope: Context, request: WorkspaceFileScope, path: string, signal: AbortSignal): Promise<RoutedRead> {
   const registry = scope.get('multiRootRegistry')
-  if (registry?.shared && scope.multiRootScope.resolve({ workspaceRoot: request.workspaceRoot, mode: 'read-only' }).authority === 'unavailable') {
-    const route = await routeWorkspacePath(scope, request.workspaceRoot, path, signal)
+  const origin = requestOrigin(scope, request)
+  if (registry?.shared && scope.multiRootScope.resolve({ workspaceRoot: origin, mode: 'read-only' }).authority === 'unavailable') {
+    const route = await routeWorkspacePath(scope, origin, path, signal, request.workspaceRoot)
     return route !== undefined && route.workspaceRoot === route.primaryRoot ? { request, path: route.absolutePath } : 'deny'
   }
-  if (scope.multiRootScope.scopeOf(request.workspaceRoot).length === 0 && registeredRoots(scope, request.workspaceRoot).length === 0) {
+  if (scope.multiRootScope.scopeOf(origin).length === 0 && registeredRoots(scope, origin).length === 0) {
     return { request, path }
   }
-  const route = await routeWorkspacePath(scope, request.workspaceRoot, path, signal)
+  const route = await routeWorkspacePath(scope, origin, path, signal, request.workspaceRoot)
   if (route !== undefined && route.workspaceRoot !== route.primaryRoot) {
     if (!scope.multiRootScope.scopeOf(route.primaryRoot).includes(route.workspaceRoot)) return 'deny'
     return { request: { ...request, workspaceRoot: route.workspaceRoot }, path: route.absolutePath }
   }
-  return underWithheldRoot(scope, request.workspaceRoot, path) ? 'deny' : { request, path }
+  return underWithheldRoot(scope, origin, path, request.workspaceRoot) ? 'deny' : { request, path }
+}
+
+/**
+ * The Registry/scope identity of one `workspaceFiles` request: the live
+ * Session's origin.
+ *
+ * Upstream wires a live Session's file scope to its effective workspace root
+ * (the working directory), so the request's own root can move while the
+ * Registry record set stays on the Session origin (ADR-0012). The request root
+ * remains the upstream path base; only the Registry lookups are re-keyed here.
+ * A stored Session has no live Session to name its origin, so its wire root is
+ * the only identity this Host can derive.
+ * @param scope - host context carrying the Session store.
+ * @param request - the wire scope of one `workspaceFiles` call.
+ * @returns the origin spelling verbatim, or `request.workspaceRoot`.
+ */
+function requestOrigin(scope: Context, request: WorkspaceFileScope): string {
+  const session = scope.get('sessions')?.get(request.sessionId)
+  if (session === undefined) return request.workspaceRoot
+  return originDirectory(scope, session) ?? request.workspaceRoot
 }
 
 /**
@@ -277,10 +307,12 @@ function registeredRoots(scope: Context, primaryRoot: string): ReturnType<MultiR
  * grant authority — it re-validates `canonicalPath` on every call, so a
  * redirected root drops out even before the next registry `refresh()` run.
  */
-function underWithheldRoot(scope: Context, primaryRoot: string, path: string): boolean {
+function underWithheldRoot(scope: Context, primaryRoot: string, path: string, base = primaryRoot): boolean {
   const statuses = registeredRoots(scope, primaryRoot)
   if (statuses.length === 0) return false
-  const lexical = resolveLexically(primaryRoot, path)
+  // The lexical base is the path's own cwd (the wire root), never the identity:
+  // a relative path belongs to the directory upstream would resolve it in.
+  const lexical = resolveLexically(base, path)
   const candidates = statuses.filter(status => isCanonicallyUnder(lexical, status.path))
   if (candidates.length === 0) return false
   const granted = new Set(scope.multiRootScope.scopeOf(primaryRoot))
@@ -301,17 +333,18 @@ function underWithheldRoot(scope: Context, primaryRoot: string, path: string): b
  * registration does not re-authorize it, and an attacker-replaced directory
  * must not turn the primary's own tree into a refusal.
  * @param scope - the context carrying the scope and the registry.
- * @param primaryRoot - the workspace root the operation starts from.
+ * @param primaryRoot - the Session origin the registrations belong to.
+ * @param treeRoot - the root the operation actually walks (the wire root).
  * @returns whether the operation's canonical root is inside a withheld registration.
  */
-function rootWithheld(scope: Context, primaryRoot: string): boolean {
+function rootWithheld(scope: Context, primaryRoot: string, treeRoot: string): boolean {
   const statuses = registeredRoots(scope, primaryRoot)
   if (statuses.length === 0) return false
   // A healthy grant set has nothing to resolve for: skip the canonical
   // lookup on every directory listing and search in the common case.
   const granted = new Set(scope.multiRootScope.scopeOf(primaryRoot))
   if (statuses.every(status => granted.has(status.path))) return false
-  return underWithheldRoot(scope, primaryRoot, canonicalRoot(primaryRoot))
+  return underWithheldRoot(scope, primaryRoot, canonicalRoot(treeRoot), treeRoot)
 }
 
 /**
@@ -328,7 +361,7 @@ async function relatedTailWithheld(scope: Context, primaryRoot: string, base: Ex
   // an intermediate directory alias must not change the path being checked.
   const targetBase = await scope.fs.resolve(base.path, { cwd: base.request.workspaceRoot, signal })
   const target = resolveRelatedWorkspacePath(scope.fs.processPath(targetBase), tail)
-  if (unknown && await routeRead(scope, { ...base.request, workspaceRoot: primaryRoot }, target, signal) === 'deny') return target
+  if (unknown && await routeRead(scope, base.request, target, signal) === 'deny') return target
   return underWithheldRoot(scope, primaryRoot, target) ? target : undefined
 }
 

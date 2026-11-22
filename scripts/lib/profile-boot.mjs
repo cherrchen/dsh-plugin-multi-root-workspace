@@ -115,7 +115,7 @@ export async function bootProfile(profileName, home, prepare) {
     if (hostCtx.get('profileContext') === undefined) hostCtx.provide('profileContext', {
       name: profileName, dir: profile.dir, home, installAnchor, cwd: process.cwd(),
       patchPath: join(profile.dir, appBoot.PROFILE_PATCH_FILENAME ?? 'cordis.patch.yml'),
-      startedBundles: profile.layers.map(layer => layer.packageName), overlays: [],
+      startedBundles: profile.layers.map(layer => layer.packageName), overlayPaths: [],
       telemetryDisabledEnv: process.env.DSH_TELEMETRY_DISABLED,
     })
   }

@@ -426,6 +426,27 @@ function legEnvironment(model) {
  * through the command, and drive one real turn.
  * @returns what the assertions read.
  */
+/**
+ * The authenticated browser entry URL contributed by the composition.
+ *
+ * DSH 0.2.3 moved `authenticatedUrl` off the public Connection service: the
+ * bundled `host-authentication-token` plugin now contributes the login URL to
+ * the `webserver/entry-url` event instead of exposing a service method. Older
+ * hosts answer through `connection.authenticatedUrl` directly, which the
+ * caller tries first.
+ * @param ctx - the booted web composition context.
+ * @param base - the bound web server's base URL, used as the event's base.
+ * @returns the authenticated launch URL.
+ */
+function entryUrlOf(ctx, base) {
+  const entries = []
+  const webServer = ctx.get('webServer')
+  if (webServer !== undefined) ctx.emit(webServer, 'webserver/entry-url', base, entries)
+  const entry = entries.find(candidate => candidate.open === true) ?? entries[0]
+  if (entry === undefined) throw new Error('smoke:journey: the composition contributed no entry URL')
+  return entry.url
+}
+
 async function runWebLeg() {
   const { ctx } = await bootProfile('web', home, async (hostCtx) => {
     const { provideCmdline } = await loadRuntimeModule('@deepseek-ai/dsh-cmdline')
@@ -516,7 +537,11 @@ async function runWebLeg() {
         body: JSON.stringify({ type: 'client-request', rpcId: 'journey-unauth', method: 'list', payload: {} }),
       })
       observed.channelUnauthenticated = unauthenticated.status
-      const authResponse = await fetch(ctx.get('connection').authenticatedUrl(base), { redirect: 'manual' })
+      const connection = ctx.get('connection')
+      const authenticatedUrl = typeof connection?.authenticatedUrl === 'function'
+        ? connection.authenticatedUrl(base)
+        : entryUrlOf(ctx, base)
+      const authResponse = await fetch(authenticatedUrl, { redirect: 'manual' })
       const cookie = authResponse.headers.get('set-cookie')?.split(';', 1)[0]
       const listed = await fetch(new URL('/multi-root-workspace/list', base), {
         method: 'POST',

@@ -65,7 +65,7 @@ import { instructionsApi } from './compat/agent-instructions.ts'
 import type { InstructionFile, InstructionsApi, LoadedInstructionFile } from './compat/agent-instructions.ts'
 import { createInstructionMessage } from './compat/llm-message.ts'
 import { toolResultFailed } from './compat/tool-result.ts'
-import { effectiveDirectory } from './compat/session-directory.ts'
+import { effectiveDirectory, originDirectory } from './compat/session-directory.ts'
 import { aroundTool, type ToolCaller } from './compat/tool-context.ts'
 import { FILE_TOUCH_TOOL_NAMES, normalizeOpsFileActivity, opsActivityEvidenceKey, ptcFileActivity, replayedInstructionTargets, stableOpsJson, touchedPathOfToolCall } from './compat/instruction-activity.ts'
 import { opsCompatibilityToken } from './compat/ops-settings.ts'
@@ -542,9 +542,12 @@ export function apply(ctx: Context, config: Config = {}): void {
       knownRoots(session) { return [...(states.get(session)?.provenanceRoots ?? [])] },
       async snapshot(agent, roots, target, signal, pending) {
         const modeToken = opsCompatibilityToken(scope)
-        const snapshot = await withRegistryRead(scope, scope.sandboxPolicy.resolve({ session: agent.session }).workspaceRoot, 'instructions', async () => {
+        // Registry identity is the Session origin; the effective cwd is only
+        // the relative base and must never re-key the root table (ADR-0012).
+        const origin = originDirectory(scope, agent.session) ?? scope.sandboxPolicy.resolve({ session: agent.session }).workspaceRoot
+        const snapshot = await withRegistryRead(scope, origin, 'instructions', async () => {
         if (opsCompatibilityToken(scope) !== modeToken) throw new Error('review-context: OPS compatibility changed during the snapshot; retry')
-        const allowed = new Set(scope.multiRootScope.scopeOf(scope.sandboxPolicy.resolve({ session: agent.session }).workspaceRoot))
+        const allowed = new Set(scope.multiRootScope.scopeOf(origin))
         roots = roots.filter(root => allowed.has(root))
         signal.throwIfAborted()
         const existing = states.get(agent.session)

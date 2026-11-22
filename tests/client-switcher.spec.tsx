@@ -392,9 +392,11 @@ afterEach(() => {
 /**
  * Render the occupant inside a header that mirrors the upstream Files pane,
  * itself inside a dockkit tab host. The returned `pane` is where the forked
- * tree must portal into.
+ * tree must portal into. `wrapped` plays 0.2.3-alpha.1's Files page, which
+ * puts the slot anchor inside a `.externalActions` box under the header;
+ * without it the anchor is the header's direct child, as it was before.
  */
-function renderInPane(harness: Harness, owner: { absolutePath?: string; renderFactorySlot?: unknown; useContextMenu?: unknown } = { absolutePath: '/repos/primary' }, strictMode = false, modern = false): {
+function renderInPane(harness: Harness, owner: { absolutePath?: string; renderFactorySlot?: unknown; useContextMenu?: unknown } = { absolutePath: '/repos/primary' }, strictMode = false, modern = false, wrapped = false): {
   pane: HTMLElement
   host: HTMLElement
   header: HTMLElement
@@ -411,6 +413,14 @@ function renderInPane(harness: Harness, owner: { absolutePath?: string; renderFa
   const reload = document.createElement('button')
   reload.setAttribute('data-files-reload', '')
   header.append(path, reload)
+  const slot = document.createElement('div')
+  slot.setAttribute('data-slot', 'sidebar.right.tab.files.actions')
+  if (wrapped) {
+    const actions = document.createElement('div')
+    actions.className = 'externalActions'
+    actions.append(slot)
+    header.append(actions)
+  }
   const body = document.createElement('div')
   body.setAttribute(modern ? 'data-files-content' : 'data-files-body', '')
   pane.append(header, body)
@@ -418,7 +428,7 @@ function renderInPane(harness: Harness, owner: { absolutePath?: string; renderFa
   document.body.append(host)
   appended.push(host)
   const occupant = harness.occupant(owner) as ReactElement
-  const mounted = render(strictMode ? <StrictMode>{occupant}</StrictMode> : occupant, { container: header })
+  const mounted = render(strictMode ? <StrictMode>{occupant}</StrictMode> : occupant, { container: wrapped ? slot : header })
   return {
     pane,
     host,
@@ -466,6 +476,25 @@ describe('the Files-tab root switcher', () => {
     const harness = mount()
     const { pane } = renderInPane(harness, undefined, true)
     await waitFor(() => { expect(document.querySelector('.mrfw-rootSwitchLabel')?.textContent).toBe('Platform') })
+    await openMenu()
+    fireEvent.click(screen.getByRole('button', { name: 'payments' }))
+    await waitFor(() => { expect(switcherKind()).toBe('additional') })
+    await waitFor(() => { expect(pane.querySelector('[data-files-path="/repos/payments/notes.md"]')).not.toBeNull() })
+  })
+
+  it('mounts inside the 0.2.3 header wrapper and still owns the header takeover', async () => {
+    const harness = mount()
+    const { pane, header } = renderInPane(harness, undefined, false, true, true)
+    await waitFor(() => { expect(document.querySelector('.mrfw-rootSwitchLabel')?.textContent).toBe('Platform') })
+    // header > .externalActions > [data-slot] > occupant. The stylesheet drops
+    // the box with display: contents so the switcher stays a header flex item;
+    // the component itself must not depend on being the header's direct child.
+    const switcher = header.querySelector('.mrfw-rootSwitcher')!
+    expect(switcher.parentElement?.getAttribute('data-slot')).toBe('sidebar.right.tab.files.actions')
+    expect(switcher.parentElement?.parentElement?.className).toBe('externalActions')
+    expect(switcher.parentElement?.parentElement?.parentElement).toBe(header)
+    expect(switcherKind()).toBe('primary')
+
     await openMenu()
     fireEvent.click(screen.getByRole('button', { name: 'payments' }))
     await waitFor(() => { expect(switcherKind()).toBe('additional') })

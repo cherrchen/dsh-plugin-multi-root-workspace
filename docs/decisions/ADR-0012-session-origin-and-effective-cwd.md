@@ -63,6 +63,23 @@ Status 保持 **Accepted**；Session origin、effective cwd、LSP 身份、指�
 
 `RootsView.effectiveCwd` 仍仅用于显示。面板不再单列当前执行目录，而在匹配根的别名旁显示「当前Agent工作目录」标签：先匹配目录本身，再匹配最近的列表祖先；无匹配时不显示标签。主根显示名称改为「主要工作目录」。此展示不改变 Session 身份、Registry 主键或授权集合。
 
+## 修订：上游把 policy root 改为有效工作目录（2026-11-22）
+
+Status 保持 **Accepted**；Session 原始项目、有效 cwd、授权集合与面板显示语义不变，但上游在 DSH `0.2.3-alpha.1` 打破了本文「Session 原始项目 = `session.header.cwd` → `sandboxPolicy.resolve().workspaceRoot`」的等价关系：`dsh-sandbox-policy` 现在把 `resolve({session}).workspaceRoot` 设为 `workingDirectory.get(session) ?? header.cwd`（有效工作目录），`dsh-api-workspace-files` 的 live Session scope 也随之使用该有效根。
+
+本文的决策不变，身份来源改为显式推导：
+
+| 概念 | 来源 |
+|---|---|
+| Session 原始项目（sessionOriginRoot） | `session.header.cwd`（唯一定义；没有 live Session 时才回退 `policy.workspaceRoot`） |
+| 上游执行边界 / 路径基 | `sandboxPolicy.resolve({session}).workspaceRoot`（有效目录，随 Host 移动） |
+
+实现集中在 `src/compat/session-directory.ts` 的 `originDirectory` / `policyOriginRoot`；`src/scope.ts`、`src/registry.ts` 的准入键、`src/instructions.ts`、`src/review-context.ts`、`src/command.ts`、`src/workspace-files.ts`、`src/process-fence.ts` 用原始目录作 Registry/scope 键，`src/sandbox.ts` / `src/dialects.ts` 继续用 `policy.workspaceRoot` 做执行与内核轮廓。
+
+上游把主边界移到有效目录是有意语义（Host 的 Worktree 服务在 checkout 内工作需要边界随 cwd 移动），插件不把主边界强钉回原始目录；插件的保证只针对自己发放的授权：附加根成员、`read-only` 拒绝与 `toolAccess` 上限必须继续按原始目录生效。因此未登记目录的写由上游 policy 决定，而「身份、附加根授权、指令撤销、面板主根」不随 cwd 改变。
+
+安全理由（按有效拼写查表的后果，而不是可用性问题）：Host 移动 Session 目录后，按有效拼写查 scope 表得到空集，`deniedRoots` 与 `toolAccess` 上限随之丢失；若新目录落在已登记的 `read-only` 附加根内，`workspace-write` 会话可能获得该根写权限。`workspace-root/change` 事件（stateVersion 3）与旧 `working-directory/change` 都在 resume 重放中接受。回归测试见 `tests/working-directory.e2e.ts`；上游差异见[0.2.3 接口审查](../reference/dsh-0.2.3-migration.md)。
+
 ## Alternatives Considered
 
 - 用 effective cwd 替换 policy root / Registry key：会隐式授权并错配持久化，拒绝。

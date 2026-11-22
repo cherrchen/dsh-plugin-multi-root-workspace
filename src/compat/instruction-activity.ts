@@ -96,6 +96,11 @@ export function replayedInstructionTargets(events: readonly unknown[], origin: s
   options?: { readonly opsCompatibility?: boolean }): readonly string[] {
   const opsOn = options?.opsCompatibility === true
   let cwd = origin
+  // A log written before the rename may carry the deprecated
+  // `working-directory/change`; one that also carries the current
+  // `workspace-root/change` is authoritative, so the legacy spelling is only
+  // honored until the first current event.
+  let movedByWorkspaceRoot = false
   const pending = new Map<string, { kind: 'native' | 'ptc'; id: string; name: string; arguments: string; directories: Set<string> }>()
   const eventsPrior = new Map<string, { name: string }>()
   const ended = new Set<string>()
@@ -121,7 +126,9 @@ export function replayedInstructionTargets(events: readonly unknown[], origin: s
   }
   for (const raw of events) {
     const event = raw as DurableActivity
-    if (event.type === 'working-directory/change' && typeof event.data.cwd === 'string') {
+    if ((event.type === 'workspace-root/change' || (event.type === 'working-directory/change' && !movedByWorkspaceRoot))
+      && typeof event.data.cwd === 'string') {
+      if (event.type === 'workspace-root/change') movedByWorkspaceRoot = true
       cwd = event.data.cwd
       for (const call of pending.values()) call.directories.add(cwd)
       continue

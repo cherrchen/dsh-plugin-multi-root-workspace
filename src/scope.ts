@@ -33,6 +33,7 @@ import {
   currentRegistryOperation, operationFrameState, rememberOperationProfile, operationPermitsProfile,
 } from './registry-operation.ts'
 import { aroundTool } from './compat/tool-context.ts'
+import { policyOriginRoot } from './compat/session-directory.ts'
 import { createOpsProtectionState, opsDispatchBarrier, opsSpawnPermitted } from './compat/ops-tools.ts'
 import type { OpsProtectionState } from './compat/ops-tools.ts'
 import { opsCompatibilityToken } from './compat/ops-settings.ts'
@@ -91,12 +92,13 @@ export interface ScopeRoot {
 }
 
 /**
- * The resolved scope of one confined call. `primaryRoot` equals the policy's
- * workspace root; `additionalRoots` are canonical, deduplicated, never equal
- * to the primary root.
+ * The resolved scope of one confined call. `primaryRoot` is the Session
+ * origin, which may differ from the policy's (effective) workspace root;
+ * `additionalRoots` are canonical, deduplicated, never equal to the primary
+ * root.
  */
 export interface FilesystemScope {
-  /** The session's workspace root (`session.header.cwd`, canonical). */
+  /** The Session origin (`session.header.cwd`, canonical), never the effective cwd. */
   primaryRoot: string
   /** Every granted member — ANY access level — canonical, in registry order. */
   additionalRoots: readonly string[]
@@ -689,9 +691,8 @@ export class MultiRootScopeService extends Service {
   }
 
   /**
-   * Resolve the scope of one confined call.
-   * @param policy - the upstream policy whose workspace root is the primary root.
-   * @returns the canonical scope; `additionalRoots` is empty when none are registered.
+   * Declare the registry admission proof this call runs under.
+   * @param proof - the operation's admission proof object.
    */
   requireAdmission(proof: object): void { this.admissionProof = proof }
 
@@ -784,10 +785,20 @@ export class MultiRootScopeService extends Service {
     return this.project(policy, this.capped(), roots, available ? 'available' : 'unavailable')
   }
 
+  /**
+   * Resolve the scope of one confined call.
+   * @param policy - the per-call policy; its workspace root is the upstream
+   *   enforcement boundary, while the Session origin supplies the root table
+   *   (ADR-0012).
+   * @returns the canonical scope; `additionalRoots` is empty when none are registered.
+   */
   resolve(policy: SandboxExecutionPolicy): FilesystemScope {
     if (this.admissionProof === undefined) return this.project(policy, this.capped())
     const operation = currentRegistryOperation(this.admissionProof)
-    if (operation !== undefined && operation.identity.mode === policy.mode && operation.scope.primaryRoot === canonicalPath(policy.workspaceRoot)) {
+    // The admitted scope is keyed by the Session origin, never by the effective
+    // policy root the operation may have moved to (ADR-0012).
+    if (operation !== undefined && operation.identity.mode === policy.mode
+      && operation.scope.primaryRoot === canonicalPath(policyOriginRoot(this.ctx, policy))) {
       const snapshot = operation.scope
       // The snapshot is already intersected with this Host's mode/tool cap.
       // Never widen it after admission; nested dispatch may only remove writes.
@@ -857,11 +868,14 @@ export class MultiRootScopeService extends Service {
   }
 
   private project(policy: SandboxExecutionPolicy, capped: boolean, recorded?: readonly AdditionalWorkspaceRoot[], authority = this.registryAuthority): FilesystemScope {
-    // The upstream workspace spelling is the Registry key (primaryKey never
-    // re-resolves it); the canonical form stays geometry — it is what the
-    // sanitized member check and the returned `primaryRoot` compare against.
-    const primaryRoot = canonicalPath(policy.workspaceRoot)
-    const registered = recorded ?? this.rootsByPrimary.get(primaryKey(policy.workspaceRoot)) ?? []
+    // The Session origin is the Registry key (primaryKey never re-resolves it);
+    // the canonical form stays geometry — it is what the sanitized member check
+    // and the returned `primaryRoot` compare against. Upstream's policy root
+    // moved onto the effective working directory, so it is only the enforcement
+    // boundary and never identity (ADR-0012).
+    const origin = policyOriginRoot(this.ctx, policy)
+    const primaryRoot = canonicalPath(origin)
+    const registered = recorded ?? this.rootsByPrimary.get(primaryKey(origin)) ?? []
     const roots = authority === 'unavailable' ? [] : sanitizeMembers(primaryRoot, registered)
     // The approved one-shot escalation (ADR-0036): the user granted THIS call
     // `danger-full-access`, so the root-access and per-tool refusals lift for

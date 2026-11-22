@@ -472,7 +472,7 @@ try {
     ] }]))
     await writeFile(join(dir, 'cordis.yml'), '[]\n')
     const profile = { name: 'probe', dir, home, startedBundles: ['probe-bundle'], patchPath: join(dir, 'cordis.patch.yml'),
-      installAnchor: join(home, 'package.json'), cwd: home, overlays: [], telemetryDisabledEnv: undefined }
+      installAnchor: join(home, 'package.json'), cwd: home, overlayPaths: [], telemetryDisabledEnv: undefined }
     let config, mounts = 0, invalidations = 0
     const field = z.boolean().default(true)
     const volatile = typeof field.volatile === 'function'

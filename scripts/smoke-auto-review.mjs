@@ -40,7 +40,7 @@ try {
       host.provide('profileContext', {
         name, dir, home, patchPath:patch, installAnchor, cwd:process.cwd(),
         startedBundles:app.readProfileManifest('probe',dir).dsh.profile.bundles,
-        overlays:[], telemetryDisabledEnv:undefined,
+        overlayPaths:[], telemetryDisabledEnv:undefined,
       })
       const {provideCmdline} = await loadRuntimeModule('@deepseek-ai/dsh-cmdline')
       provideCmdline(host,{args:template === 'web' ? ['--no-open','--port','0'] : [],exit:()=>{}})

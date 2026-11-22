@@ -24,7 +24,7 @@ English: [CONTRIBUTING.en.md](./CONTRIBUTING.en.md)
 
 ## 开发环境
 
-- Node.js `^22.19.0 || >=24`；`0.2.2` 及以后的车道要求 `>=24.9`。
+- Node.js `^22.19.0 || >=24`；`0.2.2` 车道要求 `>=24.9`，`0.2.3` 及以后的车道要求 `>=24.22.3`。
 - pnpm `11.25.0`（建议用 corepack 启用）。
 - 开发 pin 的 DSH 为 `0.2.2-rc.4`；受支持版本是[精确 allowlist](./src/compat/dsh-version.ts)，不是范围。
 
