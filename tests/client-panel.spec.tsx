@@ -1667,7 +1667,11 @@ describe('the remote-environment section', () => {
     const confirm = await screen.findByRole('dialog', { name: `${NS}.panel.remoteRemove` })
     expect(within(confirm).getByText(`${NS}.panel.remoteConfirmRemoveBound`)).toBeTruthy()
     expect(harness.calls.some(call => call.endpoint === 'removeRemote')).toBe(false)
-    fireEvent.click(within(confirm).getByRole('button', { name: `${NS}.ssh.confirmDelete` }))
+    // The confirm-delete button shares the SSH buttons' danger styling.
+    const deleteButton = within(confirm).getByRole('button', { name: `${NS}.ssh.confirmDelete` })
+    expect(deleteButton.className).toContain('mrfw-sshDanger')
+    expect(deleteButton.className).toContain('mrfw-sshButton')
+    fireEvent.click(deleteButton)
     // Registration first, then the CAS binding removal, then a fresh list —
     // and the row is gone rather than parked on "unregistered".
     await waitFor(() => { expect(screen.queryByText(ENDPOINT_LOCATION)).toBeNull() })

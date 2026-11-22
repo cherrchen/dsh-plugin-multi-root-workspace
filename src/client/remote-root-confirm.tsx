@@ -1,5 +1,6 @@
 import type { ReactNode } from 'react'
-import { Button, Modal } from '@deepseek-ai/dsh-client-ui-primitives'
+import { Modal } from '@deepseek-ai/dsh-client-ui-primitives'
+import { SshButton as Button } from './panel-buttons.tsx'
 import type { Translate } from './WorkspaceFoldersAction.tsx'
 
 export function RemoteRootConfirm(props: {
