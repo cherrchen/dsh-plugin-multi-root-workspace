@@ -499,11 +499,13 @@ function openLocalSource(root: string, relativePath: string, maxBytes: number, r
     }
     const handle = descend(relativePath.split('/'))
     if (handle.info().kind !== 'file') throw new RemoteCopyError('source-not-regular', 'the local source is not a regular file')
+    const { size, nlink, mtimeMs, ctimeMs } = handle.posixFileState!()
+    // Link count first: macOS `F_GETPATH` may name any link of a multi-linked
+    // vnode, so the canonical comparison cannot classify such a source.
+    if (nlink !== 1) throw new RemoteCopyError('source-multilinked', 'the local source has multiple links')
     if (!samePath(handle.canonical(), join(rootReal, relativePath))) {
       throw new RemoteCopyError('source-escapes-root', 'the local source moved during open')
     }
-    const { size, nlink, mtimeMs, ctimeMs } = handle.posixFileState!()
-    if (nlink !== 1) throw new RemoteCopyError('source-multilinked', 'the local source has multiple links')
     if (size > maxBytes) throw new RemoteCopyError('source-too-large', 'the local source exceeds the transfer budget')
     handles.pop()
     return { handle, size, mtimeMs, ctimeMs }

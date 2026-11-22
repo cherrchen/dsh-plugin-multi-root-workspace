@@ -1,6 +1,6 @@
 # remote_copy 远端 staging 的流式字节预算（PR #73 Codex 评审 P2）
 
-> 状态：**已实施，待 PR CI**（2026-11-22，分支 `feat/ssh-workspace`，reviewed commit `1c4e267`）。本文是本轮评审修复的核验结论、实施计划与退出验收。
+> 状态：**已实施，待复跑 PR CI**（2026-11-22，分支 `feat/ssh-workspace`，reviewed commit `1c4e267`）。本文是本轮评审修复的核验结论、实施计划与退出验收；首轮 CI 的单平台失败见 §7。
 >
 > 关联：PR [#73](https://github.com/cherrchen/dsh-plugin-multi-root-workspace/pull/73)、[ADR-0034](../../decisions/ADR-0034-binary-transfer.md)（复制阶段与字节预算）、[控制面参考](../../reference/multi-environment-control-plane.md#sftp-传输g2三个方向单文件无用户入口)、[路线图总账](./2026-09-12-multi-root-workspace.md#个人-ssh-外部评审后续2026-11-22)。
 
@@ -77,9 +77,21 @@ ADR-0034 的「流与校验」阶段本来就要求“按块背压，限定单�
 
 **变更文件**
 
-`src/remote/transfer.ts`（`RemoteStage` 预算收紧）、`tests/remote-copy.spec.ts`（写计数与三条回归）、`docs/reference/multi-environment-control-plane.md`（流式预算语义）、本计划、[路线图总账](./2026-09-12-multi-root-workspace.md#个人-ssh-外部评审后续2026-11-22)。
+`src/remote/transfer.ts`（`RemoteStage` 预算收紧；本地源先按 `nlink` 分类）、`tests/remote-copy.spec.ts`（写计数与三条回归）、`tests/remote-copy-local-link-classification.spec.ts`（F_GETPATH 命名另一链接时的确定性分类）、`docs/reference/multi-environment-control-plane.md`（流式预算语义）、本计划、[路线图总账](./2026-09-12-multi-root-workspace.md#个人-ssh-外部评审后续2026-11-22)。
 
-## 7. 风险
+## 7. CI 首轮单平台失败（2026-11-22）
+
+PR #73 首轮 CI [run 45011838211](https://github.com/cherrchen/dsh-plugin-multi-root-workspace/actions/runs/45011838211) 中，28 个 verify job 有 27 个通过，唯一失败是 `verify (macos-latest, group 4, Node 22.19.0)`，失败版本 `0.2.1-alpha.4`；`gate` 因该 job 失败而连带失败。
+
+**失败点**（既有用例，非本轮新增）：`tests/remote-copy.spec.ts > refuses symlink and multilinked sources at the bound open` 期望 `source-multilinked`，实际 `source-escapes-root`。同一 job 内其他三个版本、其余 27 个 verify job 与新增的预算用例全部通过，说明不是字节预算改动的回归。
+
+**根因**：`openLocalSource` 先比较 `handle.canonical()` 与绑定路径、后检查 `nlink`。macOS 的 `fcntl(F_GETPATH)` 只保证返回“指向该文件的一个有效路径”；对多硬链接 vnode 可能命名任一链接（[Stack Overflow 说明](https://stackoverflow.com/questions/1406679/retrieving-the-path-from-a-file-descriptor-or-file)）。该用例的源先写成 `hard.txt` 再 `link` 成 `source.txt`，CI 内核把 canonical 报成另一链接名，于是被误分类为路径逃逸。本机内核恰好返回打开时的名字，因此本地与多数车道稳定通过——这是既有的非确定性，不是本次改动引入。
+
+**修复**：先读 `posixFileState()` 并在 canonical 比较之前拒绝 `nlink !== 1`——多硬链接按其链接数确定性分类为 `source-multilinked`，与 F_GETPATH 命名哪个链接无关。新增 [`tests/remote-copy-local-link-classification.spec.ts`](../../../tests/remote-copy-local-link-classification.spec.ts)：mock native 句柄，令 `nlink = 2`、`canonical()` 指向另一链接；修复前得到 `source-escapes-root`（红），修复后得到 `source-multilinked`（绿）；Windows 跳过（本地传输不支持）。安全面不变：两条路径都在读取任何字节之前拒绝。
+
+**关于重跑**：单独重跑失败项可能因内核命名差异转绿，但会保留非确定性；因此选择修掉分类顺序后推送，触发整轮矩阵复验。`gate` 不单独处理，它只汇总 verify 结果。
+
+## 8. 风险
 
 - 新增错误码进入结果面：已有部署若把超预算增长当作 `source-changed` 处理，需要改为识别 `transfer-too-large`；两者都是 `failed`，都不发布目标。
 - 边界语义：`written + chunk.length == maxBytes` 仍允许，与 `LocalBinarySink` 一致，不改既有合同。
