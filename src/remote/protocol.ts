@@ -15,6 +15,19 @@ import { AuthorityRpcError, receive, send } from '../authority/protocol.ts'
 const MAX_PENDING = 32
 export const remoteMethods = ['hello', 'remote-snapshot', 'remote-add', 'remote-remove', 'remote-admit'] as const
 export type RemoteMethod = typeof remoteMethods[number]
+/**
+ * Per-method request budgets: mutations wait out the owner's endpoint
+ * verification (~30 s probe budget) while reads and admissions stay tight.
+ * `hello` is the handshake — a missed reply still destroys the channel.
+ */
+export type RemoteRequestTimeouts = Partial<Record<RemoteMethod, number>>
+const DEFAULT_REQUEST_TIMEOUTS: Record<RemoteMethod, number> = {
+  hello: 5_000,
+  'remote-snapshot': 5_000,
+  'remote-admit': 5_000,
+  'remote-add': 60_000,
+  'remote-remove': 60_000,
+}
 const requestSchema = z.object({
   protocol: z.literal('remote-1'), domain: z.string(), store: z.string(),
   id: z.string().uuid(), epoch: z.string().nullable(), manifestDigest: z.string().optional(), method: z.enum(remoteMethods), args: z.array(z.unknown()).max(4),
@@ -29,9 +42,11 @@ const helloReplySchema = z.object({
 
 export class RemoteClient {
   private readonly pending = new Map<string, { method: RemoteMethod; resolve(value: unknown): void; reject(error: Error): void; timer: ReturnType<typeof setTimeout> }>()
+  private readonly timeouts: Record<RemoteMethod, number>
   private closed = false
   epoch: string | undefined
-  private constructor(private readonly channel: Channel, private readonly store: string, disconnected: () => void) {
+  private constructor(private readonly channel: Channel, private readonly store: string, disconnected: () => void, timeouts: RemoteRequestTimeouts = {}) {
+    this.timeouts = { ...DEFAULT_REQUEST_TIMEOUTS, ...timeouts }
     channel.on('close', () => {
       if (this.closed) return
       this.closed = true
@@ -53,9 +68,9 @@ export class RemoteClient {
       else request.reject(new AuthorityRpcError(reply.code, reply.message))
     })
   }
-  static async connect(endpoint: string, store: string, manifestDigest: string, disconnected: () => void) {
+  static async connect(endpoint: string, store: string, manifestDigest: string, disconnected: () => void, timeouts: RemoteRequestTimeouts = {}) {
     const channel = await connectNative(endpoint)
-    const client = new RemoteClient(channel, store, disconnected)
+    const client = new RemoteClient(channel, store, disconnected, timeouts)
     try {
       const hello = helloReplySchema.parse(await client.request('hello', [manifestDigest]))
       if (hello.store !== store || hello.manifestDigest !== manifestDigest) throw new AuthorityRpcError('config-digest-mismatch', 'remote manifest digest mismatch')
@@ -67,7 +82,15 @@ export class RemoteClient {
     if (this.closed || this.pending.size >= MAX_PENDING) return Promise.reject(new AuthorityRpcError('authority-unavailable', 'remote connection is unavailable or busy'))
     const id = randomUUID()
     return new Promise((resolve, reject) => {
-      const timer = setTimeout(() => { this.channel.destroy() }, 5000)
+      const timer = setTimeout(() => {
+        // Only the handshake keeps the destroy-on-timeout rule — its pending
+        // entry stays, so 'close' still rejects it. Every other timed-out
+        // request fails alone: the pending entry is gone, a late reply is
+        // ignored, and the channel stays usable for what follows.
+        if (method === 'hello') { this.channel.destroy(); return }
+        if (!this.pending.delete(id)) return
+        reject(new AuthorityRpcError('authority-timeout', 'remote request result is unknown; resynchronize before another mutation'))
+      }, this.timeouts[method])
       this.pending.set(id, { method, resolve, reject, timer })
       send(this.channel, { protocol: 'remote-1', domain: 'remote', store: this.store, epoch: this.epoch ?? null, id, method, args, manifestDigest })
     })
@@ -162,6 +185,9 @@ export const remoteAdmitSchema = z.object({
     environmentId: z.string(), rootId: z.string(), displayPath: z.string(),
     verifiedTarget: z.object({ kind: z.enum(['object', 'path']), value: z.string() }).strict().nullable(),
     bindingDigest: z.string().nullable(), environmentDigest: z.string().regex(/^[0-9a-f]{64}$/).nullable(), configVersion: z.string().nullable(),
+    localRoot: z.object({
+      rootId: z.string(), path: z.string(), access: z.enum(['primary', 'inherit', 'read-only', 'read-write']),
+    }).strict().nullable(),
   }).strict()),
 }).strict()
 

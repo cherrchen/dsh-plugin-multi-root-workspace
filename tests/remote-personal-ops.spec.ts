@@ -145,7 +145,10 @@ describe.skipIf(process.platform === 'win32')('personal endpoint behaviours (R1/
       bindings: expect.arrayContaining([expect.objectContaining({ path: '/opt/renamed', rootId: fallback })]),
     })
     await expect(save(5, '/tmp/unknown', 'chosen-id')).rejects.toMatchObject({ code: 'personal-config-conflict' })
-    await expect(save(5, '/srv/Release_Café')).rejects.toMatchObject({ code: 'personal-config-invalid' })
+    // A create-shaped re-save of an existing environment+path edits that
+    // binding in place (no-op here — actions/transfers unchanged).
+    const resave = await save(5, '/srv/Release_Café')
+    expect(resave.bindings.filter(binding => binding.path === '/srv/Release_Café')).toMatchObject([{ rootId: 'release-cafe' }])
     expect(loadPersonalConfig(personalPath)).toMatchObject({ revision: 5 })
   })
 
@@ -392,31 +395,37 @@ describe.skipIf(process.platform === 'win32')('personal endpoint behaviours (R1/
     expect(state.environments[0]!.helper).not.toBeNull()
   })
 
-  it('sshHelperInstall resolves the host helper.js through the package root — exports never publishes lib/*', async () => {
+  it('sshHelperInstall resolves the host helper lib set through the package root — exports never publishes lib/*', async () => {
     const { registry, personalPath } = world()
     writeConfig(personalPath, CONFIG())
     const { createRequire } = await import('node:module')
     const { createHash } = await import('node:crypto')
     const { dirname } = await import('node:path')
+    const { readdirSync, statSync } = await import('node:fs')
     const require = createRequire(import.meta.url)
-    const hostHelper = join(dirname(require.resolve('@deepseek-ai/dsh-ssh/package.json')), 'lib', 'helper.js')
-    const hostHash = createHash('sha256').update(readFileSync(hostHelper)).digest('hex')
+    const hostLibDir = join(dirname(require.resolve('@deepseek-ai/dsh-ssh/package.json')), 'lib')
+    const hostLib: Record<string, string> = {}
+    for (const name of readdirSync(hostLibDir)) {
+      if (statSync(join(hostLibDir, name)).isFile()) hostLib[name] = createHash('sha256').update(readFileSync(join(hostLibDir, name))).digest('hex')
+    }
     const commands: string[] = []
     const exec: ExecFile = async (_file, args) => {
       const remote = String(args.at(-1))
       commands.push(remote)
       if (remote === 'command -v node || true') return { stdout: '/usr/bin/node\n', stderr: '' }
       if (remote === 'printf %s "$HOME"') return { stdout: '/home/builder\n', stderr: '' }
-      if (remote.startsWith('sha256sum ')) return { stdout: `${hostHash}  helper.js\n`, stderr: '' }
+      if (remote.includes(' -e ')) return { stdout: JSON.stringify({ tree: 'b'.repeat(64), lib: hostLib }), stderr: '' }
+      if (remote.startsWith('umask 077; cat > ')) return { stdout: '', stderr: '' }
       return { stdout: '', stderr: '' }
     }
     const state = await handlePersonalEndpoint(undefined as never as Context, registry, '/w',
       { endpoint: 'sshHelperInstall', sessionId: 's', revision: 0, environmentId: 'dev-box' }, { exec }) as { environments: PersonalEnvironment[] }
     const helper = state.environments[0]!.helper
-    expect(helper?.sha256).toBe(hostHash)
-    expect(helper?.helperPath).toContain('node_modules/@deepseek-ai/dsh-ssh/lib/helper.js')
+    expect(helper?.sha256).toMatch(/^[0-9a-f]{64}$/)
+    expect(helper?.helperPath).toContain('helper-entry.mjs')
     expect(helper?.protocol).toBe(3)
     expect(commands.some(cmd => cmd.includes('npm install'))).toBe(true)
+    expect(loadPersonalConfig(personalPath).environments[0]!.helper?.integrity).toBe(1)
   })
 
   it('R6: a failed access-key install removes the orphan key; env remove cleans its access key', async () => {
@@ -501,25 +510,39 @@ describe.skipIf(process.platform === 'win32')('operations argv/env and hash chec
     expect(captured!.input).toBe('ssh-ed25519 AAAAPUB\n')
   })
 
-  it('installHelper resolves node remotely, rejects non-absolute, and verifies the hash', async () => {
+  it('installHelper resolves node remotely, rejects non-absolute, and verifies the lib set', async () => {
     const credentialRoot = join(tmp(), 'cred')
-    const hostHelper = join(tmp(), 'helper.js')
+    const hostLibDir = tmp()
+    const hostHelper = join(hostLibDir, 'helper.js')
     writeFileSync(hostHelper, 'HELPER-BYTES')
+    writeFileSync(join(hostLibDir, 'protocol.js'), 'PROTOCOL-BYTES')
     const { createHash } = await import('node:crypto')
-    const hostHash = createHash('sha256').update('HELPER-BYTES').digest('hex')
+    const hash = (name: string) => createHash('sha256').update(readFileSync(join(hostLibDir, name))).digest('hex')
+    const remoteProbe = (lib: Record<string, string>) => JSON.stringify({ tree: 'c'.repeat(64), lib })
+    const goodLib = { 'helper.js': hash('helper.js'), 'protocol.js': hash('protocol.js') }
     const commands: string[] = []
-    const exec: ExecFile = async (_file, args) => {
+    let entryWrite: { input?: string } | undefined
+    const exec: ExecFile = async (_file, args, options) => {
       const remote = String(args.at(-1))
       commands.push(remote)
       if (remote === 'command -v node || true') return { stdout: '/usr/local/bin/node\n', stderr: '' }
       if (remote === 'printf %s "$HOME"') return { stdout: '/home/builder', stderr: '' }
-      if (remote.startsWith('sha256sum ')) return { stdout: `${hostHash}  helper.js\n`, stderr: '' }
+      if (remote.includes(' -e ')) return { stdout: remoteProbe(goodLib), stderr: '' }
+      if (remote.startsWith('umask 077; cat > ')) { entryWrite = options; return { stdout: '', stderr: '' } }
       return { stdout: '', stderr: '' }
     }
     const result = await installHelper(exec, SSH_CONFIG_ENV, credentialRoot, { sshVersion: '0.2.2-rc.2', hostHelperPath: hostHelper })
     expect(result.nodePath).toBe('/usr/local/bin/node')
-    expect(result.helperPath).toBe('/home/builder/.dsh-helper/0.2.2-rc.2/node_modules/@deepseek-ai/dsh-ssh/lib/helper.js')
-    expect(commands.some(cmd => cmd.includes('sha256sum'))).toBe(true)
+    expect(result.helperPath).toBe('/home/builder/.dsh-helper/0.2.2-rc.2/helper-entry.mjs')
+    expect(result.integrity).toBe(1)
+    // helper.sha256 stays the helper.js artifact digest — upstream's
+    // hello.hash identifies the launched helper.js, never the entry script.
+    expect(result.sha256).toBe(hash('helper.js'))
+    expect(commands.some(cmd => cmd.includes(' -e '))).toBe(true)
+    // The entry pins the recorded set digest and imports the upstream helper.
+    expect(entryWrite?.input).toContain('integrity check failed')
+    expect(entryWrite?.input).toContain('import("./node_modules/@deepseek-ai/dsh-ssh/lib/helper.js")')
+    expect(entryWrite?.input).toContain('c'.repeat(64))
 
     await expect(installHelper(async (_f, args) => {
       const remote = String(args.at(-1))
@@ -541,7 +564,7 @@ describe.skipIf(process.platform === 'win32')('operations argv/env and hash chec
       const remote = String(args.at(-1))
       if (remote === 'command -v node || true') return { stdout: '/usr/bin/node\n', stderr: '' }
       if (remote === 'printf %s "$HOME"') return { stdout: '/home/builder', stderr: '' }
-      if (remote.startsWith('sha256sum ')) return { stdout: `${'0'.repeat(64)}  helper.js\n`, stderr: '' }
+      if (remote.includes(' -e ')) return { stdout: remoteProbe({ ...goodLib, 'protocol.js': '0'.repeat(64) }), stderr: '' }
       return { stdout: '', stderr: '' }
     }, SSH_CONFIG_ENV, credentialRoot, { sshVersion: '0.2.2-rc.2', hostHelperPath: hostHelper }))
       .rejects.toMatchObject({ code: 'helper-hash-mismatch' })
@@ -557,20 +580,21 @@ describe.skipIf(process.platform === 'win32')('operations argv/env and hash chec
     const exec: ExecFile = async (_file, args) => {
       const remote = String(args.at(-1))
       attempts.set(remote, (attempts.get(remote) ?? 0) + 1)
-      // Every probe flaps once — the observed post-install link flap.
-      if (!remote.includes('npm install') && attempts.get(remote) === 1) {
+      // Every probe flaps once — the observed post-install link flap. The
+      // entry write is not a probe: it fails immediately, like npm install.
+      if (!remote.includes('npm install') && !remote.startsWith('umask') && attempts.get(remote) === 1) {
         throw new Error('ssh: connect to host build.internal port 22: Connection timed out')
       }
       if (remote === 'command -v node || true') return { stdout: '/usr/bin/node\n', stderr: '' }
       if (remote === 'printf %s "$HOME"') return { stdout: '/home/builder', stderr: '' }
-      if (remote.startsWith('sha256sum ')) return { stdout: `${hostHash}  helper.js\n`, stderr: '' }
+      if (remote.includes(' -e ')) return { stdout: JSON.stringify({ tree: 'd'.repeat(64), lib: { 'helper.js': hostHash } }), stderr: '' }
       return { stdout: '', stderr: '' }
     }
     const result = await installHelper(exec, SSH_CONFIG_ENV, credentialRoot, { sshVersion: '0.2.2-rc.2', hostHelperPath: hostHelper })
     expect(result.nodePath).toBe('/usr/bin/node')
     expect(attempts.get('command -v node || true')).toBe(2)
     expect(attempts.get('printf %s "$HOME"')).toBe(2)
-    const hashCommand = [...attempts.keys()].find(command => command.startsWith('sha256sum '))!
+    const hashCommand = [...attempts.keys()].find(command => command.includes(' -e '))!
     expect(attempts.get(hashCommand)).toBe(2)
     const npmCommand = [...attempts.keys()].find(command => command.includes('npm install'))!
     expect(attempts.get(npmCommand)).toBe(1)

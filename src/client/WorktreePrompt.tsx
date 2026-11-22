@@ -21,7 +21,7 @@
  * @module @dsh-electron/dsh-plugin-multi-root-workspace/client/WorktreePrompt
  */
 
-import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
+import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react'
 import { Button, Menu, Modal, Toast } from '@deepseek-ai/dsh-client-ui-primitives'
 import type { WorktreeAccess, WorktreeAccessEntry, WorktreePromptView, WorktreeSnoozeMode } from '../contract.ts'
 import {
@@ -33,7 +33,6 @@ import {
   IconWorkspaceTree,
 } from '../compat/client-icons.ts'
 import { errorKeyOf, PanelError } from './panel-client.ts'
-import { ErrorToast } from './error-toast.tsx'
 import { noticeStyle, useNoticePlacement } from './notice-placement.ts'
 import { onWorktreePromptRequest } from './worktree-prompt-bus.ts'
 import type { WorktreeClient } from './worktree-client.ts'
@@ -185,7 +184,6 @@ export function WorktreePrompt(props: WorktreePromptProps): ReactNode {
   const [rows, setRows] = useState<readonly WorktreePromptView[] | undefined>(undefined)
   const [selected, setSelected] = useState<ReadonlyMap<string, boolean>>(() => new Map())
   const [rowErrors, setRowErrors] = useState<ReadonlyMap<string, string>>(() => new Map())
-  const rowErrorToast = useMemo(() => rowErrors.size === 0 ? undefined : { codes: [...rowErrors.values()] }, [rowErrors])
   const [skippedCount, setSkippedCount] = useState(0)
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | undefined>(undefined)
@@ -859,12 +857,14 @@ export function WorktreePrompt(props: WorktreePromptProps): ReactNode {
                     align="end"
                     portal
                   />
+                  {rowErrors.has(row.key)
+                    ? <p role="alert" className="mrfw-worktreeRowError">{t('worktree.rowError')}: {t(errorKeyOf(rowErrors.get(row.key)!))}</p>
+                    : null}
                 </div>
               )
             })}
             {previewOnly ? <p className="mrfw-note">{t('worktree.previewOnly')}</p> : null}
-            <ErrorToast error={error} format={code => t(errorKeyOf(code))} />
-            <ErrorToast error={rowErrorToast} format={entry => `${t('worktree.rowError')}: ${[...new Set(entry.codes)].map(code => t(errorKeyOf(code))).join('; ')}`} />
+            {error === undefined ? null : <p role="alert" className="mrfw-alert">{t(errorKeyOf(error))}</p>}
           </div>
         </Modal>
       )}

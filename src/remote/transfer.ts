@@ -33,7 +33,8 @@ import {
 } from './sftp.ts'
 import { environmentDigest, type RemoteEnvironment, type DeploymentManifest } from './manifest.ts'
 import type { MultiRootRegistry } from '../registry.ts'
-import type { AdmittedRemoteEndpoint, RemoteOperationRequest, RemoteOperationSession } from './contract.ts'
+import { samePath } from '../roots.ts'
+import type { AdmittedLocalRoot, AdmittedRemoteEndpoint, RemoteOperationRequest, RemoteOperationSession } from './contract.ts'
 import {
   checkTransferRelativePath,
   LocalBinarySink,
@@ -116,6 +117,9 @@ interface CopyBudget {
   readonly timeoutMs: number
 }
 
+/** Grace for an interrupted wire request to answer before its shared session is broken. */
+const PENDING_GRACE_MS = 1_000
+
 /** One total I/O budget, plus a bounded, cancellation-independent cleanup window. */
 class TransferIO {
   private readonly deadline: number
@@ -155,7 +159,7 @@ class TransferIO {
         if (typeof value !== 'function' || key === 'dispose') return typeof value === 'function' ? value.bind(target) : value
         return async (...args: unknown[]) => {
           if (broken) throw new SftpConnectionLost('the interrupted SFTP generation cannot be reused')
-          let cancelled = false
+          let interrupted: 'cancelled' | 'transfer-timeout' | undefined
           let started = false
           let pendingTimeout: ReturnType<typeof setTimeout> | undefined
           const invalidate = () => {
@@ -167,25 +171,30 @@ class TransferIO {
               started = true
               try {
                 const answer: unknown = await Reflect.apply(value, target, args)
-                if (cancelled && key === 'open' && Buffer.isBuffer(answer)) {
+                if (interrupted !== undefined && key === 'open' && Buffer.isBuffer(answer)) {
                   void this.run(() => target.close(answer), invalidate, true).catch(() => {})
                 }
                 return answer
               } finally { clearTimeout(pendingTimeout) }
             }, reason => {
-              cancelled = reason === 'cancelled'
-              if (!cancelled) invalidate()
-              else if (started) {
-                // Abandon only this waiter. An unanswered wire request still
-                // has a deadline so a stalled channel cannot collect requests.
-                pendingTimeout = setTimeout(invalidate, Math.max(0, this.deadline - Date.now()))
+              interrupted = reason
+              if (started) {
+                // Abandon only this waiter. The unanswered wire request keeps
+                // a bounded grace to answer: a late reply keeps the shared
+                // session coherent, and only a still-pending request breaks
+                // the generation. Cancellation keeps the request's own
+                // remaining budget; a transfer whose budget already ran out
+                // gets the short pending grace.
+                pendingTimeout = setTimeout(invalidate, reason === 'cancelled'
+                  ? Math.max(0, this.deadline - Date.now())
+                  : PENDING_GRACE_MS)
                 pendingTimeout.unref()
               }
             }, cleanup)
           } catch (error) {
             // CREATE or LINK may already have happened. Never report a clean
             // refusal, delete an unverified name, or retry publication.
-            if (started && (broken || cancelled) && (key === 'hardlink' || (key === 'open' && (Number(args[1]) & P_CREAT) !== 0))) {
+            if (started && (broken || interrupted !== undefined) && (key === 'hardlink' || (key === 'open' && (Number(args[1]) & P_CREAT) !== 0))) {
               throw new SftpConnectionLost('the SFTP mutation acknowledgement was lost')
             }
             throw error
@@ -303,6 +312,7 @@ function snapshotEndpoint(endpoint: AdmittedRemoteEndpoint): AdmittedRemoteEndpo
     environmentDigest: endpoint.environmentDigest,
     verifiedTarget: endpoint.verifiedTarget === null ? null : { ...endpoint.verifiedTarget },
     configVersion: endpoint.configVersion,
+    localRoot: endpoint.localRoot === null || endpoint.localRoot === undefined ? null : { ...endpoint.localRoot },
   }
 }
 
@@ -314,6 +324,10 @@ function sameEndpoint(left: AdmittedRemoteEndpoint, right: AdmittedRemoteEndpoin
     && left.configVersion === right.configVersion
     && (left.verifiedTarget === null ? right.verifiedTarget === null : right.verifiedTarget !== null
       && left.verifiedTarget.kind === right.verifiedTarget.kind && left.verifiedTarget.value === right.verifiedTarget.value)
+    && (left.localRoot === null || left.localRoot === undefined
+      ? right.localRoot === null || right.localRoot === undefined
+      : right.localRoot !== null && right.localRoot !== undefined
+        && left.localRoot.rootId === right.localRoot.rootId && left.localRoot.path === right.localRoot.path && left.localRoot.access === right.localRoot.access)
 }
 
 function sameAdmission(left: Admitted, right: Admitted): boolean {
@@ -424,20 +438,43 @@ interface BoundLocalSource {
   readonly path: string
 }
 
-/** The local source root: `primary` or an `available` registered aliasId. */
-function localRoot(registry: MultiRootRegistry, session: RemoteOperationSession, rootId: string): string {
+/**
+ * The local source root: `primary` or an `available` registered aliasId. The
+ * owner-admitted record carries the grant — a follower never reads a local
+ * endpoint off its stale projection alone; the projection must still agree.
+ */
+function localRoot(registry: MultiRootRegistry, session: RemoteOperationSession, rootId: string, admitted: AdmittedLocalRoot | null | undefined): string {
   const primary = session.header.cwd
   if (rootId === 'primary') return primary
   const status = registry.list(primary).find(entry => entry.aliasId === rootId)
   if (status === undefined || status.state !== 'available') {
     throw new RemoteCopyError('local-root-unavailable', `local root "${rootId}" is not an available registered root of this primary`)
   }
-  return status.path
+  if (admitted === undefined || admitted === null) {
+    if (registry.authority?.kind === 'follower') {
+      throw new RemoteCopyError('local-authority-unavailable', 'a follower reads a local source only against the owner-admitted record')
+    }
+    return status.path
+  }
+  if (admitted.rootId !== rootId || !samePath(admitted.path, status.path) || admitted.access !== status.access) {
+    throw new RemoteCopyError('admission-changed', `the admitted local root "${rootId}" does not match this host's projection`)
+  }
+  return admitted.path
 }
 
 /** Open the source bound to a single verified inode; refusal leaves no fd open. */
-function openLocalSource(root: string, relativePath: string, maxBytes: number): BoundLocalSource {
-  const rootReal = realpathSync(root)
+function openLocalSource(root: string, relativePath: string, maxBytes: number, registered: boolean): BoundLocalSource {
+  let rootReal: string
+  try { rootReal = realpathSync(root) } catch (error) {
+    if (registered) throw new RemoteCopyError('local-root-unavailable', `the granted local root is unavailable: ${root}`)
+    throw error
+  }
+  // A registered root must still resolve to its recorded canonical path — a
+  // directory swapped for a symlink or another target is `redirected`, the
+  // same verdict the sink classification uses.
+  if (registered && !samePath(rootReal, root)) {
+    throw new RemoteCopyError('local-root-redirected', `the granted local root now resolves to "${rootReal}", not "${root}"`)
+  }
   const path = `${rootReal}/${relativePath}`
   const fd = openSync(path, constants.O_RDONLY | ((constants as unknown as { O_NOFOLLOW?: number }).O_NOFOLLOW ?? 0))
   try {
@@ -685,7 +722,10 @@ function closeQuietly(fd: number): void { try { closeSync(fd) } catch { /* alrea
 async function copyLocalToRemote(ctx: CopyContext, destinationEnvironment: RemoteEnvironment): Promise<RemoteCopyResult> {
   const budget = budgetFor(destinationEnvironment)
   let source: BoundLocalSource
-  try { source = openLocalSource(localRoot(ctx.registry, ctx.request.session, ctx.request.from.rootId), ctx.request.from.relativePath, budget.maxBytes) }
+  try {
+    const root = localRoot(ctx.registry, ctx.request.session, ctx.request.from.rootId, ctx.prepared.source.localRoot)
+    source = openLocalSource(root, ctx.request.from.relativePath, budget.maxBytes, ctx.request.from.rootId !== 'primary')
+  }
   catch (error) { return ctx.fail(codeOf(error), 'source') }
   let endpoint: RemoteEndpoint | undefined
   try { endpoint = await openSftpEndpoint(ctx, destinationEnvironment, ctx.prepared.destination) }
@@ -759,6 +799,7 @@ async function copyRemoteToLocal(ctx: CopyContext, sourceEnvironment: RemoteEnvi
   try {
     authority = ctx.registry.localTransferDestination(
       ctx.request.session.header.cwd, ctx.request.to.rootId, ctx.prepared.effectiveMode, ctx.toolName,
+      ctx.prepared.destination.localRoot,
     )
   } catch (error) { return ctx.fail(codeOf(error), 'admission') }
   let endpoint: RemoteEndpoint
@@ -807,6 +848,7 @@ async function copyRemoteToLocal(ctx: CopyContext, sourceEnvironment: RemoteEnvi
     try {
       authorityAgain = ctx.registry.localTransferDestination(
         ctx.request.session.header.cwd, ctx.request.to.rootId, ctx.prepared.effectiveMode, ctx.toolName,
+        again?.destination.localRoot,
       )
     } catch { authorityAgain = undefined }
     if (ctx.signal.aborted || again === undefined || authorityAgain === undefined || !sameAdmission(ctx.prepared, again)

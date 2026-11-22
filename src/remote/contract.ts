@@ -5,6 +5,7 @@
  * authority always follows the current Session, capped at workspace-write.
  */
 import type { RemoteBinding, RemoteEnvironment } from './manifest.ts'
+import type { RootAccess } from '../roots.ts'
 
 export type RemotePurpose = 'read' | 'write' | 'exec' | 'transfer'
 
@@ -31,6 +32,13 @@ export interface RemoteGrant {
   readonly grantId?: string | undefined
 }
 
+/** The owner-admitted authority of a `local` endpoint: the granted canonical root and its access. */
+export interface AdmittedLocalRoot {
+  readonly rootId: string
+  readonly path: string
+  readonly access: 'primary' | RootAccess
+}
+
 /** One endpoint carried by an `admit` decision; local endpoints have no remote identity. */
 export interface AdmittedRemoteEndpoint {
   readonly environmentId: string
@@ -40,6 +48,8 @@ export interface AdmittedRemoteEndpoint {
   readonly bindingDigest: string | null
   readonly environmentDigest: string | null
   readonly configVersion: string | null
+  /** The owner's local authority for a `local` endpoint; `null` on remote endpoints. */
+  readonly localRoot: AdmittedLocalRoot | null
 }
 
 /** The owner's `remote-admit` reply, and the proof a Host-side body runs under. */

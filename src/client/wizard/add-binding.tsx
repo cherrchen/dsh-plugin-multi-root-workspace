@@ -56,6 +56,7 @@ export function AddBindingWizard(props: {
   const [registering, setRegistering] = useState(false)
   const [error, setError] = useState<PanelError | undefined>(undefined)
   const lifetime = useRef<AbortController | undefined>(undefined)
+  const savedFor = useRef<{ environmentId: string; path: string; rootId: string } | null>(null)
   useEffect(() => {
     const controller = new AbortController()
     lifetime.current = controller
@@ -72,7 +73,13 @@ export function AddBindingWizard(props: {
     if (!remotePath(draft.path.trim()) || !capable || busy) return
     setSaving(true)
     setError(undefined)
-    void props.onSave(draft).then(result => {
+    // A Back→Next pass re-saves the binding just saved, but only while the
+    // draft still names the same environment and path — a changed path stays
+    // create-shaped so the server matches/creates rather than clobbering.
+    const resave = savedFor.current
+    const outgoing = resave !== null && resave.environmentId === draft.environmentId && resave.path === draft.path.trim()
+      ? { ...draft, rootId: resave.rootId } : draft
+    void props.onSave(outgoing).then(result => {
       if (lifetime.current?.signal.aborted !== false) return
       setSaving(false)
       if (result.error !== undefined) {
@@ -85,6 +92,7 @@ export function AddBindingWizard(props: {
         return
       }
       setBoundRootId(created.rootId)
+      savedFor.current = { environmentId: draft.environmentId, path: draft.path.trim(), rootId: created.rootId }
       setStage('register')
     })
   }

@@ -76,7 +76,8 @@ nativeTest('a lost mutation reply rejects authority-disconnected and never repla
   servers.push(await listen(id, async () => { await gate; return {} }))
   const client = await RemoteClient.connect(id.remoteEndpoint!, id.id, 'd'.repeat(64), () => {})
   const pending = client.request('remote-add', ['/p', { environmentId: 'e', rootId: 'r' }])
-  await expect(pending).rejects.toMatchObject({ code: expect.any(String) })
+  // A dead channel rejects the pending mutation as unknown; never replayed.
   client.close()
+  await expect(pending).rejects.toMatchObject({ code: 'authority-disconnected' })
   await expect(pending).rejects.toBeInstanceOf(AuthorityRpcError)
 })

@@ -47,7 +47,7 @@ export function lazySshExecBackend(
     deployment,
     async confine(argv, policy, signal) { return await (await backend()).confine(argv, policy, signal) },
     currentGeneration() { return manager.generationOf(environment.environmentId, workspace) },
-    async verifyCwd(cwd, root, signal) {
+    async verifyCwd(cwd, root, signal, expected) {
       if (signal.aborted) throw new Error('cancelled')
       const relative = posix.relative(root, cwd)
       if (!posix.isAbsolute(root) || !posix.isAbsolute(cwd) || relative === '..' || relative.startsWith('../')) {
@@ -56,7 +56,15 @@ export function lazySshExecBackend(
       // Execution has its own read-only helper probe; it does not require
       // transfer authority or the SFTP hardlink/fsync extensions.
       const verifier = new SshEndpointVerifier(manager)
-      await verifier.verify(environment, { path: root }, signal)
+      const verified = await verifier.verify(environment, { path: root }, signal)
+      // The pinned identity the grant recorded at registration must still
+      // hold at execution time (ADR-0030 §3: a redirected root is withheld).
+      if (expected !== null && (verified.target.kind !== expected.kind || verified.target.value !== expected.value)) {
+        throw new EndpointVerifyError(
+          'endpoint-redirected',
+          `the granted root identity changed: expected ${expected.kind} "${expected.value}", probed ${verified.target.kind} "${verified.target.value}"`,
+        )
+      }
       if (cwd !== root) await verifier.verify(environment, { path: cwd }, signal, root)
     },
     spawn(argv, options, sink) {

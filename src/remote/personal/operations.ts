@@ -4,8 +4,8 @@
  * Every external command goes through the injectable `ExecFile` seam.
  */
 import { createHash, randomBytes } from 'node:crypto'
-import { readFileSync } from 'node:fs'
-import { join } from 'node:path'
+import { readdirSync, readFileSync, statSync } from 'node:fs'
+import { dirname, join } from 'node:path'
 import { createRequire } from 'node:module'
 import type { ExecFile } from './credentials.ts'
 import { managedHostAlias, renderAskpass } from './ssh-files.ts'
@@ -87,8 +87,10 @@ export class HostKeyScans {
 /** `ssh` argv for the environment's custody kind. */
 export function sshArgs(environment: PersonalEnvironment, credentialRoot: string, extra: readonly string[] = []): string[] {
   if (environment.credential.kind === 'ssh-config') {
-    // The user's own alias via ~/.ssh/config (upstream consistency).
-    return [...extra, environment.credential.alias]
+    // The user's own alias via ~/.ssh/config. Managed aliases get these from
+    // the generated ssh_config; the user's alias config must not weaken them.
+    return ['-o', 'StrictHostKeyChecking=yes', '-o', 'ForwardAgent=no', '-o', 'UpdateHostKeys=no',
+      ...extra, environment.credential.alias]
   }
   return ['-F', join(credentialRoot, 'ssh_config'), ...extra, managedHostAlias(environment.environmentId)]
 }
@@ -132,6 +134,8 @@ export interface HelperInstallResult {
   readonly nodePath: string
   readonly helperPath: string
   readonly sha256: string
+  /** Set-artifact integrity generation (1 = `helper-entry.mjs` verifies the installed file set). */
+  readonly integrity: 1
 }
 
 /** Single-quote a value for a remote command string. */
@@ -150,6 +154,67 @@ const probe = async (exec: ExecFile, file: string, args: readonly string[], opti
     return await exec(file, args, options)
   }
 }
+
+/**
+ * The digest the remote helper entry recomputes at every launch: every
+ * regular file under the installed `node_modules` as a sha256 over sorted
+ * `<relative path>\0<content>\0` pairs. The same source runs in the install
+ * probe and inside `helper-entry.mjs`, so the two sides cannot drift. Keep
+ * the source free of single quotes — the probe embeds it in a remote
+ * shell single-quoted `node -e` argument.
+ */
+export const treeDigestSource = `(root) => {
+  const entries = []
+  const walk = (dir) => {
+    for (const entry of readdirSync(dir, { withFileTypes: true })) {
+      const full = join(dir, entry.name)
+      if (entry.isDirectory()) { walk(full); continue }
+      const rel = full.slice(root.length + 1).replace(/\\\\/g, "/")
+      if (entry.isFile()) entries.push([rel, "file", full])
+      else if (entry.isSymbolicLink()) entries.push([rel, "symlink", readlinkSync(full)])
+      else entries.push([rel, "special", ""])
+    }
+  }
+  walk(root)
+  entries.sort()
+  const hash = createHash("sha256")
+  for (const entry of entries) {
+    hash.update(entry[0])
+    hash.update("\\0")
+    hash.update(entry[1])
+    hash.update("\\0")
+    hash.update(entry[1] === "file" ? readFileSync(entry[2]) : entry[2])
+    hash.update("\\0")
+  }
+  return hash.digest("hex")
+}`
+
+/**
+ * The remote entry `helperPath` points at: recompute the recorded file-set
+ * digest and refuse to load the upstream helper on any drift — sibling
+ * chunks (`protocol.js`, `schemas.js`, `stream-security-*.js`), every
+ * npm-installed dependency file, and non-regular dirents like `.bin`
+ * symlinks (pinned by path + readlink target) are covered, not just
+ * `helper.js`. `helper.sha256` keeps recording `lib/helper.js` itself: the
+ * upstream `hello.hash` check compares against the launched helper's own
+ * bytes (`fileURLToPath(import.meta.url)` inside helper.js), never this
+ * entry file.
+ */
+export const renderHelperEntry = (expected: string): string => `// dsh-helper entry: verify the installed artifact set, then load the upstream helper.
+import { createRequire } from "node:module"
+import { dirname, join } from "node:path"
+import { fileURLToPath } from "node:url"
+const require = createRequire(import.meta.url)
+const { createHash } = require("node:crypto")
+const { readdirSync, readFileSync, readlinkSync } = require("node:fs")
+const digest = ${treeDigestSource}
+const root = join(dirname(fileURLToPath(import.meta.url)), "node_modules")
+if (digest(root) !== ${JSON.stringify(expected)}) {
+  process.stderr.write("dsh remote helper integrity check failed: the installed artifact set differs from the recorded digest\\n")
+  process.exit(78)
+}
+await import("./node_modules/@deepseek-ai/dsh-ssh/lib/helper.js")
+`
 
 /**
  * npm-install the host's exact dsh-ssh version on the remote and verify the
@@ -181,20 +246,52 @@ export async function installHelper(
   const install = `mkdir -p ~/${shellQuote(dir)} && npm install --prefix ~/${shellQuote(dir)} --no-audit --no-fund --omit=dev ${shellQuote(`@deepseek-ai/dsh-ssh@${version}`)}`
   await exec('ssh', [...args, install], { timeoutMs: 300_000 })
   const { stdout: home } = await probe(exec, 'ssh', [...args, 'printf %s "$HOME"'], { timeoutMs: 15_000 })
-  const helperAbs = `${home.trim()}/${dir}/node_modules/@deepseek-ai/dsh-ssh/lib/helper.js`
+  const base = `${home.trim()}/${dir}`
+  const modulesDir = `${base}/node_modules`
+  const packageLib = `${modulesDir}/@deepseek-ai/dsh-ssh/lib`
+  const entryAbs = `${base}/helper-entry.mjs`
   try {
-    checkRemotePath(helperAbs)
+    checkRemotePath(packageLib)
+    checkRemotePath(entryAbs)
   } catch {
     throw new RemoteOperationError('helper-install-failed', 'the remote $HOME did not resolve to an absolute path')
   }
-  const { stdout } = await probe(exec, 'ssh', [...args, `sha256sum ${shellQuote(helperAbs)} 2>/dev/null || shasum -a 256 ${shellQuote(helperAbs)}`], { timeoutMs: 30_000 })
-  const remoteHash = /^[0-9a-f]{64}/.exec(stdout.trim())?.[0]
-  if (remoteHash === undefined) throw new RemoteOperationError('helper-install-failed', 'the remote helper hash could not be read')
-  const hostHash = createHash('sha256').update(readFileSync(options.hostHelperPath)).digest('hex')
-  if (remoteHash !== hostHash) {
-    throw new RemoteOperationError('helper-hash-mismatch', `the remote helper.js hash does not match the host's ${version} copy`)
+  // One remote node probe: the file-set digest the entry will pin, plus the
+  // per-file lib/ hashes the host cross-checks against its own package —
+  // `lib/*.js` bytes must be identical to the published tarball the host runs.
+  const probeJs = `const{createHash}=require("node:crypto"),{readdirSync,readFileSync,readlinkSync,statSync}=require("node:fs"),{join}=require("node:path"),digest=${treeDigestSource},lib={};`
+    + `for(const n of readdirSync(${JSON.stringify(packageLib)}))if(statSync(join(${JSON.stringify(packageLib)},n)).isFile())lib[n]=createHash("sha256").update(readFileSync(join(${JSON.stringify(packageLib)},n))).digest("hex");`
+    + `process.stdout.write(JSON.stringify({tree:digest(${JSON.stringify(modulesDir)}),lib}))`
+  const { stdout } = await probe(exec, 'ssh', [...args, `${shellQuote(nodePath)} -e ${shellQuote(probeJs)}`], { timeoutMs: 60_000 })
+  let installed: { tree?: unknown; lib?: unknown }
+  try {
+    installed = JSON.parse(stdout) as { tree?: unknown; lib?: unknown }
+  } catch {
+    installed = {}
   }
-  return { nodePath, helperPath: helperAbs, sha256: remoteHash }
+  if (typeof installed.tree !== 'string' || !/^[0-9a-f]{64}$/.test(installed.tree) || installed.lib === null || typeof installed.lib !== 'object') {
+    throw new RemoteOperationError('helper-install-failed', 'the remote helper artifact set could not be read')
+  }
+  const hostLibDir = dirname(options.hostHelperPath)
+  const hostLib: Record<string, string> = {}
+  for (const name of readdirSync(hostLibDir)) {
+    if (statSync(join(hostLibDir, name)).isFile()) {
+      hostLib[name] = createHash('sha256').update(readFileSync(join(hostLibDir, name))).digest('hex')
+    }
+  }
+  const libEntries = (lib: Record<string, unknown>) => Object.keys(lib).sort().map(name => [name, lib[name]])
+  if (JSON.stringify(libEntries(installed.lib as Record<string, unknown>)) !== JSON.stringify(libEntries(hostLib))) {
+    throw new RemoteOperationError('helper-hash-mismatch', `the remote dsh-ssh lib files do not match the host's ${version} copy`)
+  }
+  // helper.sha256 is lib/helper.js itself — the artifact upstream's
+  // hello.hash check identifies — while the entry script pins the file set.
+  const helperSha = hostLib['helper.js']
+  if (helperSha === undefined) {
+    throw new RemoteOperationError('helper-install-failed', `the host's dsh-ssh package has no lib/helper.js under ${hostLibDir}`)
+  }
+  const entry = renderHelperEntry(installed.tree)
+  await exec('ssh', [...args, `umask 077; cat > ${shellQuote(entryAbs)}`], { input: entry, timeoutMs: 30_000 })
+  return { nodePath, helperPath: entryAbs, sha256: helperSha, integrity: 1 }
 }
 
 /**

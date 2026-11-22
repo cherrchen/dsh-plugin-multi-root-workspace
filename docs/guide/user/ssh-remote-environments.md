@@ -48,8 +48,8 @@ English: [ssh-remote-environments.en.md](./ssh-remote-environments.en.md)
    - 点击 **扫描并测试连接**，在同一步内选择一条扫描到的主机密钥指纹后点击 **确认并保存**；点 **上一步** 可回到表单。
 3. **第 2 步（连接设置）**：
    - **密码凭据**：先点击 **安装访问密钥**，使用刚才保存的密码登录一次并在远端写入访问密钥。
-   - **托管凭据链接**：如果界面提示「尚未链接」，点击 **链接到 ~/.ssh/config**。插件会先备份原 `~/.ssh/config`，再在其首行写入一条 `Include` 指令以使托管别名生效（未链接前无法建立连接）。
-   - **安装 Helper**（如需命令执行或对象级核验，推荐安装）：可先点 **检测 Node**，再点击 **安装 Helper**（插件会通过 SSH 在远端 `~/.dsh-helper/<版本>` 安装与宿主完全同版的 `@deepseek-ai/dsh-ssh` 并校验 `helper.js` 哈希；要求远端已安装 Node.js 且 `command -v node` 返回绝对路径）。
+   - **托管凭据链接**：如果界面提示「尚未链接」，点击 **链接到 ~/.ssh/config**。插件会先备份原 `~/.ssh/config`，再在其首行写入一条 `Include` 指令以使托管别名生效（未链接前无法建立连接）。`~/.ssh/config` 是符号链接时，改动落在链接目标上、符号链接保持不变。
+   - **安装 Helper**（如需命令执行或对象级核验，推荐安装）：可先点 **检测 Node**，再点击 **安装 Helper**（插件会通过 SSH 在远端 `~/.dsh-helper/<版本>` 安装与宿主完全同版的 `@deepseek-ai/dsh-ssh`，并写入一个每次启动都会校验整个依赖文件集的入口脚本；要求远端已安装 Node.js 且 `command -v node` 返回绝对路径）。
    - 勾选 **允许命令执行**（需 Helper 已安装）和/或 **允许文件传输**，点击 **完成**。
 
 ### 第 3 步：绑定目录到工作区并登记
@@ -73,6 +73,7 @@ English: [ssh-remote-environments.en.md](./ssh-remote-environments.en.md)
 - **`owner-without-remote-protocol` / 面板提示另一实例持有存储**：另一个未开启 SSH 远端功能的 DSH 实例（例如未启用该插件的 Desktop 端）正持有 `$DSH_HOME` 的存储锁。退出那个实例后再刷新。
 - **`endpoint-unverifiable`** — 确认 Host 使用受支持的 DSH 版本，并已安装四个版本匹配的 SSH 可选包。
 - **`ssh-config-not-linked`**（个人模式）：存在托管凭据的环境但尚未把插件生成的配置链接进 `~/.ssh/config`，在「远端连接」中点击 **链接到 ~/.ssh/config**。
+- **`helper-outdated`**：记录的 Helper 早于整集完整性校验，在对应连接卡片上重新 **安装 Helper**。
 - **`unknown` 返回与 `reconcileId`**：远端命令启动后连接断开或文件发布应答丢失时，工具不会自动重试（避免重复执行或覆盖文件），请凭返回的 `reconcileId` 到远端对账后再决定后续操作。
 
 关于协议字段、全部错误码与架构细节，参见技术参考 [SSH 远端环境参考](../../reference/ssh-remote-environments.md) 与 [多执行环境控制面参考](../../reference/multi-environment-control-plane.md)。

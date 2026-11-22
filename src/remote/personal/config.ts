@@ -26,6 +26,8 @@ const helperSchema = z.object({
   helperPath: z.string().min(1),
   sha256: z.string().regex(/^[0-9a-f]{64}$/),
   protocol: z.number().int().min(1),
+  /** 1 = `helperPath` is `helper-entry.mjs`, which verifies the installed file set at launch. Absent on legacy installs. */
+  integrity: z.literal(1).optional(),
 }).strict()
 
 export const personalEnvironmentSchema = z.object({
@@ -92,7 +94,10 @@ export function toDeploymentManifest(config: PersonalConfig, manifestPath: strin
     hostKey: environment.hostKey,
     namespace: environment.environmentId,
     transport: environment.helper !== null ? 'helper' : 'sftp',
-    helper: environment.helper === null ? null : { sha256: environment.helper.sha256, protocol: environment.helper.protocol },
+    helper: environment.helper === null ? null : {
+      sha256: environment.helper.sha256, protocol: environment.helper.protocol,
+      ...(environment.helper.integrity === undefined ? {} : { integrity: environment.helper.integrity }),
+    },
     connection: environment.helper !== null
       ? { host: managedAlias(environment), nodePath: environment.helper.nodePath, helperPath: environment.helper.helperPath }
       : { host: managedAlias(environment) },
@@ -197,7 +202,55 @@ interface PersonalSnapshot {
 }
 
 /** The v2 environment file is the migration commit point. A v1 reader ignores the prepared sidecar. */
+/**
+ * What makes one store file "the same" as last read: dev+ino+size+mtimeMs
+ * covers content churn, and mode+uid cover the protection bits
+ * `checkPersonalFileProtection` enforces — a chmod/chown or a symlink swap
+ * must reload too. `null` when the path is absent.
+ */
+type FileIdentity = Pick<Stats, 'dev' | 'ino' | 'size' | 'mtimeMs' | 'mode' | 'uid'>
+
+const statIdentity = (path: string): FileIdentity | null => {
+  try {
+    const info = lstatSync(path)
+    return { dev: info.dev, ino: info.ino, size: info.size, mtimeMs: info.mtimeMs, mode: info.mode, uid: info.uid }
+  } catch (error) {
+    const code = (error as NodeJS.ErrnoException).code
+    if (code === 'ENOENT' || code === 'ENOTDIR') return null
+    throw error
+  }
+}
+
+const sameIdentity = (left: FileIdentity | null, right: FileIdentity | null): boolean =>
+  left === right || (left !== null && right !== null
+    && left.dev === right.dev && left.ino === right.ino && left.size === right.size
+    && left.mtimeMs === right.mtimeMs && left.mode === right.mode && left.uid === right.uid)
+
+/**
+ * `refreshRemotePersonal` re-reads this store on every remote operation. Skip
+ * the read + parse while the stat identity of the env file and its bindings
+ * sidecar is unchanged since the last successful read; a changed or missing
+ * file still reloads immediately.
+ */
+const snapshotCache = new Map<string, { stats: readonly [FileIdentity | null, FileIdentity | null, FileIdentity | null]; snapshot: PersonalSnapshot }>()
+
 function readSnapshot(path: string): PersonalSnapshot {
+  // The parent dir is part of the identity: `checkPersonalDirectoryProtection`
+  // reads its uid+mode on every full read, so a chmod/chown/symlink swap on
+  // the directory must invalidate the cache just like a file change does.
+  const stats: readonly [FileIdentity | null, FileIdentity | null, FileIdentity | null] =
+    [statIdentity(path), statIdentity(bindingStorePath(path)), statIdentity(dirname(path))]
+  const cached = snapshotCache.get(path)
+  if (cached !== undefined && sameIdentity(cached.stats[0], stats[0]) && sameIdentity(cached.stats[1], stats[1])
+    && sameIdentity(cached.stats[2], stats[2])) {
+    return cached.snapshot
+  }
+  const snapshot = readSnapshotFull(path)
+  snapshotCache.set(path, { stats, snapshot })
+  return snapshot
+}
+
+function readSnapshotFull(path: string): PersonalSnapshot {
   if (!filePresent(path)) {
     return { config: { schemaVersion: 2, revision: 0, environments: [], bindings: [] }, identity: '', split: false }
   }

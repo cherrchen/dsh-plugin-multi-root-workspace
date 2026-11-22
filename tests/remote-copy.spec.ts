@@ -734,4 +734,49 @@ describe('total transfer I/O deadline and cancellation', () => {
     expect(s.mem.files.get('/import/peer.txt')?.data.toString()).toBe('shared bytes')
     expect(s.mem.files.has('/import/dest.txt')).toBe(false)
   })
+
+  it('a timed-out write abandons only the waiter and breaks the shared session after a bounded grace', async () => {
+    fixture = createFixtureWorkspace('copy-shared-timeout')
+    writeFileSync(join(fixture.workspace, 'source.txt'), 'shared bytes')
+    const s = stack({ uniqueOperationIds: true, transfer: { maxBytes: 1024, timeoutMs: 50 } })
+    const dispose = vi.fn()
+    Object.assign(s.mem, { dispose })
+    const entered = Promise.withResolvers<void>()
+    const writing = Promise.withResolvers<void>()
+    vi.spyOn(s.mem, 'write').mockImplementationOnce(async () => {
+      entered.resolve()
+      await writing.promise
+    })
+    const first = run(s, localToRemote(), { manager: s.manager })
+    await entered.promise
+    const second = run(s, localToRemote({ to: { ...localToRemote().to, relativePath: 'peer.txt' } }), { manager: s.manager })
+    await expect(first).resolves.toMatchObject({ code: 'transfer-timeout' })
+    // The timed-out waiter is abandoned; the sibling transfer keeps the session.
+    await expect(second).resolves.toMatchObject({ status: 'committed' })
+    expect(dispose).not.toHaveBeenCalled()
+    expect(s.mem.files.get('/import/peer.txt')?.data.toString()).toBe('shared bytes')
+    // The wire request never answers: after the grace the generation breaks.
+    await new Promise(resolve => setTimeout(resolve, 1_500))
+    expect(dispose).toHaveBeenCalled()
+  })
+
+  it('a timed-out request that answers inside the grace keeps the shared session', async () => {
+    fixture = createFixtureWorkspace('copy-shared-timeout-late')
+    writeFileSync(join(fixture.workspace, 'source.txt'), 'shared bytes')
+    const s = stack({ uniqueOperationIds: true, transfer: { maxBytes: 1024, timeoutMs: 50 } })
+    const dispose = vi.fn()
+    Object.assign(s.mem, { dispose })
+    const entered = Promise.withResolvers<void>()
+    const writing = Promise.withResolvers<void>()
+    vi.spyOn(s.mem, 'write').mockImplementationOnce(async () => {
+      entered.resolve()
+      await writing.promise
+    })
+    const first = run(s, localToRemote(), { manager: s.manager })
+    await entered.promise
+    await expect(first).resolves.toMatchObject({ code: 'transfer-timeout' })
+    writing.resolve()
+    await new Promise(resolve => setTimeout(resolve, 1_500))
+    expect(dispose).not.toHaveBeenCalled()
+  })
 })

@@ -200,11 +200,11 @@ async function runPersonalEndpoint(
       await store.importKey(call.label, call.privateKey, call.passphrase)
       return await after()
     case 'sshCredentialPassword':
-      store.savePassword(call.label, call.password)
+      await store.savePassword(call.label, call.password)
       return await after()
     case 'sshCredentialRemove': {
       const config = loadPersonalConfig(paths.personalPath)
-      store.remove(call.id, id => config.environments.some(environment =>
+      await store.remove(call.id, id => config.environments.some(environment =>
         environment.credential.kind === 'managed'
         && (environment.credential.credentialId === id || environment.credential.accessKeyId === id)))
       return await after()
@@ -324,7 +324,7 @@ async function runPersonalEndpoint(
       // R6: the removed environment's access key is best-effort cleanup.
       const accessKeyId = removed?.credential.kind === 'managed' ? removed.credential.accessKeyId : undefined
       if (accessKeyId !== undefined) {
-        try { store.remove(accessKeyId, () => false) } catch { /* already gone */ }
+        try { await store.remove(accessKeyId, () => false) } catch { /* already gone */ }
       }
       return state
     }
@@ -356,19 +356,52 @@ async function runPersonalEndpoint(
       }
       const secretFile = store.secretFileOf(environment.credential.credentialId)
       if (secretFile === undefined) throw new RemoteAdmissionError('credential-not-found', 'the credential secret is missing')
+      // Fail before any key generation or remote write when the caller's
+      // revision is already stale — an install that cannot be recorded would
+      // leave a remote grant plus an orphan local key.
+      if (config.revision !== call.revision) {
+        throw new RemoteAdmissionError('personal-config-conflict', 'the SSH environment data changed; reload and retry')
+      }
       const accessKey = await store.generate(`env-${environment.environmentId}`, { purpose: 'access-key', environmentId: environment.environmentId })
       try {
         await installAccessKey(exec, environment, paths.credentialRoot, { publicKey: accessKey.publicKey ?? '' }, secretFile)
       } catch (error) {
-        try { store.remove(accessKey.id, () => false) } catch { /* best effort: no orphan key */ }
+        try { await store.remove(accessKey.id, () => false) } catch { /* best effort: no orphan key */ }
         throw error
       }
-      return await mutate(registry, primary, paths, call.revision, current => ({
-        ...current,
-        environments: current.environments.map(entry => entry.environmentId === call.environmentId
-          ? { ...entry, credential: { kind: 'managed' as const, credentialId: entry.credential.kind === 'managed' ? entry.credential.credentialId : '', accessKeyId: accessKey.id } }
-          : entry),
-      }))
+      const attach = async (revision: number): Promise<SshStateView> => mutate(registry, primary, paths, revision, current => {
+        const entry = current.environments.find(candidate => candidate.environmentId === call.environmentId)
+        if (entry === undefined) throw new RemoteAdmissionError('environment-not-found', `unknown environment "${call.environmentId}"`)
+        if (entry.credential.kind !== 'managed') {
+          throw new RemoteAdmissionError('personal-config-conflict', 'the SSH environment changed during access-key install; reload and retry')
+        }
+        return {
+          ...current,
+          environments: current.environments.map(candidate => candidate.environmentId !== call.environmentId ? candidate : {
+            ...candidate,
+            credential: { ...candidate.credential, accessKeyId: accessKey.id },
+          }),
+        }
+      })
+      try {
+        return await attach(call.revision)
+      } catch (error) {
+        // The remote grant and local key already exist: retry the record
+        // once against a fresh revision when the environment is still the
+        // same install target; otherwise remove the key and fail closed.
+        if (!(error instanceof RemoteAdmissionError) || error.code !== 'personal-config-conflict') throw error
+        const reloaded = loadPersonalConfig(paths.personalPath)
+        const current = reloaded.environments.find(entry => entry.environmentId === call.environmentId)
+        if (current !== undefined && current.credential.kind === 'managed'
+          && current.credential.credentialId === environment.credential.credentialId
+          && current.endpoint.hostname === environment.endpoint.hostname
+          && current.endpoint.port === environment.endpoint.port
+          && current.endpoint.user === environment.endpoint.user) {
+          return await attach(reloaded.revision)
+        }
+        try { await store.remove(accessKey.id, () => false) } catch { /* best effort: no orphan key */ }
+        throw error
+      }
     }
     case 'sshBindingSave':
       if (primary === undefined) throw new RemoteAdmissionError('panel/bad-request', 'a Workspace binding requires a live session')
@@ -382,7 +415,11 @@ async function runPersonalEndpoint(
         const key = primaryKey(primary)
         const siblings = config.bindings.filter(entry => entry.environmentId === binding.environmentId
           && primaryKey(entry.primary) === key)
-        const previous = siblings.find(entry => entry.rootId === binding.rootId)
+        // A create-shaped draft (no rootId) re-save edits the binding that
+        // already covers this environment+path instead of allocating a fresh id.
+        const previous = binding.rootId === undefined
+          ? siblings.find(entry => entry.path === binding.path)
+          : siblings.find(entry => entry.rootId === binding.rootId)
         if (binding.rootId !== undefined && previous === undefined) {
           throw new RemoteAdmissionError('personal-config-conflict', 'the Workspace binding to edit no longer exists; reload and retry')
         }
@@ -398,7 +435,7 @@ async function runPersonalEndpoint(
         if (previous !== undefined && previous.path === binding.path
           && sameMembers(previous.actions, binding.actions)
           && sameMembers(transferKeys(previous.transfers), transferKeys(binding.transfers))) return config
-        const rootId = binding.rootId ?? newBindingRootId(binding.path, new Set(siblings.map(entry => entry.rootId)))
+        const rootId = binding.rootId ?? previous?.rootId ?? newBindingRootId(binding.path, new Set(siblings.map(entry => entry.rootId)))
         return {
           ...config,
           bindings: [...config.bindings.filter(entry => entry !== previous), { ...binding, rootId, primary, bindingId: randomUUID() }],

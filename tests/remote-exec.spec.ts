@@ -355,7 +355,7 @@ describe.skipIf(process.platform === 'win32')('the two-admission remote command 
     const signal = AbortSignal.timeout(2_000)
     for (const root of ['/srv/app', '/srv/logs']) {
       const backend = lazySshExecBackend(environment, manager, root)!
-      await backend.verifyCwd!(root + '/nested', root, signal)
+      await backend.verifyCwd!(root + '/nested', root, signal, { kind: 'object', value: '1:2' })
       await expect(backend.confine(['probe'], { mode: 'workspace-write', workspaceRoot: root, sessionId: 'session' }, signal))
         .resolves.toMatchObject({ generation: root })
       expect(backend.currentGeneration()).toBe(root)

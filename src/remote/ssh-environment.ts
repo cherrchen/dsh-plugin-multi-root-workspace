@@ -380,6 +380,11 @@ export class SshEnvironmentManager {
       throw new SshEnvironmentError(`ssh-capability-absent:${this.gate.status === 'absent' ? this.gate.reason : 'unknown'}`, `SSH capability is not eligible on this host`)
     }
     if (environment.transport !== 'helper') throw new SshEnvironmentError('transport-not-helper', `environment "${environmentId}" uses transport "${environment.transport}"`)
+    // A helper installed before full-artifact integrity has no entry point to
+    // verify its file set: refuse rather than trust the single-file digest.
+    if (this.personalCustody && environment.helper!.integrity === undefined) {
+      throw new SshEnvironmentError('helper-outdated', 'the recorded helper predates full-artifact integrity; reinstall the helper')
+    }
     if (environment.credentialIsolation !== 'attested' && !this.allowUnattested && !this.brokerCustody) {
       throw new SshEnvironmentError('credential-isolation-unattested', `environment "${environmentId}" is declared unattested; connections require an attested deployment`)
     }

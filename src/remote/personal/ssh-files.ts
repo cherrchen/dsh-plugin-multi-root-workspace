@@ -3,9 +3,9 @@
  * `managed` environments, the plugin's own `known_hosts`, and the one-line
  * `Include` link into `~/.ssh/config` (with backup). POSIX only.
  */
-import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync, copyFileSync } from 'node:fs'
+import { copyFileSync, existsSync, lstatSync, mkdirSync, readFileSync, readlinkSync, realpathSync, renameSync, statSync, writeFileSync } from 'node:fs'
 import { homedir } from 'node:os'
-import { join } from 'node:path'
+import { dirname, join, resolve } from 'node:path'
 import type { PersonalConfig, PersonalEnvironment } from './config.ts'
 
 export function managedHostAlias(environmentId: string): string {
@@ -134,14 +134,28 @@ export function link(credentialRoot: string, home: string = homedir()): LinkStat
   if (status.linked) return status
   const sshDir = join(home, '.ssh')
   if (!existsSync(sshDir)) mkdirSync(sshDir, { mode: 0o700 })
-  if (existsSync(status.configPath)) {
+  // ~/.ssh/config may be a symlink (dotfiles managers): backup + rewrite the
+  // resolved target so the link itself survives. A dangling link writes
+  // through to the path it points at.
+  let target = status.configPath
+  try {
+    if (lstatSync(status.configPath).isSymbolicLink()) {
+      try {
+        target = realpathSync(status.configPath)
+      } catch {
+        target = resolve(dirname(status.configPath), readlinkSync(status.configPath))
+      }
+    }
+  } catch { /* no config file yet */ }
+  const targetMode = existsSync(target) ? statSync(target).mode & 0o777 : 0o600
+  if (existsSync(target)) {
     const stamp = new Date().toISOString().replace(/[:.]/g, '-')
-    copyFileSync(status.configPath, `${status.configPath}.dsh-backup-${stamp}`)
+    copyFileSync(target, `${target}.dsh-backup-${stamp}`)
   }
-  const previous = existsSync(status.configPath) ? readFileSync(status.configPath, 'utf8') : ''
-  const temp = `${status.configPath}.tmp-${process.pid}`
-  writeFileSync(temp, `${includeLine(credentialRoot)}\n${previous}`, { mode: 0o600 })
-  renameSync(temp, status.configPath)
+  const previous = existsSync(target) ? readFileSync(target, 'utf8') : ''
+  const temp = `${target}.tmp-${process.pid}`
+  writeFileSync(temp, `${includeLine(credentialRoot)}\n${previous}`, { mode: targetMode })
+  renameSync(temp, target)
   return { managed: status.managed, linked: true, configPath: status.configPath }
 }
 

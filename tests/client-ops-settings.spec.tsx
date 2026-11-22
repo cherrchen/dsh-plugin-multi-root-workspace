@@ -70,7 +70,7 @@ describe('OPS compatibility settings card', () => {
       fireEvent.click(screen.getByRole('switch', { name: 'ops.compatibilityEnable' }))
       fireEvent.click(screen.getByRole('checkbox', { name: 'ops.confirmAcknowledge' }))
       fireEvent.click(screen.getByRole('button', { name: 'ops.confirmEnable' }))
-      await waitFor(() => expect(screen.getByRole('status').textContent).toBe('ops.settingsFailed'))
+      await waitFor(() => expect(screen.getByRole('alert').textContent).toBe('ops.settingsFailed'))
     }
   })
 

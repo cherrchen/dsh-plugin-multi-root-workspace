@@ -10,6 +10,7 @@
  * local path reference — which the text states so a model cannot mistake one
  * for the other.
  */
+import { homedir } from 'node:os'
 import type { RemoteBinding, RemoteEnvironment } from './manifest.ts'
 import type { RemoteStatus } from './contract.ts'
 
@@ -17,6 +18,17 @@ import type { RemoteStatus } from './contract.ts'
 export const REMOTE_CONTEXT_NAME = 'multi-root:remote'
 
 const ACTION_ORDER = ['read', 'write', 'exec'] as const
+
+/**
+ * `status.reason` can embed host-local paths (e.g. the personal config under
+ * the user's home); before it reaches the model, hide the home directory as
+ * `~`, collapse whitespace, and bound the length.
+ */
+export function sanitizeRemoteReason(reason: string): string {
+  const home = homedir()
+  const text = (home === '' ? reason : reason.split(home).join('~')).replace(/\s+/g, ' ').trim()
+  return text.length > 200 ? `${text.slice(0, 199)}…` : text
+}
 
 function peer(environmentId: string, rootId: string): string {
   return `${environmentId}/${rootId}`
@@ -61,7 +73,7 @@ export function renderRemoteCapabilities(options: {
   if (lines.length === 0) return ''
   const state = options.status.state === 'ready'
     ? ''
-    : ` The remote control plane is ${options.status.state}${options.status.reason === undefined ? '' : ` (${options.status.reason})`}, so every remote tool call is refused with remote-unavailable until the host resolves it.`
+    : ` The remote control plane is ${options.status.state}${options.status.reason === undefined ? '' : ` (${sanitizeRemoteReason(options.status.reason)})`}, so every remote tool call is refused with remote-unavailable until the host resolves it.`
   const mode = options.mode === 'read-only'
     ? ' This session is read-only: remote writes, commands, and copies whose destination is remote are refused.'
     : ''

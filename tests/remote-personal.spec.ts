@@ -318,14 +318,14 @@ describe.skipIf(process.platform === 'win32')('credential store', () => {
   it('password credentials list metadata only — never the secret', async () => {
     const root = join(tmp(), 'cred')
     const store = new CredentialStore(root)
-    const view = store.savePassword('prod', 's3cr3t-p@ssword')
+    const view = await store.savePassword('prod', 's3cr3t-p@ssword')
     expect(view.kind).toBe('password')
     const serialized = JSON.stringify(store.list())
     expect(serialized).not.toContain('s3cr3t-p@ssword')
     expect(serialized).not.toContain('secrets/')
     expect(existsSync(join(root, 'secrets', view.id))).toBe(true)
-    expect(() => store.remove(view.id, () => true)).toThrowError(/still referenced/)
-    store.remove(view.id, () => false)
+    await expect(store.remove(view.id, () => true)).rejects.toThrowError(/still referenced/)
+    await store.remove(view.id, () => false)
     expect(store.list()).toEqual([])
   })
 

@@ -224,6 +224,11 @@ describe('remote control plane', () => {
     await expect(stack.registry.withRemoteOperation(op(stack, {
       purpose: 'transfer', endpoints: [{ environmentId: 'build-02', rootId: 'dst' }, { environmentId: 'build-01', rootId: 'src' }],
     }), () => {})).rejects.toMatchObject({ code: 'transfer-pair-not-allowed' })
+    // A `local` endpoint resolves through the owner's live root state too —
+    // register `scratch` so the refusal comes from the pairing rule, not the
+    // local-endpoint check.
+    const scratchAdded = await stack.registry.add(fixture.workspace, { path: fixture.outside })
+    await stack.registry.setAliasId(fixture.workspace, { kind: 'id', id: scratchAdded[0]!.id }, 'scratch')
     await expect(stack.registry.withRemoteOperation(op(stack, {
       purpose: 'transfer', endpoints: [{ environmentId: 'build-01', rootId: 'src' }, { environmentId: 'local', rootId: 'scratch' }],
     }), () => {})).rejects.toMatchObject({ code: 'transfer-pair-not-allowed' })

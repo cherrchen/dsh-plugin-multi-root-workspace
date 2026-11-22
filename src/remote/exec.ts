@@ -29,7 +29,7 @@ export interface RemoteExecutionBackend {
     signal: AbortSignal,
   ): Promise<{ argv: readonly string[]; enforcement: 'full' | 'partial'; generation: string }>
   currentGeneration(): string
-  verifyCwd?(cwd: string, root: string, signal: AbortSignal): Promise<void>
+  verifyCwd?(cwd: string, root: string, signal: AbortSignal, expected: { readonly kind: 'object' | 'path'; readonly value: string } | null): Promise<void>
   spawn(
     argv: readonly string[],
     options: { cwd: string; env: Readonly<Record<string, string>>; generation: string },
@@ -84,7 +84,7 @@ export type RemoteCommandResult =
 
 const TRANSIENT_ADMISSION_ERRORS = new Set([
   'remote-unavailable', 'config-digest-mismatch', 'owner-without-remote-protocol',
-  'authority-unavailable', 'authority-disconnected', 'authority-busy',
+  'authority-unavailable', 'authority-disconnected', 'authority-busy', 'authority-timeout',
 ])
 
 const notStarted = (base: Base, code: string): RemoteCommandResult =>
@@ -143,7 +143,7 @@ export async function runRemoteCommand(
       const remoteCwd = cwdRelative === '' ? admitted.displayPath : posix.join(admitted.displayPath, cwdRelative)
       const argv = [...deployment.shell, request.command]
       if (backend.verifyCwd !== undefined) {
-        try { await backend.verifyCwd(remoteCwd, admitted.displayPath, signal) } catch (error) {
+        try { await backend.verifyCwd(remoteCwd, admitted.displayPath, signal, admitted.verifiedTarget) } catch (error) {
           return denied(typeof (error as { code?: unknown }).code === 'string' ? (error as { code: string }).code : 'cwd-unverifiable')
         }
       }

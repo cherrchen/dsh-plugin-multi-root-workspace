@@ -30,12 +30,12 @@
 - **个人配置文件** `<sharedStorageRoot>/multi_root_workspace.remote-personal.json`：属当前 uid、0600、非 symlink、所在目录不可被 group/other 写、不得位于任何绑定的本地 primary 内。内容是环境（主机名、端口、用户、平台、主机钥指纹、凭据引用、Helper、workspace、可选 exec/transfer）与绑定（与部署清单同一绑定 schema）；读入时转换为同一 `DeploymentManifest` 形状，因此准入、记录域与 `remote-1` 协议不分叉。写入走原子替换并带 `revision` 比较，冲突为 `personal-config-conflict`。各 Host 在列表与准入前按 stat 身份检测变更并重载，摘要变化后 follower 重新 hello。
 - **凭据**：两种来源。
   - `ssh-config`：引用用户 `~/.ssh/config` 中已有的别名。添加时以 `ssh -G` 解析出的用户、主机与端口登记，连接时账户必须仍然一致。
-  - `managed`：插件凭据根 `<sharedStorageRoot>/multi_root_workspace.ssh/`（0700）下的密钥或密码。面板可生成 ed25519 密钥、导入私钥（带口令的私钥在导入时去掉口令保存）或保存密码；列表只返回标签、类型、公钥与指纹，**任何端点都不返回私钥或密码**。删除被环境引用的凭据为 `credential-in-use`。
+  - `managed`：插件凭据根 `<sharedStorageRoot>/multi_root_workspace.ssh/`（0700）下的密钥或密码。面板可生成 ed25519 密钥、导入私钥（带口令的私钥在导入时经 `SSH_ASKPASS`/`SSH_ASKPASS_REQUIRE=force` 把旧口令交给 `ssh-keygen -p` 解密后保存，口令不进入进程 argv）或保存密码；列表只返回标签、类型、公钥与指纹，**任何端点都不返回私钥或密码**。删除被环境引用的凭据为 `credential-in-use`。凭据记录的读改写经 `credentials.json.lock` 内核租约串行化并在租约内重读，跨 Host 实例不丢记录。
   - 上游 `BatchMode=yes` 禁止交互认证，因此密码凭据不直接驱动上游连接：保存使用密码的环境时，插件用密码（`SSH_ASKPASS` + `SSH_ASKPASS_REQUIRE=force`，脚本只读取凭据根中的密码文件）登录一次，把为该环境生成的访问密钥追加到远端 `~/.ssh/authorized_keys`，之后连接一律用该密钥。密码保留在凭据根内，供重新安装访问密钥。
-  - 托管别名 `dsh-<environmentId>` 写入凭据根内生成的 `ssh_config`（`IdentitiesOnly yes`、插件 `known_hosts`、`StrictHostKeyChecking yes`、`BatchMode yes`、`ForwardAgent no`、`UpdateHostKeys no`）。因为上游只读 `~/.ssh/config`，用户须在面板中一次性确认“链接到 ~/.ssh/config”，插件在该文件**首行**加入一条 `Include <凭据根>/ssh_config`（先备份原文件）；未链接时托管环境的连接报 `ssh-config-not-linked`。
+  - 托管别名 `dsh-<environmentId>` 写入凭据根内生成的 `ssh_config`（`IdentitiesOnly yes`、插件 `known_hosts`、`StrictHostKeyChecking yes`、`BatchMode yes`、`ForwardAgent no`、`UpdateHostKeys no`）。因为上游只读 `~/.ssh/config`，用户须在面板中一次性确认“链接到 ~/.ssh/config”，插件在该文件**首行**加入一条 `Include <凭据根>/ssh_config`（先备份原文件）；`~/.ssh/config` 为符号链接时备份与写入落在其目标文件上、链接本身保留，悬空链接直接向目标路径写入；未链接时托管环境的连接报 `ssh-config-not-linked`。
 - **主机钥**：首次信任（TOFU）。面板用 `ssh-keyscan` 取指纹给用户确认，确认后写入插件 `known_hosts` 并记入配置；此后连接仍要求 known_hosts 恰好一把匹配钥且指纹等于记录值。`ssh-config` 来源沿用用户自己的 known_hosts。
 - **身份检查的放宽**：个人模式不再要求 `ssh -G` 解析出 `batchmode yes`、`stricthostkeychecking yes`、`forwardagent no`、`updatehostkeys no`——上游在命令行强制了前三项，后者只影响 known_hosts 改写；账户一致与主机钥检查保留。
-- **Helper**：面板“安装 Helper”经插件自己的 `ssh` 在远端执行 `npm install --prefix ~/.dsh-helper/<版本> @deepseek-ai/dsh-ssh@<Host 同版>`，再比较远端 `helper.js` 的 SHA-256 与 Host 本机同版文件；一致才记入配置。用户也可填写已安装的 `nodePath` / `helperPath`。`~/.dsh-helper` 可被目标账户改写，这是个人模式接受的风险；需要 root 只读 Helper 的用户应选团队模式。
+- **Helper**：面板“安装 Helper”经插件自己的 `ssh` 在远端执行 `npm install --prefix ~/.dsh-helper/<版本> @deepseek-ai/dsh-ssh@<Host 同版>`，再把远端 `lib/*` 逐文件哈希与 Host 本机同版包比对（不一致即拒绝记录），并写入一个 `helper-entry.mjs` 入口：每次启动先重算整个安装 `node_modules` 文件集的确定性摘要（常规文件按内容、`.bin` 等符号链接按 readlink 目标、其他特殊目录项按类型标记），漂移即拒绝加载；`helper.sha256` 仍记录 `lib/helper.js` 自身摘要，即上游 `hello.hash` 握手校验的工件。记录带 `integrity: 1`，无此标记的旧记录在打开时拒绝（`helper-outdated`），须重装。用户也可填写已安装的 `nodePath` / `helperPath`。`~/.dsh-helper` 可被目标账户改写，这是个人模式接受的风险；需要 root 只读 Helper 的用户应选团队模式。
 - **复制目的**：不要求 chroot；绑定由用户声明 `import`/`export`，建议只 pull 或 push 到自己拥有的目录。
 
 ### 3. 团队模式

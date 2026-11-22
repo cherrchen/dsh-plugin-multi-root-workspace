@@ -24,7 +24,6 @@ import {
   type KeyboardEvent, type ReactNode,
 } from 'react'
 import clsx from 'clsx'
-import { ErrorToast } from '../error-toast.tsx'
 import type { TabId } from '@deepseek-ai/dsh-client-ui-dockkit'
 import type { SnapshotSelectorHook } from '@deepseek-ai/dsh-client-store'
 import type { TranslateNS } from '@deepseek-ai/dsh-client-ui-slots'
@@ -280,7 +279,7 @@ function SearchFailure({ failure, onRetry, describe, t }: {
   const message = describe?.(failure) ?? describeTreeFailure(t, failure)
   return (
     <div className={CLASS.failure} data-files-row="search-failed">
-      <ErrorToast error={failure} format={() => t('search.failed', { message })} />
+      <p className="mrfw-ftNote" role="alert">{t('search.failed', { message })}</p>
       <PaneButton variant="outline" size="sm" className={CLASS.retry} data-files-search-retry onClick={onRetry}>{t('search.retry')}</PaneButton>
     </div>
   )

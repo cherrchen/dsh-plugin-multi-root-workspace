@@ -92,6 +92,19 @@ describe('SshEnvironmentManager refusal ordering', () => {
     await expect(open({ allow: false })).rejects.toMatchObject({ code: 'credential-isolation-unattested' })
     expect(calls.filter(call => call.startsWith('ssh -G'))).toHaveLength(0)
   })
+  it('refuses a personal helper that predates full-artifact integrity', async () => {
+    const manager = new SshEnvironmentManager({
+      manifest: manifest([environment()]), logger, gate: eligible, custody: 'personal', exec, readFile: () => KEY_LINE,
+    })
+    await expect(manager.open('vps-app')).rejects.toMatchObject({ code: 'helper-outdated' })
+    expect(calls.filter(call => call.startsWith('ssh -G'))).toHaveLength(0)
+    const upgraded = new SshEnvironmentManager({
+      manifest: manifest([environment({ helper: { sha256: 'a'.repeat(64), protocol: 1, integrity: 1 as const } })]),
+      logger, gate: eligible, custody: 'personal', exec, readFile: () => KEY_LINE,
+    })
+    // Past the integrity gate, the next refusal is the personal workspace check.
+    await expect(upgraded.open('vps-app')).rejects.toMatchObject({ code: 'workspace-invalid' })
+  })
   it('refuses account and host-key drift after ssh -G but before loading modules', async () => {
     await expect(open({ allow: true, env: environment({ account: 'other' }) })).rejects.toMatchObject({ code: 'account-mismatch' })
     await expect(open({ allow: true, env: environment({ hostKey: `SHA256:${'B'.repeat(43)}` }) })).rejects.toMatchObject({ code: 'host-key-mismatch' })

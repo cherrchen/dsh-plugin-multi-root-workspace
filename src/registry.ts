@@ -68,7 +68,7 @@ import type { LocalDestinationAuthority } from './remote/local-sink.ts'
 import { RemoteControlPlane, type RemoteConfig } from './remote/plane.ts'
 import type { loadDeploymentManifest } from './remote/manifest.ts'
 import { parseRemoteArguments, remoteAdmitSchema, remoteSnapshotSchema, type RemoteMethod } from './remote/protocol.ts'
-import type { RemoteEndpointRef, RemoteSnapshotReply } from './remote/contract.ts'
+import type { AdmittedLocalRoot, RemoteEndpointRef, RemoteSnapshotReply } from './remote/contract.ts'
 import {
   additionalRootId,
   canonicalRoot,
@@ -1874,7 +1874,7 @@ export class MultiRootRegistry extends Service {
     const args = { purpose: request.purpose, endpoints: [...request.endpoints], manifestDigest: this.remotePlane.manifestDigest! }
     const admission = this.client
       ? remoteAdmitSchema.parse(await this.remotePlane.remoteRequest('remote-admit', [key, args])) as import('./remote/contract.ts').RemoteAdmission
-      : await this.serialize(key, async () => this.remotePlane.admit(key, args, this.operationEpoch!))
+      : await this.admitRemoteOperation(key, args)
     if (admission.epoch !== this.remoteEpoch()) deny('stale-epoch', 'the remote admission epoch does not match the live channel')
     trace('admitted', 'decision=admit')
     const identity: RemoteOperationIdentity = Object.freeze({
@@ -1899,6 +1899,33 @@ export class MultiRootRegistry extends Service {
   }
 
   /**
+   * The owner's authoritative local record remote admission binds a `local`
+   * endpoint to (ADR-0034): `primary` resolves to the canonical session root,
+   * every other id must name an `available` registered root under the live
+   * local authority — the state v1 admission revalidates before it answers.
+   */
+  private admittedLocalRecord(key: string, rootId: string): AdmittedLocalRoot {
+    if (rootId === 'primary') return { rootId, path: canonicalRoot(key), access: 'primary' }
+    const status = this.available ? this.statusesOf(key).find(entry => entry.aliasId === rootId) : undefined
+    if (status === undefined || status.state !== 'available') {
+      throw new RemoteAdmissionError('local-root-unavailable', `local root "${rootId}" is not an available registered root of this primary`)
+    }
+    return { rootId, path: status.path, access: status.access }
+  }
+
+  /**
+   * Owner-side remote admission at the queue's ordering point: stored roots
+   * are reclassified — the live check v1 admission runs — and `local`
+   * endpoints resolve through {@link admittedLocalRecord}.
+   */
+  private async admitRemoteOperation(key: string, args: Parameters<RemoteControlPlane['admit']>[1]): Promise<import('./remote/contract.ts').RemoteAdmission> {
+    return await this.serialize(key, async () => {
+      await this.reclassify(key)
+      return this.remotePlane.admit(key, args, this.operationEpoch!, rootId => this.admittedLocalRecord(key, rootId))
+    })
+  }
+
+  /**
    * Authorize one LOCAL binary write destination for the transfer port
    * (ADR-0034). This is the same fence the filesystem mutations consult, minus
    * the `ctx.fs` call: the named root must be a live `available` registration
@@ -1908,12 +1935,18 @@ export class MultiRootRegistry extends Service {
    * staging file and the published name out of the DSH home, the storage
    * medium, and the lease directory under every mode.
    *
+   * On a follower the local projection is stale by definition, so the
+   * authority is issued only against the owner-admitted record carried by
+   * the operation's remote admission: the projection must still agree —
+   * same path and access, state `available` — or the call fails closed.
+   *
    * A transfer must ask again immediately before publication; the authority is
    * a snapshot, never a cached permit.
    * @param primaryRoot - the session's primary root (any spelling).
    * @param rootId - `primary` or the stable alias id of a registered root.
    * @param effectiveMode - the operation's session mode, capped at workspace-write.
    * @param toolName - the dispatching tool, whose per-tool cap narrows additional roots.
+   * @param admitted - the owner-admitted local record from the remote admission; required on a follower.
    * @returns the canonical root and the protected boundaries to enforce.
    * @throws {RemoteAdmissionError} with a stable refusal code.
    */
@@ -1922,20 +1955,34 @@ export class MultiRootRegistry extends Service {
     rootId: string,
     effectiveMode: 'read-only' | 'workspace-write',
     toolName: string,
+    admitted?: AdmittedLocalRoot | null,
   ): LocalDestinationAuthority {
     if (this.disposed) throw new RemoteAdmissionError('remote-unavailable', 'the registry is disposed')
     if (typeof rootId !== 'string' || rootId === '') throw new RemoteAdmissionError('invalid-arguments', 'a local transfer destination requires a root id')
+    if (admitted !== undefined && admitted !== null && admitted.rootId !== rootId) {
+      throw new RemoteAdmissionError('admission-changed', `the admitted local root "${admitted.rootId}" does not match "${rootId}"`)
+    }
+    if ((admitted === undefined || admitted === null) && this.client !== undefined) {
+      throw new RemoteAdmissionError('local-authority-unavailable', 'a follower issues a local transfer authority only against the owner-admitted record')
+    }
     if (!this.available) {
       throw new RemoteAdmissionError('local-authority-unavailable', 'the local registry authority is not live; additional roots are not granted here')
     }
     const deny = this.knownProtectedPaths().map(path => path.path)
     if (rootId === 'primary') {
       if (effectiveMode === 'read-only') throw new RemoteAdmissionError('mode-denies', 'a read-only session cannot write into the primary root')
-      return { rootId, root: canonicalRoot(primaryKey(primaryRoot)), access: 'primary', deny }
+      const root = canonicalRoot(primaryKey(primaryRoot))
+      if (admitted !== undefined && admitted !== null && (admitted.access !== 'primary' || !samePath(admitted.path, root))) {
+        throw new RemoteAdmissionError('admission-changed', 'the admitted primary root does not match this host\'s authority')
+      }
+      return { rootId, root: admitted?.path ?? root, access: 'primary', deny }
     }
     const status = this.list(primaryRoot).find(entry => entry.aliasId === rootId)
     if (status === undefined || status.state !== 'available') {
       throw new RemoteAdmissionError('local-root-unavailable', `local root "${rootId}" is not an available registered root of this primary`)
+    }
+    if (admitted !== undefined && admitted !== null && (!samePath(admitted.path, status.path) || admitted.access !== status.access)) {
+      throw new RemoteAdmissionError('admission-changed', `the admitted local root "${rootId}" does not match this host's projection`)
     }
     if (effectiveRootAccess(status.access, effectiveMode) === 'read-only') {
       throw new RemoteAdmissionError(
@@ -1948,7 +1995,7 @@ export class MultiRootRegistry extends Service {
     if (this.ctx.multiRootScope.capsTool(toolName)) {
       throw new RemoteAdmissionError('tool-capped', `tool "${toolName}" is capped to read-only and cannot write into local root "${rootId}"`)
     }
-    return { rootId, root: status.path, access: status.access, deny }
+    return { rootId, root: admitted?.path ?? status.path, access: admitted?.access ?? status.access, deny }
   }
 
   /** The remote-1 listener's dispatch: same queue, same epoch as v1. */
@@ -1968,7 +2015,7 @@ export class MultiRootRegistry extends Service {
       case 'remote-snapshot': return await this.serialize(key, async () => this.remotePlane.snapshot(key, this.operationEpoch!))
       case 'remote-add': return await this.addRemote(primary, args[1] as RemoteEndpointRef)
       case 'remote-remove': return await this.removeRemote(primary, args[1] as RemoteEndpointRef)
-      case 'remote-admit': return await this.serialize(key, async () => this.remotePlane.admit(key, args[1] as Parameters<RemoteControlPlane['admit']>[1], this.operationEpoch!))
+      case 'remote-admit': return await this.admitRemoteOperation(key, args[1] as Parameters<RemoteControlPlane['admit']>[1])
       default: throw new RemoteAdmissionError('unknown-method', `unsupported remote method ${method}`)
     }
   }

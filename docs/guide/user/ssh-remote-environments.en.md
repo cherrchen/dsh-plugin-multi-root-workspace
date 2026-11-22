@@ -48,8 +48,8 @@ Personal mode is configured entirely in the GUI and requires no root privileges,
    - Click **Scan and test connection**, pick one of the scanned host-key fingerprints in the same step, then click **Confirm and save**; click **Back** to return to the form.
 3. **Step 2 (Connection setup)**:
    - **Password credentials**: click **Install access key** first so the plugin logs in once with the saved password and installs the access key.
-   - **Linking managed config**: if prompted that the config is not linked, click **Link ~/.ssh/config**. The plugin backs up your existing `~/.ssh/config` and prepends a single `Include` line so the managed host alias resolves (required before connecting).
-   - **Install helper** (recommended; required for command execution and object-identity verification): optionally click **Detect Node**, then click **Install helper**. The plugin installs the exact host-matching `@deepseek-ai/dsh-ssh` version under `~/.dsh-helper/<version>` and verifies the `helper.js` SHA-256 against the host copy (requires Node.js on the remote host with `command -v node` resolving to an absolute path).
+   - **Linking managed config**: if prompted that the config is not linked, click **Link ~/.ssh/config**. The plugin backs up your existing `~/.ssh/config` and prepends a single `Include` line so the managed host alias resolves (required before connecting). If `~/.ssh/config` is a symlink, the change lands on the link target and the symlink itself is preserved.
+   - **Install helper** (recommended; required for command execution and object-identity verification): optionally click **Detect Node**, then click **Install helper**. The plugin installs the exact host-matching `@deepseek-ai/dsh-ssh` version under `~/.dsh-helper/<version>` and writes an entry script that re-verifies the whole installed dependency file set on every launch (requires Node.js on the remote host with `command -v node` resolving to an absolute path).
    - Check **Allow command execution** (requires the helper) and/or **Allow file transfer**, then click **Finish**.
 
 ### Step 3: Bind a directory to the workspace and register
@@ -73,6 +73,7 @@ Turn off **SSH remote environments** in the plugin settings to shut down the rem
 - **`owner-without-remote-protocol`**: another DSH instance without the SSH remote plane enabled (for example, an unpatched Desktop instance) holds the `$DSH_HOME` storage lease. Quit that instance and refresh.
 - **`endpoint-unverifiable`** — Check that the Host uses a supported DSH release and has all four matching SSH packages installed.
 - **`ssh-config-not-linked`** (Personal mode): a managed credential environment exists, but the generated config is not yet linked into `~/.ssh/config`. Click **Link ~/.ssh/config** under **Remote connections**.
+- **`helper-outdated`**: the recorded helper predates full file-set integrity verification; click **Install helper** again on that connection card.
 - **`unknown` result with `reconcileId`**: connection dropped after a remote command started or after sending a file publish request. Tools never auto-retry to avoid duplicate execution or overwrites; reconcile on the remote host or in the Broker audit log using `reconcileId`.
 
 For protocol schemas, full refusal codes, and architectural invariants, see the [SSH remote environments reference](../../reference/ssh-remote-environments.md) and the [control plane reference](../../reference/multi-environment-control-plane.md).

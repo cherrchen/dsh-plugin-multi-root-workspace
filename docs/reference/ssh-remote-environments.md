@@ -18,8 +18,8 @@ Host 将显式的 `team`、`hardened` 或其他不支持的模式视为停用。
 - Workspace Root 绑定由 Host 写到 `<personalPath>.bindings.json`，格式为 `{ schemaVersion: 1, revision, bindings[] }`。绑定按本地 `primary`、`environmentId`、`rootId` 唯一标识，包含远端路径、动作与传输对端。一个 Workspace 可在同一环境绑定多个互不重叠的目录。新建或实际修改授权的绑定带 Host 生成的 `bindingId`。路径、动作集合与传输配对集合相同时，保存保留原记录、摘要和配置 revision。解除后重新添加同名绑定需要重新登记。
 - 两个文件都必须是当前 uid 拥有的普通文件，非符号链接，权限至多 0600，父目录不得由 group/other 写，位置须在所有绑定的本地主根之外。连接文件缺失时，整个 personal 配置视为空；v2 连接文件存在时，绑定文件必须可读并通过保护检查。
 - 两个文件共用 `<basename>.lock` 的内核租约与 CAS，当前 revision 取两份文件的最大值。读取 v1 合并文件时剥离环境里的 `workspace`，保留已保存的绑定路径与权限。首次写入先准备绑定文件，再原子替换为 v2 连接文件。在这之后，每个变更只原子替换它所属的文件。
-- 凭据根由 `remoteEnvironments.credentialRoot` 指定，默认 `$DSH_HOME/storages/multi_root_workspace.ssh`。目录必须为当前 uid 所有且权限为 0700，否则返回 `credential-root-unsafe`。内部有 `credentials.json`、`keys/<id>` 与公钥、`secrets/<id>`、生成的 `ssh_config` 与 `known_hosts` 以及 `askpass.sh`。
-- 每次远端 snapshot/list/admit/add/remove 前，`refreshPersonal()` 检查两个文件的保护和内容。有效配置原位发布，保留 owner 的授权域与现有 `remote-1` 连接。后续请求各自携带并校验当期清单摘要。配置损坏、语义非法或保护失效时，控制面进入 `config-invalid`，清空清单和摘要并拒绝远端准入，修复后可重新加载。
+- 凭据根由 `remoteEnvironments.credentialRoot` 指定，默认 `$DSH_HOME/storages/multi_root_workspace.ssh`。目录必须为当前 uid 所有且权限为 0700，否则返回 `credential-root-unsafe`。内部有 `credentials.json`、`keys/<id>` 与公钥、`secrets/<id>`、生成的 `ssh_config` 与 `known_hosts` 以及 `askpass.sh`。凭据记录的生成、导入、保存密码与删除经 `credentials.json.lock` 内核租约（与清单文件同一机制）串行化并在租约内重读，多个 Host 实例并发变更不丢记录。
+- 每次远端 snapshot/list/admit/add/remove 前，`refreshPersonal()` 检查两个文件的保护和内容。两份文件与其所在目录的 stat 身份（dev/ino/size/mtime/mode/uid）全部未变时沿用上一次已校验的读入；任一字段变化、文件缺失或父目录权限被放宽时立即重读并重做全部保护检查。有效配置原位发布，保留 owner 的授权域与现有 `remote-1` 连接。后续请求各自携带并校验当期清单摘要。配置损坏、语义非法或保护失效时，控制面进入 `config-invalid`，清空清单和摘要并拒绝远端准入，修复后可重新加载。
 - personal 环境授权身份包含主机名、端口、账号、平台、主机钥、凭据引用（含已安装访问密钥）、Helper 与执行/传输策略。连接新建或身份变化生成新的身份 ID。显示名只影响展示。尚未包含目标和凭据身份的旧 personal 登记升级后变为 `withheld`，须重新登记一次。
 - personal Helper 在目录核验或获准执行时取该绑定的远端目录作为工作区；连接按环境和目录分别缓存。旧 Helper 绑定首次升级会因其清单内容变化而需要重新登记。
 
@@ -33,7 +33,7 @@ Host 将显式的 `team`、`hardened` 或其他不支持的模式视为停用。
 - `sshHostKeyScan` 返回有效期 60 秒的确认令牌。直连形式用 `ssh-keyscan`，令牌绑定目标主机、端口和候选指纹。别名形式通过 `ssh -G` 和本机 known_hosts 取得目标和唯一指纹，令牌还绑定别名与账号。
 - `sshEnvironmentSave` 携带 `intent: create | update`。创建时 ID 已存在返回 `environment-id-conflict`，更新目标不存在返回 `environment-not-found`。连接身份及记录的指纹相同时可复用已有指纹。主机、端口、账号、平台、凭据来源或材料改变时需要重新确认扫描结果。别名保存时会重新核对解析结果。允许启用 exec 的条件是 Helper 已安装且可沿用。
 - `sshEnvironmentRemove` 拒绝移除仍被 Workspace 引用的环境（`environment-in-use`）。`sshEnvironmentTest`、`sshHelperInstall`、`sshAccessKeyInstall` 负责连接检查与远端设置。
-- `sshBindingSave` 用显式 `rootId` 编辑已有绑定，省略时创建。绑定归请求会话的 Workspace。`sshBindingRemove` 解除当前 Workspace 的绑定。
+- `sshBindingSave` 用显式 `rootId` 编辑已有绑定，省略时创建；省略 `rootId` 且同一 Workspace、同一环境已存在同路径绑定时，编辑该绑定而不是分配新 `rootId`（向导「上一步→下一步」的重复保存因此幂等）。绑定归请求会话的 Workspace。`sshBindingRemove` 解除当前 Workspace 的绑定。
 
 插件详情的「SSH 远端」通过独立的 `/multi-root-workspace-ssh-settings` Connection 通道打开。它使用同一 Host 身份校验，直接读取插件级状态和管理连接、凭据，不要求活动会话。该通道拒绝 Workspace 绑定、目录浏览与登记/移除请求；这些操作继续通过 `PANEL_CHANNEL` 由当前会话派生主根。
 
@@ -60,15 +60,16 @@ Host dsh-<environmentId>
 
 生成的路径按 ssh_config 规则引用和转义，拒绝换行/NUL；支持凭据根含空格。OpenSSH 的 `-G` 会移除引号，因此 Host 仅在完整字段与已知托管 known_hosts 路径一致时将其保留为单个文件，不用预期路径覆盖其他解析结果。
 
-`sshConfigLink` 在 `~/.ssh/config` **首行**写入 `Include "<credentialRoot>/ssh_config"`（先备份为 `config.dsh-backup-<时间戳>`，幂等）。未链接而使用 managed 环境时连接报 `ssh-config-not-linked`。
+`sshConfigLink` 在 `~/.ssh/config` **首行**写入 `Include "<credentialRoot>/ssh_config"`（先备份为 `config.dsh-backup-<时间戳>`，幂等）。`~/.ssh/config` 是符号链接（dotfiles 托管常见）时，备份与写入落在其解析出的目标文件上——符号链接本身保留、绝不替换成普通文件，备份落在目标文件旁；悬空符号链接直接向目标路径写入。未链接而使用 managed 环境时连接报 `ssh-config-not-linked`。
 
-SFTP 使用独立的 SSH 子进程，同样在命令行强制 `StrictHostKeyChecking=yes`、`ForwardAgent=no`、`UpdateHostKeys=no`，并关闭 ControlMaster/ControlPath；用户别名配置不能放宽这些参数。
+SFTP 使用独立的 SSH 子进程，同样在命令行强制 `StrictHostKeyChecking=yes`、`ForwardAgent=no`、`UpdateHostKeys=no`，并关闭 ControlMaster/ControlPath；用户别名配置不能放宽这些参数。ssh-config 别名的 `sshEnvironmentTest` 与 `sshHelperInstall` 在命令行强制同一组安全选项（测试连接另加 `BatchMode=yes` 与 `ConnectTimeout=10`）；托管来源从生成的 `ssh_config` 获得同样的值。
 
 ## Helper 安装与密码访问密钥引导
 
-- Helper：远端执行 `npm install --prefix ~/.dsh-helper/<ver> @deepseek-ai/dsh-ssh@<Host 同版>`，再比较远端 `helper.js` 的 SHA-256 与 Host 本机文件；一致才写入 `helper` 字段（`protocol` 取上游 `SSH_PROTOCOL_VERSION`）。远端 node 探测容忍缺失（`command -v node || true`），缺 node 或路径非绝对时报 `helper-node-missing`；node/`$HOME`/sha256 三个秒级探测在连接瞬断时自动重试一次，`npm install` 不重试；外部命令失败的报错携带退出码/信号与 stderr（截断），不再只剩裸 `Command failed:`。
+- Helper：远端执行 `npm install --prefix ~/.dsh-helper/<ver> @deepseek-ai/dsh-ssh@<Host 同版>`，随后一次远端 node 探测计算整个 `node_modules` 文件集的确定性摘要（按相对路径排序的「路径 + 内容」sha256，覆盖 `helper.js` 的全部同包兄弟文件与所有 npm 依赖），并把远端 `lib/*` 逐文件哈希与 Host 本机包逐一比对——不一致即 `helper-hash-mismatch` 拒绝记录。连接使用 `helper-entry.mjs` 作为 `helperPath`：每次启动先重算该文件集摘要（常规文件按内容、符号链接按 readlink 目标、其他目录项按类型标记），与记录不符即以 78 退出并拒绝加载上游 helper；`helper.sha256` 记录远端 `lib/helper.js` 自身的 SHA-256——上游 `hello.hash` 校验的正是被加载的 helper.js 字节，而非入口脚本——记录另带 `integrity: 1`。没有 `integrity` 的旧单文件摘要记录在打开时被拒绝（`helper-outdated`），须重新安装 Helper。远端 node 探测容忍缺失（`command -v node || true`），缺 node 或路径非绝对时报 `helper-node-missing`；node/`$HOME`/摘要三个秒级探测在连接瞬断时自动重试一次，`npm install` 不重试；外部命令失败的报错携带退出码/信号与 stderr（截断），不再只剩裸 `Command failed:`。
 - 编辑连接：派生的 `accessKeyId` 由 Host 从已保存记录保留，前端无需回传；仅 environmentId、hostname/port/user、credentialId 与已确认主机指纹均未变化时继承。改变身份后必须重新安装访问密钥，不能通过保存请求移植旧密钥。
-- 密码引导：为该环境生成访问密钥后，以 `SSH_ASKPASS`（凭据根内 0700 脚本，只读取 `DSH_SSH_SECRET_FILE`）+ `SSH_ASKPASS_REQUIRE=force` + `BatchMode=no` 用密码登录一次，把公钥追加到远端 `authorized_keys`；此后连接一律走访问密钥。
+- 密码引导：为该环境生成访问密钥后，以 `SSH_ASKPASS`（凭据根内 0700 脚本，只读取 `DSH_SSH_SECRET_FILE`）+ `SSH_ASKPASS_REQUIRE=force` + `BatchMode=no` 用密码登录一次，把公钥追加到远端 `authorized_keys`；此后连接一律走访问密钥。整个操作先做 revision 预检（过期 revision 在任何密钥生成与远端写入之前拒绝 `personal-config-conflict`）；安装后记录的 CAS 仍冲突时，只要环境仍存在且托管凭据与目标未变，就以新读到的 revision 重试一次并复用已安装的密钥，否则移除刚生成的密钥——不留无主访问密钥或远端授权。
+- 私钥导入：带口令的私钥经 `SSH_ASKPASS`/`SSH_ASKPASS_REQUIRE=force`（凭据根内私有临时目录中的 0600 口令文件 + 0700 脚本，用完即删）把旧口令交给 `ssh-keygen -p` 解密后重新保存，口令不进入命令行参数；材料或口令被拒报 `credential-import-failed` 并清除半成品密钥文件。
 
 ## 实时开关
 
@@ -107,7 +108,7 @@ GUI 入口有两处：
 
 ### Workspace Root 绑定对话框
 
-从 Workspace Folders 打开 `SshWorkspaceBindingsDialog`。「添加绑定」打开 `AddBindingWizard`（`src/client/wizard/add-binding.tsx`），与「添加远端工作目录」向导共用 `WizardShell` 的绑定、登记两步：第一步在整页表单中选择已有连接、指定远端路径（只读 SFTP 浏览或手动输入规范化的 POSIX 绝对路径）、勾选允许动作与本地传输对端（`primary` 和可用附加根的 `aliasId`），「下一步」经 revision CAS 保存；第二步展示环境、路径、动作与传输摘要并调用 `remotes.add` 登记，成功后进入完成页。已有绑定仍在对话框内联编辑或解除，其他绑定和 SSH 连接独立保留；编辑权限或更新部署后状态变为「待重新登记」的目录，从 Workspace Folders 行尾「…」菜单重新登记。
+从 Workspace Folders 打开 `SshWorkspaceBindingsDialog`。「添加绑定」打开 `AddBindingWizard`（`src/client/wizard/add-binding.tsx`），与「添加远端工作目录」向导共用 `WizardShell` 的绑定、登记两步：第一步在整页表单中选择已有连接、指定远端路径（只读 SFTP 浏览或手动输入规范化的 POSIX 绝对路径）、勾选允许动作与本地传输对端（`primary` 和可用附加根的 `aliasId`），「下一步」经 revision CAS 保存（草稿携带已保存的 `rootId`，「上一步→下一步」的重复保存编辑同一绑定而非重复登记）；第二步展示环境、路径、动作与传输摘要并调用 `remotes.add` 登记，成功后进入完成页。已有绑定仍在对话框内联编辑或解除，其他绑定和 SSH 连接独立保留；编辑权限或更新部署后状态变为「待重新登记」的目录，从 Workspace Folders 行尾「…」菜单重新登记。
 
 新建绑定时，Host 将路径的末级目录名转换为最多 63 字符的小写标识。转换结果为空，或同一项目和 SSH 环境已有同名标识时，改用 UUID 的前 8 位，并保证该标识在当前范围内唯一。编辑已有绑定时沿用原标识。
 
@@ -137,4 +138,4 @@ exec 与 transfer 独立授权：执行前用 helper 的只读受限 stat/realpa
 
 ## 传输截止时间
 
-`transfer.timeoutMs` 是一次复制的总 I/O 预算，包含准入、连接/握手、预检、读取/写入、回读校验和发布。并发调用可共享环境的 SFTP 通道与 opening。取消只结束当前调用的等待，其他调用可继续使用通道。待应答的请求超时会废弃通道代次，迟到的 opening 由管理器统一处理。清理使用独立且共享的 1 秒预算。失效代次按 residual/unknown 报告，避免按路径清理。CREATE 或 LINK 发出后缺少应答时返回 unknown 和 reconcileId。LINK 已确认时，清理失败仍返回 committed 与残留状态。
+`transfer.timeoutMs` 是一次复制的总 I/O 预算，包含准入、连接/握手、预检、读取/写入、回读校验和发布。并发调用可共享环境的 SFTP 通道与 opening。取消与超时都只结束当前调用的等待：未应答的线上请求获得一段有界宽限（超时 1 秒、取消取剩余预算），宽限内收到应答则共享代次保持可用，其他调用继续使用通道；宽限耗尽仍未应答才废弃该代次。迟到的 opening 由管理器统一处理。清理使用独立且共享的 1 秒预算。失效代次按 residual/unknown 报告，避免按路径清理。CREATE 或 LINK 发出后缺少应答时返回 unknown 和 reconcileId。LINK 已确认时，清理失败仍返回 committed 与残留状态。

@@ -10,14 +10,14 @@ import type { KvTable } from '@deepseek-ai/dsh-storage-domain'
 import { openAuthorityStorage } from '../compat/authority-storage.ts'
 import type { storeIdentity } from '../authority/native.ts'
 import type {
-  AdmittedRemoteEndpoint, RemoteAdmission, RemoteEndpointRef, RemoteEndpointVerifier,
+  AdmittedLocalRoot, AdmittedRemoteEndpoint, RemoteAdmission, RemoteEndpointRef, RemoteEndpointVerifier,
   RemoteGrant, RemotePurpose, RemoteSnapshotReply, RemoteStatus,
 } from './contract.ts'
 import { RemoteAdmissionError } from './contract.ts'
 import { bindingDigest, environmentDigest, type loadDeploymentManifest, ManifestError, type DeploymentManifest } from './manifest.ts'
 import { loadPersonalManifest, type PersonalManifest } from './personal/config.ts'
 import { findBinding, grantState, remoteDomainSpec, REMOTE_TABLE_NAME, type PersistedRemoteGrants } from './records.ts'
-import { RemoteClient, RemoteServer } from './protocol.ts'
+import { RemoteClient, RemoteServer, type RemoteRequestTimeouts } from './protocol.ts'
 
 /** The three SSH custody modes (ADR-0049). */
 export type RemoteMode = 'personal' | 'team' | 'hardened'
@@ -64,6 +64,8 @@ export class RemoteControlPlane {
   client: RemoteClient | undefined
   private revision = 0
   verifier: RemoteEndpointVerifier | undefined
+  /** Test hook: overrides for the remote-1 client's per-method request budgets. */
+  requestTimeouts: RemoteRequestTimeouts | undefined
 
   constructor(private readonly config: RemoteConfig | undefined, private readonly logger: { warn(message: string): unknown }, private readonly loadDeploymentForTesting?: typeof loadDeploymentManifest) {
     this.state = { state: 'disabled' }
@@ -246,9 +248,16 @@ export class RemoteControlPlane {
 
   /**
    * Owner-side admission; called inside the queue, same ordering point as
-   * `captureSnapshot`/`admit` on the v1 side.
+   * `captureSnapshot`/`admit` on the v1 side. `localRecord` resolves a `local`
+   * endpoint through the owner's authoritative root state (ADR-0034), so a
+   * removed or withheld local root refuses here, ordered with the remote end.
    */
-  admit(key: string, request: { purpose: RemotePurpose; endpoints: readonly RemoteEndpointRef[]; manifestDigest: string }, epoch: string): RemoteAdmission {
+  admit(
+    key: string,
+    request: { purpose: RemotePurpose; endpoints: readonly RemoteEndpointRef[]; manifestDigest: string },
+    epoch: string,
+    localRecord: (rootId: string) => AdmittedLocalRoot,
+  ): RemoteAdmission {
     this.requireReady()
     if (request.manifestDigest !== this.manifestDigest) {
       throw new RemoteAdmissionError('config-digest-mismatch', 'the deployment manifest digest does not match the owner\'s')
@@ -258,8 +267,9 @@ export class RemoteControlPlane {
     const identities: unknown[] = []
     const admitted = (ref: RemoteEndpointRef): AdmittedRemoteEndpoint => {
       if (ref.environmentId === 'local') {
-        identities.push([ref.environmentId, ref.rootId])
-        return { environmentId: 'local', rootId: ref.rootId, displayPath: ref.rootId, verifiedTarget: null, bindingDigest: null, environmentDigest: null, configVersion: null }
+        const localRoot = localRecord(ref.rootId)
+        identities.push([ref.environmentId, ref.rootId, localRoot.path, localRoot.access])
+        return { environmentId: 'local', rootId: ref.rootId, displayPath: ref.rootId, verifiedTarget: null, bindingDigest: null, environmentDigest: null, configVersion: null, localRoot }
       }
       const grant = grants.find(candidate => candidate.environmentId === ref.environmentId && candidate.rootId === ref.rootId)
       if (grant === undefined) throw new RemoteAdmissionError('endpoint-not-registered', `no remote grant is registered for ${ref.environmentId}:${ref.rootId}`)
@@ -271,6 +281,7 @@ export class RemoteControlPlane {
         environmentId: ref.environmentId, rootId: ref.rootId, displayPath: grant.displayPath,
         verifiedTarget: grant.verifiedTarget, bindingDigest: grant.bindingDigest, configVersion: grant.configVersion,
         environmentDigest: environmentDigest(findBinding(manifest, key, ref)!.environment),
+        localRoot: null,
       }
     }
     let endpoints: AdmittedRemoteEndpoint[]
@@ -393,7 +404,7 @@ export class RemoteControlPlane {
           this.client = undefined
           if (this.state.state === 'ready') this.setState('owner-without-remote-protocol', 'the remote channel closed')
         }
-      })
+      }, this.requestTimeouts)
       adopted.client = client
       if (client.epoch !== epoch) { client.close(); adopted.client = undefined; this.setState('epoch-mismatch', 'the remote-1 epoch differs from the v1 authority epoch'); return }
       this.client = client

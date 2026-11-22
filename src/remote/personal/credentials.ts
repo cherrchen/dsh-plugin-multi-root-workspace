@@ -5,8 +5,9 @@
  * material — `list()` answers metadata only.
  */
 import { randomBytes } from 'node:crypto'
-import { existsSync, lstatSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
+import { existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
+import { RegistryAuthorityLease, RegistryLeaseContendedError } from '../../registry-lease.ts'
 
 /** External command seam — every ssh-keygen call is injectable for tests. */
 export type ExecFile = (file: string, args: readonly string[], options?: { input?: string; env?: Record<string, string>; timeoutMs?: number }) => Promise<{ stdout: string; stderr: string }>
@@ -71,6 +72,28 @@ export class CredentialStore {
     writeFileSync(this.recordsPath(), JSON.stringify(records, null, 2), { mode: 0o600 })
   }
 
+  /**
+   * Serialize a read-modify-write of credentials.json through the same kernel
+   * lease the personal config stores use (ADR-0007), so two Host processes
+   * cannot lose each other's records.
+   */
+  private async mutateRecords(edit: (records: CredentialRecord[]) => CredentialRecord[]): Promise<void> {
+    let lease: RegistryAuthorityLease
+    try {
+      lease = await RegistryAuthorityLease.acquire(`${this.recordsPath()}.lock`)
+    } catch (error) {
+      if (error instanceof RegistryLeaseContendedError) {
+        throw new CredentialError('credential-store-busy', 'the credential store is being written by another process; retry')
+      }
+      throw error
+    }
+    try {
+      this.save(edit(this.records()))
+    } finally {
+      await lease.release()
+    }
+  }
+
   /** Metadata only — never key or password bytes. */
   list(): CredentialView[] {
     return this.records().map(({ secretFile: _secret, ...view }) => view)
@@ -84,14 +107,14 @@ export class CredentialStore {
     const publicKey = readFileSync(`${keyPath}.pub`, 'utf8').trim()
     const fingerprint = await this.fingerprintOf(keyPath)
     const record: CredentialRecord = { id, label, kind: 'key', publicKey, fingerprint, createdAt: new Date().toISOString(), ...(meta === undefined ? {} : meta) }
-    this.save([...this.records(), record])
+    await this.mutateRecords(records => [...records, record])
     return { id, label, kind: 'key', publicKey, fingerprint, createdAt: record.createdAt, ...(meta === undefined ? {} : meta) }
   }
 
   /**
    * Import private key material. An encrypted key requires `passphrase`,
-   * which is stripped before storage; it travels only inside ssh-keygen argv
-   * and is never echoed in errors.
+   * which is stripped before storage; ssh-keygen reads it through an
+   * SSH_ASKPASS helper, never from argv or error output.
    */
   async importKey(label: string, privateKey: string, passphrase?: string): Promise<CredentialView> {
     const id = newId()
@@ -103,7 +126,28 @@ export class CredentialStore {
         const { stdout } = await this.exec('ssh-keygen', ['-y', '-f', keyPath], { timeoutMs: 30_000 })
         writeFileSync(`${keyPath}.pub`, `${stdout.trim()}\n`, { mode: 0o644 })
       } else {
-        await this.exec('ssh-keygen', ['-p', '-P', passphrase, '-N', '', '-f', keyPath], { timeoutMs: 30_000 })
+        // `ssh-keygen -p` must read the OLD passphrase: feed it through an
+        // askpass helper inside a private temp dir so it never sits in argv
+        // (visible to local users via ps). SSH_ASKPASS_REQUIRE=force makes it
+        // work without a tty; DISPLAY only has to be non-empty.
+        const tempRoot = mkdtempSync(join(this.root, 'askpass-'))
+        try {
+          const secretFile = join(tempRoot, 'secret')
+          writeFileSync(secretFile, passphrase, { mode: 0o600 })
+          const askpass = join(tempRoot, 'askpass.sh')
+          writeFileSync(askpass, '#!/bin/sh\nexec cat "$DSH_SSH_SECRET_FILE"\n', { mode: 0o700 })
+          await this.exec('ssh-keygen', ['-p', '-N', '', '-f', keyPath], {
+            env: {
+              SSH_ASKPASS: askpass,
+              SSH_ASKPASS_REQUIRE: 'force',
+              DSH_SSH_SECRET_FILE: secretFile,
+              DISPLAY: 'dsh-ssh',
+            },
+            timeoutMs: 30_000,
+          })
+        } finally {
+          rmSync(tempRoot, { recursive: true, force: true })
+        }
         const { stdout } = await this.exec('ssh-keygen', ['-y', '-f', keyPath], { timeoutMs: 30_000 })
         writeFileSync(`${keyPath}.pub`, `${stdout.trim()}\n`, { mode: 0o644 })
       }
@@ -115,17 +159,17 @@ export class CredentialStore {
     const publicKey = readFileSync(`${keyPath}.pub`, 'utf8').trim()
     const fingerprint = await this.fingerprintOf(keyPath)
     const record: CredentialRecord = { id, label, kind: 'key', publicKey, fingerprint, createdAt: new Date().toISOString() }
-    this.save([...this.records(), record])
+    await this.mutateRecords(records => [...records, record])
     return { id, label, kind: 'key', publicKey, fingerprint, createdAt: record.createdAt }
   }
 
   /** Store a password (0600 under secrets/). */
-  savePassword(label: string, password: string): CredentialView {
+  async savePassword(label: string, password: string): Promise<CredentialView> {
     const id = newId()
     const secretFile = join(this.root, 'secrets', id)
     writeFileSync(secretFile, password, { mode: 0o600 })
     const record: CredentialRecord = { id, label, kind: 'password', secretFile, createdAt: new Date().toISOString() }
-    this.save([...this.records(), record])
+    await this.mutateRecords(records => [...records, record])
     return { id, label, kind: 'password', createdAt: record.createdAt }
   }
 
@@ -137,14 +181,16 @@ export class CredentialStore {
   keyPathOf(id: string): string { return join(this.root, 'keys', id) }
 
   /** Refuse `credential-in-use` while a personal environment references it. */
-  remove(id: string, inUse: (credentialId: string) => boolean): void {
+  async remove(id: string, inUse: (credentialId: string) => boolean): Promise<void> {
     if (inUse(id)) throw new CredentialError('credential-in-use', `credential ${id} is still referenced by a remote environment`)
-    const next = this.records().filter(record => record.id !== id)
-    if (next.length === this.records().length) throw new CredentialError('credential-not-found', `no credential ${id}`)
-    rmSync(join(this.root, 'keys', id), { force: true })
-    rmSync(`${join(this.root, 'keys', id)}.pub`, { force: true })
-    rmSync(join(this.root, 'secrets', id), { force: true })
-    this.save(next)
+    await this.mutateRecords(records => {
+      const next = records.filter(record => record.id !== id)
+      if (next.length === records.length) throw new CredentialError('credential-not-found', `no credential ${id}`)
+      rmSync(join(this.root, 'keys', id), { force: true })
+      rmSync(`${join(this.root, 'keys', id)}.pub`, { force: true })
+      rmSync(join(this.root, 'secrets', id), { force: true })
+      return next
+    })
   }
 
   private async fingerprintOf(keyPath: string): Promise<string | undefined> {
