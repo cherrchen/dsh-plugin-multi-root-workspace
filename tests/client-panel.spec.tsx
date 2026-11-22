@@ -521,6 +521,89 @@ describe('the New Session hero entry', () => {
 })
 
 describe('the panel dialog', () => {
+  it('updates the root list floor when existing rows wrap and unwrap', async () => {
+    const harness = mount()
+    harness.setView({
+      primaryRoot: '/repos/primary',
+      roots: Array.from({ length: 3 }, (_, index) => ({
+        ...ROOT_A,
+        ordinal: index + 1,
+        id: `wrapped-${index + 1}`,
+        path: `/repos/wrapped-${index + 1}`,
+        alias: `wrapped-${index + 1}`,
+      })),
+      limit: 16,
+      count: 3,
+    })
+    const heights = new Map<HTMLElement, number>()
+    const spy = vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function (this: HTMLElement) {
+      const height = heights.get(this) ?? 70
+      return new DOMRect(0, 0, 0, height)
+    })
+    const observe = vi.fn()
+    let notifyResize: (() => void) | undefined
+    vi.stubGlobal('ResizeObserver', class {
+      constructor(callback: () => void) {
+        notifyResize = callback
+      }
+
+      observe = observe
+      disconnect(): void {}
+    })
+    try {
+      renderPanel(harness)
+      fireEvent.click(screen.getByRole('button', { name: /action.label/ }))
+      await waitFor(() => { expect(screen.getByText('/repos/wrapped-3')).toBeTruthy() })
+      const list = document.querySelector('.mrfw-rootList') as HTMLElement
+      const rows = Array.from(list.querySelectorAll<HTMLElement>('.mrfw-row'))
+      expect(observe.mock.calls.map(([row]) => row)).toEqual(rows)
+      const publishedHeight = (): string => list.style.getPropertyValue('--mrfw-root-row-height')
+      expect(publishedHeight()).toBe('70px')
+
+      heights.set(rows[0]!, 104)
+      heights.set(rows[1]!, 132)
+      act(() => { notifyResize!() })
+      expect(publishedHeight()).toBe('132px')
+
+      heights.set(rows[1]!, 70)
+      act(() => { notifyResize!() })
+      expect(publishedHeight()).toBe('104px')
+
+      heights.clear()
+      act(() => { notifyResize!() })
+      expect(publishedHeight()).toBe('70px')
+    } finally {
+      spy.mockRestore()
+      vi.unstubAllGlobals()
+    }
+  })
+
+  it('keeps the primary row and add controls out of the scrolling row list', async () => {
+    const harness = mount()
+    const roots = Array.from({ length: 16 }, (_, index) => ({
+      ...ROOT_A,
+      ordinal: index + 1,
+      id: `root-${index + 1}`,
+      path: `/repos/root-${index + 1}`,
+      alias: `root-${index + 1}`,
+    }))
+    harness.setView({ primaryRoot: '/repos/primary', roots, limit: 16, count: 16 })
+    renderPanel(harness)
+    fireEvent.click(screen.getByRole('button', { name: /action.label/ }))
+    await waitFor(() => { expect(screen.getByText('/repos/root-16')).toBeTruthy() })
+
+    const list = document.querySelector('.mrfw-rootList')
+    expect(list).toBeTruthy()
+    // Every secondary row scrolls; the primary row, both section titles and
+    // the add row stay in the fixed part of the dialog.
+    expect(list!.querySelectorAll('.mrfw-row')).toHaveLength(16)
+    expect(list!.querySelector('.mrfw-rowBare')).toBeNull()
+    expect(document.querySelector('.mrfw-rowBare')?.closest('.mrfw-rootList')).toBeNull()
+    expect(document.querySelector('.mrfw-actions')?.closest('.mrfw-rootList')).toBeNull()
+    expect(list!.closest('.mrfw-sectionAdditional')).toBeTruthy()
+    expect(document.querySelectorAll('.mrfw-sectionTitle')[1]?.closest('.mrfw-rootList')).toBeNull()
+  })
+
   it('toggles read-only Root Skills and edits its independent namespace over the channel', async () => {
     const harness = mount()
     harness.setView({ primaryRoot: '/repos/primary', roots: [{ ...ROOT_B, aliasId: 'website', skillsEnabled: false }], limit: 16, count: 1 })

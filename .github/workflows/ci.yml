@@ -34,6 +34,8 @@ jobs:
       - run: pnpm compat:check
       - run: pnpm lint
       - run: pnpm docs:check
+      - run: pnpm exec playwright install --with-deps chromium
+      - run: pnpm test:panel-browser
 
   verify:
     name: verify (${{ matrix.os }}, group ${{ matrix.group }}, Node ${{ matrix.node }})

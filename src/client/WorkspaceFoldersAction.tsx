@@ -26,7 +26,7 @@
  * @module @dsh-electron/dsh-plugin-multi-root-workspace/client/WorkspaceFoldersAction
  */
 
-import { useCallback, useEffect, useRef, useState, useSyncExternalStore, type KeyboardEvent as ReactKeyboardEvent, type ReactNode } from 'react'
+import { useCallback, useEffect, useLayoutEffect, useRef, useState, useSyncExternalStore, type KeyboardEvent as ReactKeyboardEvent, type ReactNode } from 'react'
 import { createPortal } from 'react-dom'
 import { sshLocation } from '../remote/ssh-location.ts'
 import { Menu, Modal } from '@deepseek-ai/dsh-client-ui-primitives'
@@ -56,6 +56,7 @@ import { StatusLine } from './pending.tsx'
 import { ErrorToast, PanelErrorToast } from './error-toast.tsx'
 import { WorkspaceRow } from './workspace-row.tsx'
 import { requestWorktreePrompt } from './worktree-prompt-bus.ts'
+import { measureRootRowHeight } from './root-row-room.ts'
 import type { Key } from './locales.ts'
 import type { RootAccess, RootEntryView, RootState, RootView, RootsView, WorktreeRootView } from '../contract.ts'
 import type { WorktreeClient } from './worktree-client.ts'
@@ -376,6 +377,7 @@ export function WorkspaceFoldersDialog(props: WorkspaceFoldersActionProps & { on
    * of reopening it.
    */
   const cleanupForRef = useRef<readonly string[] | undefined>(undefined)
+  const rootListRef = useRef<HTMLDivElement | null>(null)
   const dialogRef = useRef<HTMLDivElement | null>(null)
   const requestEpoch = useRef(0)
   /** Fences remote-section answers independently of roots answers. */
@@ -399,6 +401,26 @@ export function WorkspaceFoldersDialog(props: WorkspaceFoldersActionProps & { on
   // The dialog is modal: it takes focus when it opens, Escape closes it, and
   // Tab cycles within it instead of escaping into the sidebar behind it.
   useEffect(() => { dialogRef.current?.focus() }, [])
+
+  // Measure the tallest row after roots change and when rows wrap or unwrap.
+  // CSS uses this as the list floor, bounded by the viewport cap.
+  useLayoutEffect(() => {
+    const list = rootListRef.current
+    if (list === null) return undefined
+    const apply = (): void => {
+      const height = measureRootRowHeight(list)
+      if (height > 0) list.style.setProperty('--mrfw-root-row-height', `${height}px`)
+      else list.style.removeProperty('--mrfw-root-row-height')
+    }
+    apply()
+    if (typeof ResizeObserver === 'undefined') return undefined
+    const observer = new ResizeObserver(apply)
+    list.querySelectorAll<HTMLElement>('.mrfw-row').forEach(row => observer.observe(row))
+    return () => {
+      observer.disconnect()
+      list.style.removeProperty('--mrfw-root-row-height')
+    }
+  }, [state.view?.roots])
   const onDialogKeyDown = (event: ReactKeyboardEvent): void => {
     if (event.key === 'Escape') {
       // An open menu or the upgrade confirmation owns Escape: its own
@@ -813,7 +835,7 @@ export function WorkspaceFoldersDialog(props: WorkspaceFoldersActionProps & { on
             />
           </section>
 
-          <section className="mrfw-section">
+          <section className="mrfw-section mrfw-sectionAdditional">
             <div className="mrfw-sectionTitleRow mrfw-sectionTitleRowAction">
               <span className="mrfw-sectionTitle">{t('panel.additional')}</span>
               {/* The batch entry sits on its own section's title: it acts on
@@ -834,160 +856,162 @@ export function WorkspaceFoldersDialog(props: WorkspaceFoldersActionProps & { on
                 </span>
               ) : null}
             </div>
-            {state.view === undefined ? <p className="mrfw-note">{t('panel.loading')}</p> : null}
-            {state.view !== undefined && roots.length === 0 ? (
-              <p className="mrfw-note">
-                {t('panel.empty')} {t('panel.emptyHint')}
-              </p>
-            ) : null}
-            {roots.map(root => {
-              const key = rowKey(root)
-              const IconAccess = root.access === 'read-only' ? IconAccessReadOnly
-                : root.access === 'read-write' ? IconAccessReadWrite : IconAccessInherit
-              // Only a confirmed-missing tracked worktree may be cleaned up;
-              // every other row keeps its full action set and status text.
-              const cleanable = root.worktree?.cleanupEligible === true
-              return <WorkspaceRow
-                key={key}
-                t={t}
-                name={<span className="mrfw-rootNameText">{displayNameOf(root)}</span>}
-                badges={<>
-                  {workingRoot === root.path ? <span className="mrfw-cwdTag">{t('panel.currentAgentCwd')}</span> : null}
-                  {/* The access level rides beside the name as read-only
-                      text; changing it stays behind the row's … menu. */}
-                  <span className="mrfw-accessBadge">
-                    {IconAccess === undefined ? null : <IconAccess size={14} />}
-                    {root.effectiveAccess === undefined ? t(accessKey(root.access)) : t('panel.accessEffective', {
-                      access: t(accessKey(root.access)),
-                      effective: t(`effective.${root.effectiveAccess}`),
-                    })}
-                  </span>
-                </>}
-                path={root.path}
-                copied={copiedId === key}
-                onCopy={() => { void copyPath(key, root.path) }}
-                trailing={<>
-                  {cleanable || root.state === 'available' ? null : (
-                    <span title={root.detail} className="mrfw-stateWarn">
-                      {t(stateKey(root.state))}
+            <div className="mrfw-rootList" ref={rootListRef}>
+              {state.view === undefined ? <p className="mrfw-note">{t('panel.loading')}</p> : null}
+              {state.view !== undefined && roots.length === 0 ? (
+                <p className="mrfw-note">
+                  {t('panel.empty')} {t('panel.emptyHint')}
+                </p>
+              ) : null}
+              {roots.map(root => {
+                const key = rowKey(root)
+                const IconAccess = root.access === 'read-only' ? IconAccessReadOnly
+                  : root.access === 'read-write' ? IconAccessReadWrite : IconAccessInherit
+                // Only a confirmed-missing tracked worktree may be cleaned up;
+                // every other row keeps its full action set and status text.
+                const cleanable = root.worktree?.cleanupEligible === true
+                return <WorkspaceRow
+                  key={key}
+                  t={t}
+                  name={<span className="mrfw-rootNameText">{displayNameOf(root)}</span>}
+                  badges={<>
+                    {workingRoot === root.path ? <span className="mrfw-cwdTag">{t('panel.currentAgentCwd')}</span> : null}
+                    {/* The access level rides beside the name as read-only
+                        text; changing it stays behind the row's … menu. */}
+                    <span className="mrfw-accessBadge">
+                      {IconAccess === undefined ? null : <IconAccess size={14} />}
+                      {root.effectiveAccess === undefined ? t(accessKey(root.access)) : t('panel.accessEffective', {
+                        access: t(accessKey(root.access)),
+                        effective: t(`effective.${root.effectiveAccess}`),
+                      })}
                     </span>
-                  )}
-                  {cleanable || root.worktree === undefined || root.worktree.state === 'active' ? null : (
-                    <span className="mrfw-stateWarn">{t(worktreeStateKey(root.worktree.state))}</span>
-                  )}
-                  {cleanable || root.worktree?.state !== 'changed' ? null : (
-                    <span className="mrfw-note">{t('worktree.pathReused')}</span>
-                  )}
-                  {cleanable || root.state !== 'missing' ? null : (
-                    <IconButton
-                      pending={state.busy}
-                      onClick={() => { void reRegister(root) }}
-                      icon={<IconRefresh />}
-                      label={t('panel.reRegister')}
-                    />
-                  )}
-                  {root.state === 'redirected' ? (
-                    <span className="mrfw-note">{t('panel.redirectedHint')}</span>
-                  ) : null}
-                  {cleanable || root.skillsEnabled === undefined ? null : (
-                    <IconButton
-                      pending={state.busy}
-                      pressed={root.skillsEnabled}
-                      onClick={() => { void mutate('setSkillsEnabled', { entry: entryOf(root), skillsEnabled: !root.skillsEnabled }) }}
-                      icon={<SkillsIcon enabled={root.skillsEnabled} />}
-                      label={t('panel.skills')}
-                      hint={t(root.skillsEnabled ? 'panel.skillsEnabled' : 'panel.skillsDisabled')}
-                    />
-                  )}
-                  {cleanable ? (
-                    // The row's primary action: a red delete that opens the same
-                    // confirmation the batch entry does — the path-reuse warning
-                    // lives there, not in the row.
-                    <IconButton
-                      variant="danger"
-                      pending={state.busy}
-                      onClick={() => { openCleanup([root.id]) }}
-                      icon={<IconTrash />}
-                      label={t('worktree.cleanup')}
-                    />
-                  ) : (
-                    <IconButton
-                      pending={state.busy}
-                      onClick={() => { void reveal(root) }}
-                      icon={<IconFolderOpen />}
-                      label={t('panel.reveal')}
-                    />
-                  )}
-                  <Menu
-                    open={menuFor === key}
-                    onClose={() => { setMenuFor(undefined) }}
-                    items={[
-                      { id: 'rename', label: t('panel.rename'), icon: <IconEdit /> },
-                      { id: 'alias-id', label: t('panel.aliasIdEdit'), disabled: state.busy },
-                      { id: 'access:inherit', label: t('panel.accessInherit'), icon: IconAccessInherit === undefined ? undefined : <IconAccessInherit />, disabled: state.busy || root.access === 'inherit' },
-                      { id: 'access:read-only', label: t('panel.accessReadOnly'), icon: IconAccessReadOnly === undefined ? undefined : <IconAccessReadOnly />, disabled: state.busy || root.access === 'read-only' },
-                      { id: 'access:read-write', label: t('panel.accessReadWrite'), icon: IconAccessReadWrite === undefined ? undefined : <IconAccessReadWrite />, disabled: state.busy || root.access === 'read-write' },
-                      ...(root.worktree?.cleanupEligible === true
-                        ? [{ id: 'worktree-cleanup', label: t('worktree.cleanup'), icon: <IconTrash />, danger: true, disabled: state.busy }]
-                        : []),
-                      { id: 'remove', label: t('panel.remove'), icon: <IconTrash />, danger: true, disabled: state.busy },
-                    ]}
-                    onSelect={(id) => {
-                      setMenuFor(undefined)
-                      if (id === 'alias-id') {
-                        setAliasField('aliasId')
-                        setAliasFor(key)
-                        setAliasDraft(root.aliasId ?? '')
-                      }
-                      if (id === 'rename') {
-                        setAliasField('alias')
-                        setAliasFor(key)
-                        setAliasDraft(root.alias ?? '')
-                      }
-                      if (id.startsWith('access:')) {
-                        const access = id.slice('access:'.length) as RootAccess
-                        // Widening what the agent may modify — under ANY session
-                        // mode — asks first, through the confirmation layered
-                        // over this dialog, not the browser's window.confirm.
-                        // Only one confirmation may own the screen: opening
-                        // the upgrade layer drops an open cleanup confirmation.
-                        if (widensAccess(root.access, access)) { closeCleanup(); setUpgradeFor({ root, access }); return }
-                        void mutate('setAccess', { entry: entryOf(root), access })
-                      }
-                      if (id === 'worktree-cleanup') openCleanup([root.id])
-                      if (id === 'remove') void mutate('remove', { entry: entryOf(root) })
-                    }}
-                    portal
-                    align="end"
-                    closeOnPointerLeave
-                    anchor={(
+                  </>}
+                  path={root.path}
+                  copied={copiedId === key}
+                  onCopy={() => { void copyPath(key, root.path) }}
+                  trailing={<>
+                    {cleanable || root.state === 'available' ? null : (
+                      <span title={root.detail} className="mrfw-stateWarn">
+                        {t(stateKey(root.state))}
+                      </span>
+                    )}
+                    {cleanable || root.worktree === undefined || root.worktree.state === 'active' ? null : (
+                      <span className="mrfw-stateWarn">{t(worktreeStateKey(root.worktree.state))}</span>
+                    )}
+                    {cleanable || root.worktree?.state !== 'changed' ? null : (
+                      <span className="mrfw-note">{t('worktree.pathReused')}</span>
+                    )}
+                    {cleanable || root.state !== 'missing' ? null : (
                       <IconButton
                         pending={state.busy}
-                        onClick={() => { setMenuFor(current => (current === key ? undefined : key)) }}
-                        icon={<IconEllipsis />}
-                        label={t('panel.more')}
+                        onClick={() => { void reRegister(root) }}
+                        icon={<IconRefresh />}
+                        label={t('panel.reRegister')}
                       />
                     )}
-                  />
-                </>}
-              >
-                {aliasFor === key ? (
-                  <span className="mrfw-aliasEditor">
-                    <input
-                      autoFocus
-                      className="mrfw-input mrfw-inputInline"
-                      value={aliasDraft}
-                      placeholder={t(aliasField === 'aliasId' ? 'panel.aliasIdPlaceholder' : 'panel.aliasPlaceholder')}
-                      onChange={event => { setAliasDraft(event.target.value) }}
+                    {root.state === 'redirected' ? (
+                      <span className="mrfw-note">{t('panel.redirectedHint')}</span>
+                    ) : null}
+                    {cleanable || root.skillsEnabled === undefined ? null : (
+                      <IconButton
+                        pending={state.busy}
+                        pressed={root.skillsEnabled}
+                        onClick={() => { void mutate('setSkillsEnabled', { entry: entryOf(root), skillsEnabled: !root.skillsEnabled }) }}
+                        icon={<SkillsIcon enabled={root.skillsEnabled} />}
+                        label={t('panel.skills')}
+                        hint={t(root.skillsEnabled ? 'panel.skillsEnabled' : 'panel.skillsDisabled')}
+                      />
+                    )}
+                    {cleanable ? (
+                      // The row's primary action: a red delete that opens the same
+                      // confirmation the batch entry does — the path-reuse warning
+                      // lives there, not in the row.
+                      <IconButton
+                        variant="danger"
+                        pending={state.busy}
+                        onClick={() => { openCleanup([root.id]) }}
+                        icon={<IconTrash />}
+                        label={t('worktree.cleanup')}
+                      />
+                    ) : (
+                      <IconButton
+                        pending={state.busy}
+                        onClick={() => { void reveal(root) }}
+                        icon={<IconFolderOpen />}
+                        label={t('panel.reveal')}
+                      />
+                    )}
+                    <Menu
+                      open={menuFor === key}
+                      onClose={() => { setMenuFor(undefined) }}
+                      items={[
+                        { id: 'rename', label: t('panel.rename'), icon: <IconEdit /> },
+                        { id: 'alias-id', label: t('panel.aliasIdEdit'), disabled: state.busy },
+                        { id: 'access:inherit', label: t('panel.accessInherit'), icon: IconAccessInherit === undefined ? undefined : <IconAccessInherit />, disabled: state.busy || root.access === 'inherit' },
+                        { id: 'access:read-only', label: t('panel.accessReadOnly'), icon: IconAccessReadOnly === undefined ? undefined : <IconAccessReadOnly />, disabled: state.busy || root.access === 'read-only' },
+                        { id: 'access:read-write', label: t('panel.accessReadWrite'), icon: IconAccessReadWrite === undefined ? undefined : <IconAccessReadWrite />, disabled: state.busy || root.access === 'read-write' },
+                        ...(root.worktree?.cleanupEligible === true
+                          ? [{ id: 'worktree-cleanup', label: t('worktree.cleanup'), icon: <IconTrash />, danger: true, disabled: state.busy }]
+                          : []),
+                        { id: 'remove', label: t('panel.remove'), icon: <IconTrash />, danger: true, disabled: state.busy },
+                      ]}
+                      onSelect={(id) => {
+                        setMenuFor(undefined)
+                        if (id === 'alias-id') {
+                          setAliasField('aliasId')
+                          setAliasFor(key)
+                          setAliasDraft(root.aliasId ?? '')
+                        }
+                        if (id === 'rename') {
+                          setAliasField('alias')
+                          setAliasFor(key)
+                          setAliasDraft(root.alias ?? '')
+                        }
+                        if (id.startsWith('access:')) {
+                          const access = id.slice('access:'.length) as RootAccess
+                          // Widening what the agent may modify — under ANY session
+                          // mode — asks first, through the confirmation layered
+                          // over this dialog, not the browser's window.confirm.
+                          // Only one confirmation may own the screen: opening
+                          // the upgrade layer drops an open cleanup confirmation.
+                          if (widensAccess(root.access, access)) { closeCleanup(); setUpgradeFor({ root, access }); return }
+                          void mutate('setAccess', { entry: entryOf(root), access })
+                        }
+                        if (id === 'worktree-cleanup') openCleanup([root.id])
+                        if (id === 'remove') void mutate('remove', { entry: entryOf(root) })
+                      }}
+                      portal
+                      align="end"
+                      closeOnPointerLeave
+                      anchor={(
+                        <IconButton
+                          pending={state.busy}
+                          onClick={() => { setMenuFor(current => (current === key ? undefined : key)) }}
+                          icon={<IconEllipsis />}
+                          label={t('panel.more')}
+                        />
+                      )}
                     />
-                    <Action pending={state.busy} onClick={() => { void mutate(aliasField === 'aliasId' ? 'setAliasId' : 'alias', { entry: entryOf(root), [aliasField]: aliasDraft }).then(ok => { if (ok) setAliasFor(undefined) }) }}>
-                      {t('panel.aliasSave')}
-                    </Action>
-                    <Action onClick={() => { setAliasFor(undefined) }}>{t('panel.aliasCancel')}</Action>
-                  </span>
-                ) : null}
-              </WorkspaceRow>
-            })}
+                  </>}
+                >
+                  {aliasFor === key ? (
+                    <span className="mrfw-aliasEditor">
+                      <input
+                        autoFocus
+                        className="mrfw-input mrfw-inputInline"
+                        value={aliasDraft}
+                        placeholder={t(aliasField === 'aliasId' ? 'panel.aliasIdPlaceholder' : 'panel.aliasPlaceholder')}
+                        onChange={event => { setAliasDraft(event.target.value) }}
+                      />
+                      <Action pending={state.busy} onClick={() => { void mutate(aliasField === 'aliasId' ? 'setAliasId' : 'alias', { entry: entryOf(root), [aliasField]: aliasDraft }).then(ok => { if (ok) setAliasFor(undefined) }) }}>
+                        {t('panel.aliasSave')}
+                      </Action>
+                      <Action onClick={() => { setAliasFor(undefined) }}>{t('panel.aliasCancel')}</Action>
+                    </span>
+                  ) : null}
+                </WorkspaceRow>
+              })}
+            </div>
           </section>
 
           {props.remotes === undefined || (remoteState.view !== undefined && (remoteState.view.status.state === 'disabled' || remoteState.view.custodyMode !== 'personal')) ? null : (
