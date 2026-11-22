@@ -5,14 +5,15 @@
  * the name comparison alone is nondeterministic there and used to surface the
  * refusal as `source-escapes-root` on some runners.
  *
- * The native handle layer is mocked so both links are real, the opened name is
- * `source.txt`, and `canonical()` reports the other link.
+ * The native handle mock reports two links for the opened `source.txt` and
+ * returns the other link's name from `canonical()`.
  */
-import { mkdirSync, mkdtempSync, realpathSync, rmSync } from 'node:fs'
+import { realpathSync } from 'node:fs'
 import { join } from 'node:path'
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest'
 import { runRemoteCopy, type RemoteCopyDeps, type RemoteCopyRequest } from '../src/remote/transfer.ts'
 import type { MultiRootRegistry } from '../src/registry.ts'
+import { createFixtureWorkspace, type FixtureWorkspace } from './support/temp-workspace.ts'
 
 const state = vi.hoisted(() => ({ rootReal: '', otherLink: '' }))
 
@@ -35,8 +36,6 @@ vi.mock('../src/worktrees/native-io.ts', () => {
   return { openMetadataRoot: () => ({ ...directory, directory: () => ({ child: () => directory }) }) }
 })
 
-let base = ''
-
 const session = () => ({ header: { cwd: state.rootReal }, id: 's1' }) as never
 const request = (): RemoteCopyRequest => ({
   session: session(),
@@ -45,14 +44,14 @@ const request = (): RemoteCopyRequest => ({
 })
 
 describe.runIf(process.platform !== 'win32')('runRemoteCopy local link classification', () => {
+  let fixture: FixtureWorkspace | undefined
+
   beforeAll(() => {
-    base = mkdtempSync(join(process.cwd(), '.dsh-smoke', 'remote-copy-links-'))
-    const workspace = join(base, 'ws')
-    mkdirSync(workspace)
-    state.rootReal = realpathSync(workspace)
+    fixture = createFixtureWorkspace('remote-copy-links')
+    state.rootReal = realpathSync(fixture.workspace)
     state.otherLink = join(state.rootReal, 'hard.txt')
   })
-  afterAll(() => rmSync(base, { recursive: true, force: true }))
+  afterAll(() => fixture?.dispose())
 
   it('reports source-multilinked when F_GETPATH names the other link', async () => {
     const registry = {
