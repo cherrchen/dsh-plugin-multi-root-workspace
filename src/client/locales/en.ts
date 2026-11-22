@@ -266,6 +266,7 @@ export const en = {
   'ssh.bindings': 'Bindings for this project',
   'ssh.empty.bindings': 'No bindings for this project yet.',
   'ssh.bindingAdd': 'Add binding',
+  'ssh.binding.steps': 'Add binding steps',
   'ssh.binding.environment': 'Environment',
   'ssh.binding.path': 'Remote absolute path',
   'ssh.binding.actions': 'Allowed actions',

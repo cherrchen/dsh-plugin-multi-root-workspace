@@ -266,6 +266,7 @@ export const de = {
   'ssh.bindings': 'Bindungen für dieses Projekt',
   'ssh.empty.bindings': 'Noch keine Bindungen für dieses Projekt.',
   'ssh.bindingAdd': 'Bindung hinzufügen',
+  'ssh.binding.steps': 'Schritte zum Hinzufügen einer Bindung',
   'ssh.binding.environment': 'Umgebung',
   'ssh.binding.path': 'Absoluter Remote-Pfad',
   'ssh.binding.actions': 'Erlaubte Aktionen',

@@ -57,14 +57,9 @@ Personal mode is configured entirely in the GUI and requires no root privileges,
 Connections are plugin-global, while directory bindings belong to each workspace. **This step requires the Workspace Folders panel with an active session**:
 
 1. Open **Folders** from the sidebar and click **Manage remote Root bindings** in the **Remote working directories** section.
-2. Click **Add binding**:
-   - Pick an existing SSH connection.
-   - Enter a normalized absolute POSIX path (for example `/srv/work/app`), or click **Browse…** to pick a directory over read-only SFTP.
-   - Check **Allowed actions**: `read`, `write`, `execute` (`execute` requires a connection with the helper installed and exec enabled).
-   - If using `remote_copy` between local and remote roots, check **Allow copying files to the remote host** / **Allow copying files to the local machine** for `primary` or any available additional root.
-   - Click **Save binding**.
-3. Back in the **Workspace folders** dialog under **Remote working directories**, open the row's **…** menu and click **Register**.
-   - Registration connects to the remote host to verify the directory exists and is not redirected via symlinks. Once the status shows **Registered**, the endpoint is available to the model.
+2. Click **Add binding** and complete the two guided steps:
+   - **Bind directory**: pick an existing SSH connection; enter a normalized absolute POSIX path (for example `/srv/work/app`), or click **Browse…** to pick a directory over read-only SFTP; check **Allowed actions**: `read`, `write`, `execute` (`execute` requires a connection with the helper installed and exec enabled); if using `remote_copy` between local and remote roots, check **Allow copying files to the remote host** / **Allow copying files to the local machine** for `primary` or any available additional root. Click **Next** to save the binding.
+   - **Confirm and register**: review the environment, path, actions, and transfer summary, then click **Register to workspace**. Registration connects to the remote host to verify the directory exists and is not redirected via symlinks. Once the pane shows **Registered**, the endpoint is available to the model.
 
 > [!TIP]
 > Before deleting a connection, unbind all workspace bindings referencing it (`environment-in-use` otherwise). If editing permissions or updating the connection marks an endpoint **Withheld**, click **Register** again from the `…` menu.

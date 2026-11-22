@@ -35,4 +35,4 @@
 
 - 本地新增多一步显式确认；远端登记不再要求先开管理弹窗。
 - 无 channel/契约变化；`WorkspaceFoldersAction` 的 props 新增 `remoteEnabled`（可选，缺席时按 OFF 形态渲染）。
-- 后续工作：把 `SshManagementDialog` 的编辑表单与 `SshWorkspaceBindingsDialog` 迁到 `wizard/kit.tsx`（「添加连接」已完成迁移，见 `wizard/add-connection.tsx`，`sshWizardSteps` 等旧样式已移除）。
+- 后续工作：把 `SshManagementDialog` 的编辑表单迁到 `wizard/kit.tsx`（「添加连接」已完成迁移，见 `wizard/add-connection.tsx`，`sshWizardSteps` 等旧样式已移除；「添加绑定」复用 `add-remote.tsx` 的绑定、登记两步，见 `wizard/add-binding.tsx`，`SshWorkspaceBindingsDialog` 中已有绑定的编辑仍保留内联表单）。

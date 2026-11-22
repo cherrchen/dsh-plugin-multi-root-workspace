@@ -10,13 +10,16 @@ import { sshLocation, sshTarget } from '../remote/ssh-location.ts'
 import { RemoteRootConfirm } from './remote-root-confirm.tsx'
 import { PanelError } from './panel-client.ts'
 import { ErrorToast, PanelErrorToast } from './error-toast.tsx'
-import type { CredentialPublicView, RemoteDirectoryListing, SshBindingDraft, SshBindingView, SshClient, SshManagementClient, SshEnvironmentView, SshScanResult, SshStateView } from './ssh-client.ts'
+import type { CredentialPublicView, RemoteDirectoryListing, SshBindingView, SshClient, SshManagementClient, SshEnvironmentView, SshScanResult, SshStateView } from './ssh-client.ts'
 import {
-  editorIdentity, editorOf, environmentDraftOf, execHelperReady,
+  bindingDraftOf, blankBinding, editorIdentity, editorOf, environmentDraftOf, execHelperReady,
   newEnvironmentId, recordedFingerprint, remotePath, scanReady, scanTargetOf, sshPort, sshToken, togglePeer,
   SSH_ALIAS,
+  type BindingDraft,
   type EditorDraft,
 } from './ssh-draft.ts'
+import { AddBindingWizard, type BindingSaveResult } from './wizard/add-binding.tsx'
+import type { RemotesClient } from './remotes-client.ts'
 import { AddConnectionWizard } from './wizard/add-connection.tsx'
 import { ChoiceCard, WizardActions, WizardField } from './wizard/kit.tsx'
 import type { Key } from './locales.ts'
@@ -179,22 +182,6 @@ const managedCredentials = (credentials: readonly CredentialPublicView[], t: Tra
     { id: '', label: t('ssh.field.managed') },
     ...credentials.map(credential => ({ id: credential.id, label: credential.label })),
   ]
-
-interface BindingDraft {
-  environmentId: string
-  readonly rootId?: string
-  path: string
-  read: boolean
-  write: boolean
-  exec: boolean
-  imports: ReadonlySet<string>
-  exports: ReadonlySet<string>
-}
-
-const blankBinding = (environmentId: string | undefined): BindingDraft => ({
-  environmentId: environmentId ?? '', path: '', read: true, write: false, exec: false,
-  imports: new Set(), exports: new Set(),
-})
 
 /** The operator-facing reason for one remote control-plane state. */
 function statusText(status: RemotesView['status'], t: Translate): string {
@@ -1204,6 +1191,7 @@ export function SshManagementDialog(props: SshManagementDialogProps): ReactNode 
 export interface SshWorkspaceBindingsDialogProps {
   readonly ssh: SshClient
   readonly sessionId: string
+  readonly remotes: RemotesClient | undefined
   readonly roots: RootsView | undefined
   readonly onClose: () => void
   readonly onChanged: () => void
@@ -1215,6 +1203,7 @@ export function SshWorkspaceBindingsDialog(props: SshWorkspaceBindingsDialogProp
   const { ssh, sessionId, roots, t } = props
   const [view, setView] = useState<SshStateView | undefined>()
   const [draft, setDraft] = useState<BindingDraft>()
+  const [addOpen, setAddOpen] = useState(false)
   const [confirmUnbind, setConfirmUnbind] = useState<SshBindingView>()
   const [pathOpen, setPathOpen] = useState(false)
   const [pending, setPending] = useState<{ kind: 'save' } | { kind: 'remove'; key: string } | undefined>(undefined)
@@ -1259,24 +1248,23 @@ export function SshWorkspaceBindingsDialog(props: SshWorkspaceBindingsDialogProp
     }
   }
 
-  const mutate = async (op: { kind: 'save' } | { kind: 'remove'; key: string }, call: (revision: number, signal: AbortSignal) => Promise<SshStateView>): Promise<boolean> => {
+  const mutate = async (op: { kind: 'save' } | { kind: 'remove'; key: string }, call: (revision: number, signal: AbortSignal) => Promise<SshStateView>): Promise<BindingSaveResult> => {
     const signal = lifetime.current?.signal
-    if (view === undefined || signal === undefined || signal.aborted) return false
+    if (view === undefined || signal === undefined || signal.aborted) return {}
     setPending(op)
     setError(undefined)
     try {
       const next = await call(view.revision, signal)
-      if (signal.aborted) return false
+      if (signal.aborted) return {}
       setView(next)
       props.onChanged()
-      return true
+      return { state: next }
     } catch (cause) {
-      if (!signal.aborted) {
-        const failure = cause instanceof PanelError ? cause : new PanelError('unavailable', String(cause))
-        setError(failure)
-        if (failure.code === 'personal-config-conflict') await load(signal)
-      }
-      return false
+      if (signal.aborted) return {}
+      const failure = cause instanceof PanelError ? cause : new PanelError('unavailable', String(cause))
+      setError(failure)
+      if (failure.code === 'personal-config-conflict') await load(signal)
+      return { error: failure }
     } finally {
       if (!signal.aborted) setPending(undefined)
     }
@@ -1293,19 +1281,8 @@ export function SshWorkspaceBindingsDialog(props: SshWorkspaceBindingsDialogProp
       exports: new Set(binding.transfers?.filter(transfer => transfer.direction === 'export').map(transfer => transfer.peer.rootId)),
     })
   }
-  const save = async (value: BindingDraft): Promise<void> => {
-    const actions = (['read', 'write', 'exec'] as const).filter(action => value[action])
-    const transfers = [
-      ...[...value.imports].map(rootId => ({ direction: 'import' as const, peer: { environmentId: 'local', rootId } })),
-      ...[...value.exports].map(rootId => ({ direction: 'export' as const, peer: { environmentId: 'local', rootId } })),
-    ]
-    const binding: SshBindingDraft = {
-      environmentId: value.environmentId, path: value.path.trim(), actions,
-      ...(value.rootId === undefined ? {} : { rootId: value.rootId }),
-      ...(transfers.length === 0 ? {} : { transfers }),
-    }
-    if (await mutate({ kind: 'save' }, async (revision, signal) => await ssh.bindingSave(sessionId, revision, binding, signal))) setDraft(undefined)
-  }
+  const save = async (value: BindingDraft): Promise<BindingSaveResult> =>
+    await mutate({ kind: 'save' }, async (revision, signal) => await ssh.bindingSave(sessionId, revision, bindingDraftOf(value), signal))
   const validPath = draft !== undefined && remotePath(draft.path.trim())
   return <><Modal open title={t('ssh.bindings')} closeLabel={t('panel.close')} onClose={props.onClose}
     className="mrfw-sshDialog" contentClassName="mrfw-sshDialogContent">
@@ -1371,10 +1348,9 @@ export function SshWorkspaceBindingsDialog(props: SshWorkspaceBindingsDialogProp
           </div>
         ) : null}
         {view.environments.length === 0 ? <p className="mrfw-note">{t('ssh.binding.noEnvironments')}</p> : null}
-        {draft === undefined ? (
-          <Button variant="primary" size="sm" disabled={busy || view.environments.length === 0}
-            onClick={() => setDraft(blankBinding(view.environments[0]?.environmentId))}>{t('ssh.bindingAdd')}</Button>
-        ) : (
+        <SshSettingsAdd label={t('ssh.bindingAdd')} disabled={busy || draft !== undefined || view.environments.length === 0}
+          expanded={addOpen} onClick={() => setAddOpen(true)} />
+        {draft === undefined ? null : (
           <div className="mrfw-sshForm">
             <Field label={t('ssh.binding.environment')}>
               <SshPicker label={t('ssh.binding.environment')} value={draft.environmentId} disabled={busy || editing}
@@ -1411,7 +1387,7 @@ export function SshWorkspaceBindingsDialog(props: SshWorkspaceBindingsDialogProp
             <div className="mrfw-sshRowActions">
               <Button variant="primary" disabled={busy || environment === undefined || !validPath || !(draft.read || draft.write || draft.exec)}
                 loading={pending?.kind === 'save'}
-                onClick={() => { void save(draft) }}>{t('ssh.binding.save')}</Button>
+                onClick={() => { void save(draft).then(result => { if (result.state !== undefined) setDraft(undefined) }) }}>{t('ssh.binding.save')}</Button>
               <Button variant="ghost" disabled={busy} onClick={() => setDraft(undefined)}>{t('ssh.cancel')}</Button>
             </div>
             <RemotePathDialog open={pathOpen} initialPath={draft.path} environmentId={draft.environmentId} ssh={ssh} sessionId={sessionId}
@@ -1421,6 +1397,11 @@ export function SshWorkspaceBindingsDialog(props: SshWorkspaceBindingsDialogProp
       </>}
     </div>
   </Modal>
+    {addOpen && view !== undefined ? (
+      <AddBindingWizard ssh={ssh} sessionId={sessionId} remotes={props.remotes} roots={roots}
+        environments={view.environments} busy={busy} t={t}
+        onClose={() => setAddOpen(false)} onChanged={props.onChanged} onSave={save} />
+    ) : null}
     {confirmUnbind === undefined ? null : (
       <RemoteRootConfirm kind="binding" path={confirmUnbind.path} t={t}
         onClose={() => setConfirmUnbind(undefined)}

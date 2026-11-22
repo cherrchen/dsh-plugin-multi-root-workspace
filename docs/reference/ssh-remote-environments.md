@@ -107,7 +107,7 @@ GUI 入口有两处：
 
 ### Workspace Root 绑定对话框
 
-从 Workspace Folders 打开 `SshWorkspaceBindingsDialog`。选择已有连接，指定远端路径和允许的动作。可以通过只读 SFTP 选择目录，也可以手动输入规范化的 POSIX 绝对路径。本地传输对端可选 `primary` 和可用附加根的 `aliasId`。保存后从 Workspace Folders 对应目录的「…」菜单登记。绑定对话框可编辑或解除一条绑定，其他绑定和 SSH 连接独立保留。
+从 Workspace Folders 打开 `SshWorkspaceBindingsDialog`。「添加绑定」打开 `AddBindingWizard`（`src/client/wizard/add-binding.tsx`），与「添加远端工作目录」向导共用 `WizardShell` 的绑定、登记两步：第一步在整页表单中选择已有连接、指定远端路径（只读 SFTP 浏览或手动输入规范化的 POSIX 绝对路径）、勾选允许动作与本地传输对端（`primary` 和可用附加根的 `aliasId`），「下一步」经 revision CAS 保存；第二步展示环境、路径、动作与传输摘要并调用 `remotes.add` 登记，成功后进入完成页。已有绑定仍在对话框内联编辑或解除，其他绑定和 SSH 连接独立保留；编辑权限或更新部署后状态变为「待重新登记」的目录，从 Workspace Folders 行尾「…」菜单重新登记。
 
 新建绑定时，Host 将路径的末级目录名转换为最多 63 字符的小写标识。转换结果为空，或同一项目和 SSH 环境已有同名标识时，改用 UUID 的前 8 位，并保证该标识在当前范围内唯一。编辑已有绑定时沿用原标识。
 

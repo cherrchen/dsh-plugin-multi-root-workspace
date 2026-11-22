@@ -266,6 +266,7 @@ export const ru = {
   'ssh.bindings': 'Привязки этого проекта',
   'ssh.empty.bindings': 'У этого проекта пока нет привязок.',
   'ssh.bindingAdd': 'Добавить привязку',
+  'ssh.binding.steps': 'Шаги добавления привязки',
   'ssh.binding.environment': 'Среда',
   'ssh.binding.path': 'Удалённый абсолютный путь',
   'ssh.binding.actions': 'Разрешённые действия',

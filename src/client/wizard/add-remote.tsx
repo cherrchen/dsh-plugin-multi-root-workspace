@@ -13,14 +13,14 @@ import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react'
 import { Input, Modal, Tag } from '@deepseek-ai/dsh-client-ui-primitives'
 import type { RootsView } from '../../contract.ts'
 import { sshLocation, sshTarget } from '../../remote/ssh-location.ts'
-import { IconCheck, IconChevronRight, IconFolderClose, IconLink, IconPlus } from '../../compat/client-icons.ts'
+import { IconChevronRight, IconFolderClose, IconLink, IconPlus } from '../../compat/client-icons.ts'
 import { SshButton as Button } from '../panel-buttons.tsx'
 import { localBindingPeers } from '../remote-root-menu.tsx'
 import { CredentialsPanel, platformLabel, type CredentialCreateKind } from '../ssh-panel.tsx'
 import { PanelError } from '../panel-client.ts'
 import { ErrorToast, PanelErrorToast } from '../error-toast.tsx'
 import { PendingBar, StatusLine } from '../pending.tsx'
-import { ChoiceCard, WizardActions, WizardCheckbox, WizardField, WizardShell } from './kit.tsx'
+import { CheckMark, ChoiceCard, WizardActions, WizardCheckbox, WizardField, WizardShell } from './kit.tsx'
 import { ConnectForm, EnvironmentSetup, HostKeyPick, nodeCheckOf, type NodeCheck } from './env-parts.tsx'
 import {
   blankEditor, connectionReady, draftFieldError, editorOf, environmentDraftOf,
@@ -51,14 +51,8 @@ const blankBinding = (): BindingForm => ({
   path: '', read: true, write: false, exec: false, imports: new Set(), exports: new Set(),
 })
 
-/** The selected-marker glyph: the host check icon where it exists. */
-function CheckMark(props: { readonly size?: number }): ReactNode {
-  const size = props.size ?? 14
-  return IconCheck === undefined ? <span aria-hidden="true">✓</span> : <IconCheck size={size} aria-hidden="true" />
-}
-
 /** The SFTP directory picker, restyled on the wizard kit. */
-function WizardPathBrowser(props: {
+export function WizardPathBrowser(props: {
   readonly open: boolean
   readonly initialPath: string
   readonly environmentId: string

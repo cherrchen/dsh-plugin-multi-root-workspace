@@ -7,7 +7,7 @@
  *
  * @module @dsh-electron/dsh-plugin-multi-root-workspace/client/ssh-draft
  */
-import type { SshEnvironmentView } from './ssh-client.ts'
+import type { SshBindingDraft, SshEnvironmentView } from './ssh-client.ts'
 import type { Key } from './locales.ts'
 
 /** The exec stanza the "allow command execution" toggle materializes (ADR-0049). */
@@ -186,4 +186,36 @@ export const togglePeer = (set: ReadonlySet<string>, id: string): ReadonlySet<st
   if (next.has(id)) next.delete(id)
   else next.add(id)
   return next
+}
+
+/** The workspace-binding draft, shared by the flat editor and the add wizard. */
+export interface BindingDraft {
+  environmentId: string
+  /** Present only while editing an existing binding; adds never carry one. */
+  readonly rootId?: string
+  path: string
+  read: boolean
+  write: boolean
+  exec: boolean
+  imports: ReadonlySet<string>
+  exports: ReadonlySet<string>
+}
+
+export const blankBinding = (environmentId: string | undefined): BindingDraft => ({
+  environmentId: environmentId ?? '', path: '', read: true, write: false, exec: false,
+  imports: new Set(), exports: new Set(),
+})
+
+/** The `sshBindingSave` wire object for one draft. */
+export function bindingDraftOf(value: BindingDraft): SshBindingDraft {
+  const actions = (['read', 'write', 'exec'] as const).filter(action => value[action])
+  const transfers = [
+    ...[...value.imports].map(rootId => ({ direction: 'import' as const, peer: { environmentId: 'local', rootId } })),
+    ...[...value.exports].map(rootId => ({ direction: 'export' as const, peer: { environmentId: 'local', rootId } })),
+  ]
+  return {
+    environmentId: value.environmentId, path: value.path.trim(), actions,
+    ...(value.rootId === undefined ? {} : { rootId: value.rootId }),
+    ...(transfers.length === 0 ? {} : { transfers }),
+  }
 }

@@ -265,6 +265,7 @@ export const zh = {
   'ssh.bindings': '本项目绑定',
   'ssh.empty.bindings': '本项目还没有绑定。',
   'ssh.bindingAdd': '添加绑定',
+  'ssh.binding.steps': '添加绑定步骤',
   'ssh.binding.environment': '环境',
   'ssh.binding.path': '远端绝对路径',
   'ssh.binding.actions': '允许动作',

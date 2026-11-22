@@ -340,13 +340,13 @@ async function finishAndClose(dialog: HTMLElement): Promise<void> {
   await waitFor(() => expect(screen.queryByRole('dialog', { name: 'ssh.tab.add' })).toBeNull())
 }
 
-async function openBindings(ssh: SshClient, options: { add?: boolean } = {}): Promise<HTMLElement> {
-  renderDialog({ ssh })
+async function openBindings(ssh: SshClient, options: { add?: boolean; remoteCalls?: { method: string; args: unknown[] }[] } = {}): Promise<HTMLElement> {
+  renderDialog({ ssh, remoteCalls: options.remoteCalls })
   fireEvent.click(await screen.findByRole('button', { name: 'panel.remoteBindings' }))
   const dialog = await screen.findByRole('dialog', { name: 'ssh.bindings' })
-  const add = await within(dialog).findByRole('button', { name: 'ssh.bindingAdd' })
-  if (options.add !== false) fireEvent.click(add)
-  return dialog
+  if (options.add === false) return dialog
+  fireEvent.click(await within(dialog).findByRole('button', { name: 'ssh.bindingAdd' }))
+  return await screen.findByRole('dialog', { name: 'ssh.bindingAdd' })
 }
 
 describe('the SSH management dialog', () => {
@@ -633,16 +633,21 @@ describe('the SSH management dialog', () => {
     expect(ssh.calls.filter(call => call.method === 'hostKeyScan')).toHaveLength(1)
     expect(ssh.calls.some(call => call.method === 'bindingSave')).toBe(false)
 
-    const binding = await openBindings(ssh)
+    const remoteCalls: { method: string; args: unknown[] }[] = []
+    const binding = await openBindings(ssh, { remoteCalls })
     selectOption(binding, 'ssh.binding.environment', 'Env Build')
     fireEvent.change(within(binding).getByLabelText('ssh.binding.path'), { target: { value: '/srv/app' } })
     const bindingExec = within(binding).getByLabelText('remote.capability.exec') as HTMLInputElement
     expect(bindingExec.disabled).toBe(false)
     fireEvent.click(bindingExec)
-    fireEvent.click(within(binding).getByRole('button', { name: 'ssh.binding.save' }))
+    fireEvent.click(within(binding).getByRole('button', { name: 'ssh.step.next' }))
     expect(await callsOf(ssh, 'bindingSave')).toEqual([['session-1', 10, {
       environmentId: 'env-build', path: '/srv/app', actions: ['read', 'exec'],
     }]])
+    await within(binding).findByText('wizard.summaryEnvironment')
+    fireEvent.click(within(binding).getByRole('button', { name: 'wizard.register' }))
+    await waitFor(() => expect(remoteCalls.map(call => call.args.slice(0, 3))).toEqual([['session-1', 'env-build', 'app']]))
+    await within(binding).findByText('wizard.done')
   })
 
   it.each(['', 'ab', '远端环境'])('creates a connection with a short UUID when the display name %j has no valid slug', async displayName => {
@@ -892,7 +897,7 @@ describe('the SSH management dialog', () => {
     expect(within(dialog).getAllByRole('textbox')).toEqual([within(dialog).getByLabelText('ssh.binding.path')])
     fireEvent.change(within(dialog).getByLabelText('ssh.binding.path'), { target: { value: '/srv/data' } })
     fireEvent.click(imports[1]!)
-    fireEvent.click(within(dialog).getByRole('button', { name: 'ssh.binding.save' }))
+    fireEvent.click(within(dialog).getByRole('button', { name: 'ssh.step.next' }))
     expect(await callsOf(ssh, 'bindingSave')).toEqual([['session-1', 7, {
       environmentId: 'env-prod',
       path: '/srv/data',
@@ -1048,17 +1053,24 @@ describe('the SSH management dialog', () => {
 
   it('binds two Roots to one connection and unbinds only the selected Root', async () => {
     const ssh = fakeSsh(sshState())
-    const dialog = await openBindings(ssh)
+    const wizard = await openBindings(ssh)
+    const dialog = screen.getByRole('dialog', { name: 'ssh.bindings' })
+    let saved = 0
     for (const path of ['/srv/app', '/srv/logs']) {
-      const bindingPath = within(dialog).getByLabelText('ssh.binding.path')
-      const save = within(dialog).getByRole('button', { name: 'ssh.binding.save' }) as HTMLButtonElement
+      const bindingPath = within(wizard).getByLabelText('ssh.binding.path')
+      const next = within(wizard).getByRole('button', { name: 'ssh.step.next' })
       fireEvent.change(bindingPath, { target: { value: '/srv//bad' } })
-      expect(save.disabled).toBe(true)
-      expect(within(dialog).getByText('error.workspace-invalid')).toBeTruthy()
+      fireEvent.click(next)
+      expect(within(wizard).getByText('error.workspace-invalid')).toBeTruthy()
+      expect(ssh.calls.filter(call => call.method === 'bindingSave')).toHaveLength(saved)
       fireEvent.change(bindingPath, { target: { value: path } })
-      fireEvent.click(save)
+      fireEvent.click(next)
       await within(dialog).findByText(`ssh://deploy@prod.internal:22${path}`)
-      if (path === '/srv/app') fireEvent.click(await within(dialog).findByRole('button', { name: 'ssh.bindingAdd' }))
+      saved += 1
+      if (path === '/srv/app') {
+        await within(wizard).findByText('wizard.summaryEnvironment')
+        fireEvent.click(within(wizard).getByRole('button', { name: 'ssh.step.back' }))
+      }
     }
     const calls = await callsOf(ssh, 'bindingSave')
     expect(calls.map(args => args[2])).toEqual([
@@ -1097,7 +1109,7 @@ describe('the SSH management dialog', () => {
   it('browses remote directories and fills the remote path', async () => {
     const ssh = fakeSsh(sshState())
     const dialog = await openBindings(ssh)
-    fireEvent.click(within(dialog).getByRole('button', { name: 'ssh.add.pickPath' }))
+    fireEvent.click(within(dialog).getByRole('button', { name: 'wizard.browse' }))
     const picker = await screen.findByRole('dialog', { name: 'ssh.pathPickerTitle' })
     fireEvent.click(await within(picker).findByRole('button', { name: 'app' }))
     await waitFor(() => {
@@ -1112,7 +1124,7 @@ describe('the SSH management dialog', () => {
     const ssh = fakeSsh(sshState())
     ssh.fail('listDirectories', new PanelError('remote-path-listing-failed', 'boom'))
     const dialog = await openBindings(ssh)
-    fireEvent.click(within(dialog).getByRole('button', { name: 'ssh.add.pickPath' }))
+    fireEvent.click(within(dialog).getByRole('button', { name: 'wizard.browse' }))
     const picker = await screen.findByRole('dialog', { name: 'ssh.pathPickerTitle' })
     expect(await within(picker).findByText('ssh.pathPickerFailed')).toBeTruthy()
     fireEvent.change(within(picker).getByLabelText('ssh.binding.path'), { target: { value: '/srv/app' } })
@@ -1286,20 +1298,25 @@ describe('pending feedback on network-bound requests', () => {
       ssh.calls.push({ method: 'bindingRemove', args })
       return await removed.promise
     }
-    const dialog = await openBindings(ssh)
-    fireEvent.change(within(dialog).getByLabelText('ssh.binding.path'), { target: { value: '/srv/app' } })
-    fireEvent.click(within(dialog).getByRole('button', { name: 'ssh.binding.save' }))
+    const wizard = await openBindings(ssh)
+    fireEvent.change(within(wizard).getByLabelText('ssh.binding.path'), { target: { value: '/srv/app' } })
+    fireEvent.click(within(wizard).getByRole('button', { name: 'ssh.step.next' }))
     await waitFor(() => expect(ssh.calls.some(call => call.method === 'bindingSave')).toBe(true))
-    const save = within(dialog).getByRole('button', { name: 'ssh.binding.save' })
-    await within(dialog).findByText('ssh.pending.bindingSave')
+    const save = within(wizard).getByRole('button', { name: 'ssh.step.next' })
     expect(save.getAttribute('aria-busy')).toBe('true')
-    expect(dialog.querySelector('.mrfw-pendingBar[data-active="true"]')).toBeTruthy()
+    expect(wizard.querySelector('.mrfw-pendingBar[data-active="true"]')).toBeTruthy()
     await act(async () => {
       saved.resolve(sshState({
         bindings: [{ environmentId: 'env-prod', rootId: 'app', path: '/srv/app', actions: ['read'] }],
       }))
       await saved.promise
     })
+    // The wizard advances to the registration step; closing it leaves the
+    // saved row in the bindings dialog for the unbind half of this test.
+    await within(wizard).findByText('wizard.summaryEnvironment')
+    fireEvent.click(within(wizard).getByRole('button', { name: 'panel.close' }))
+    await waitFor(() => expect(screen.queryByRole('dialog', { name: 'ssh.bindingAdd' })).toBeNull())
+    const dialog = screen.getByRole('dialog', { name: 'ssh.bindings' })
     const row = (await within(dialog).findByText('ssh://deploy@prod.internal:22/srv/app')).closest('.mrfw-row') as HTMLElement
     fireEvent.click(within(row).getByRole('button', { name: 'ssh.binding.remove' }))
     const confirmation = await screen.findByRole('dialog', { name: 'ssh.binding.remove' })
@@ -1332,12 +1349,12 @@ describe('pending feedback on network-bound requests', () => {
       }
     }
     const dialog = await openBindings(ssh)
-    fireEvent.click(within(dialog).getByRole('button', { name: 'ssh.add.pickPath' }))
+    fireEvent.click(within(dialog).getByRole('button', { name: 'wizard.browse' }))
     const picker = await screen.findByRole('dialog', { name: 'ssh.pathPickerTitle' })
     fireEvent.click(await within(picker).findByRole('button', { name: 'app' }))
     await waitFor(() => expect(ssh.calls.filter(call => call.method === 'listDirectories')).toHaveLength(2))
     await within(picker).findByText('ssh.pending.list')
-    const list = picker.querySelector('.mrfw-sshDirList') as HTMLElement
+    const list = picker.querySelector('.mrfw-wizDirList') as HTMLElement
     expect(list.getAttribute('aria-busy')).toBe('true')
     expect(within(list).getByRole('button', { name: 'app' })).toBeTruthy()
     await act(async () => {

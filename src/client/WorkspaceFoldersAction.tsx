@@ -1086,7 +1086,7 @@ export function WorkspaceFoldersDialog(props: WorkspaceFoldersActionProps & { on
           )}
           {sshBindingsOpen && props.ssh !== undefined && sessionId !== undefined
             && remoteState.view?.custodyMode === 'personal' && remoteState.view.status.state === 'ready' ? (
-              <SshWorkspaceBindingsDialog key={sessionId} ssh={props.ssh} sessionId={sessionId} roots={state.view}
+              <SshWorkspaceBindingsDialog key={sessionId} ssh={props.ssh} sessionId={sessionId} remotes={props.remotes} roots={state.view}
                 onClose={() => setSshBindingsOpen(false)} onChanged={refreshRemoteSection} t={t} />
             ) : null}
             </>

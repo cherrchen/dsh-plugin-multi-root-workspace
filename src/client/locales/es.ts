@@ -266,6 +266,7 @@ export const es = {
   'ssh.bindings': 'Vinculaciones de este proyecto',
   'ssh.empty.bindings': 'Aún no hay vinculaciones para este proyecto.',
   'ssh.bindingAdd': 'Añadir vinculación',
+  'ssh.binding.steps': 'Pasos para añadir una vinculación',
   'ssh.binding.environment': 'Entorno',
   'ssh.binding.path': 'Ruta remota absoluta',
   'ssh.binding.actions': 'Acciones permitidas',

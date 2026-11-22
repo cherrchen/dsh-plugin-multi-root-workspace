@@ -273,6 +273,12 @@ export function WizardActions(props: { readonly children: ReactNode }): ReactNod
   return <div className="mrfw-wizActions">{props.children}</div>
 }
 
+/** The selected/done glyph: the host check icon where it exists. */
+export function CheckMark(props: { readonly size?: number }): ReactNode {
+  const size = props.size ?? 14
+  return IconCheck === undefined ? <span aria-hidden="true">✓</span> : <IconCheck size={size} aria-hidden="true" />
+}
+
 /** A controlled dropdown picker on the host `Menu`, in the kit's field style. */
 export function WizardPicker<Value extends string>(props: {
   readonly label: string

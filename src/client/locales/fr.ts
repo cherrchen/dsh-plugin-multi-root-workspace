@@ -266,6 +266,7 @@ export const fr = {
   'ssh.bindings': 'Liaisons de ce projet',
   'ssh.empty.bindings': 'Aucune liaison pour ce projet pour l’instant.',
   'ssh.bindingAdd': 'Ajouter une liaison',
+  'ssh.binding.steps': "Étapes d'ajout d'une liaison",
   'ssh.binding.environment': 'Environnement',
   'ssh.binding.path': 'Chemin absolu distant',
   'ssh.binding.actions': 'Actions autorisées',

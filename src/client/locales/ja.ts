@@ -266,6 +266,7 @@ export const ja = {
   'ssh.bindings': 'このプロジェクトのバインディング',
   'ssh.empty.bindings': 'このプロジェクトのバインディングはまだありません。',
   'ssh.bindingAdd': 'バインディングを追加',
+  'ssh.binding.steps': 'バインディング追加の手順',
   'ssh.binding.environment': '環境',
   'ssh.binding.path': 'リモートの絶対パス',
   'ssh.binding.actions': '許可するアクション',
