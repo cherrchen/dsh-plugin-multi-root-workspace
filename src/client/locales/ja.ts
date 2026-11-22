@@ -189,6 +189,7 @@ export const ja = {
   'panel.remoteEmpty': 'このプロジェクトにデプロイされたリモートエンドポイントはありません。',
   'panel.remoteRegister': '登録',
   'panel.remoteConfirmRemove': "{path} の登録を解除しますか？ワークスペースとの関連付けは保持されます。",
+  'panel.remoteConfirmRemoveBound': '{path} を削除しますか？登録を取り消し、このワークスペースとの関連付けも解除します。',
   'panel.remoteRemove': '削除',
   'panel.remoteRegisterGuide': "ディレクトリ右側の「…」から登録します。接続と Helper は SSH 管理で設定できます。",
   'panel.remoteNoCapabilities': '利用不可',

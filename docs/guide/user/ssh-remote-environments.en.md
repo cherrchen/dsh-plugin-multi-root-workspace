@@ -62,7 +62,7 @@ Connections are plugin-global, while directory bindings belong to each workspace
    - **Confirm and register**: review the environment, path, actions, and transfer summary, then click **Register to workspace**. Registration connects to the remote host to verify the directory exists and is not redirected via symlinks. Once the pane shows **Registered**, the endpoint is available to the model.
 
 > [!TIP]
-> Before deleting a connection, unbind all workspace bindings referencing it (`environment-in-use` otherwise). If editing permissions or updating the connection marks an endpoint **Withheld**, click **Register** again from the `…` menu.
+> Before deleting a connection, unbind all workspace bindings referencing it — in the bindings dialog, or via **Remove** in the remote row's `…` menu (in personal mode, remove revokes the registration and unbinds at once) — `environment-in-use` otherwise. If editing permissions or updating the connection marks an endpoint **Withheld**, click **Register** again from the `…` menu.
 
 ## Disabling SSH and troubleshooting
 

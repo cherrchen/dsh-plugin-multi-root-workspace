@@ -189,6 +189,7 @@ export const de = {
   'panel.remoteEmpty': 'Die Bereitstellung deklariert für dieses Projekt keinen Remote-Endpunkt.',
   'panel.remoteRegister': 'Registrieren',
   'panel.remoteConfirmRemove': "Die Registrierung für {path} entfernen? Die Zuordnung zum Arbeitsbereich bleibt bestehen.",
+  'panel.remoteConfirmRemoveBound': '{path} entfernen? Dadurch wird die Registrierung widerrufen und die Zuordnung zu diesem Arbeitsbereich gelöst.',
   'panel.remoteRemove': 'Entfernen',
   'panel.remoteRegisterGuide': "Registriere ein Verzeichnis über sein Menü „…“. Verbindungen und Helfer richtest du in der SSH-Verwaltung ein.",
   'panel.remoteNoCapabilities': 'Keine',

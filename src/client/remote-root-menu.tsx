@@ -41,7 +41,7 @@ interface RemoteRootMenuProps {
   readonly anchor: ReactNode
   readonly t: Translate
   readonly onClose: () => void
-  readonly onRegistration: (action: 'register' | 'remove') => void
+  readonly onRegistration: (action: 'register' | 'remove' | 'unbind') => void
   readonly onChanged: () => void
 }
 
@@ -113,11 +113,17 @@ export function RemoteRootMenu(props: RemoteRootMenuProps): ReactNode {
   const registering = endpoint.state !== 'registered'
   if (!editing || !canEdit) {
     if (canEdit) items.push({ id: 'edit', label: t('ssh.binding.editCapabilities'), icon: <IconEdit />, disabled: controlsPending })
-    items.push(registering ? {
-      id: 'register', label: t(endpoint.state === 'withheld' ? 'panel.reRegister' : 'panel.remoteRegister'), disabled: controlsPending,
-    } : {
-      id: 'remove', label: t('panel.remoteRemove'), icon: <IconTrash />, danger: true, disabled: controlsPending,
-    })
+    if (registering) {
+      items.push({
+        id: 'register', label: t(endpoint.state === 'withheld' ? 'panel.reRegister' : 'panel.remoteRegister'), disabled: controlsPending,
+      })
+    }
+    // Personal custody owns the binding, so removal is offered in every state
+    // — it is the only way to drop an unregistered row. Without it the menu
+    // keeps the registration-only remove on registered rows alone.
+    if (canEdit || !registering) {
+      items.push({ id: 'remove', label: t('panel.remoteRemove'), icon: <IconTrash />, danger: true, disabled: controlsPending })
+    }
   } else {
     items.push({ id: 'cancel', label: t('ssh.cancel'), disabled: saving })
     if (error !== undefined) {
@@ -189,9 +195,9 @@ export function RemoteRootMenu(props: RemoteRootMenuProps): ReactNode {
       } else if (id === 'save') void save()
       else update.get(id)?.()
     }} />
-    {confirmRemove && endpoint.state === 'registered' ? (
-      <RemoteRootConfirm kind="registration" path={path} t={t} onClose={() => setConfirmRemove(false)}
-        onConfirm={() => { setConfirmRemove(false); props.onRegistration('remove') }} />
+    {confirmRemove && (canEdit || endpoint.state === 'registered') ? (
+      <RemoteRootConfirm kind={canEdit ? 'root' : 'registration'} path={path} t={t} onClose={() => setConfirmRemove(false)}
+        onConfirm={() => { setConfirmRemove(false); props.onRegistration(canEdit ? 'unbind' : 'remove') }} />
     ) : null}
   </>
 }

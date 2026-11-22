@@ -189,6 +189,7 @@ export const ru = {
   'panel.remoteEmpty': 'В развёртывании нет удалённых эндпоинтов для этого проекта.',
   'panel.remoteRegister': 'Зарегистрировать',
   'panel.remoteConfirmRemove': "Удалить регистрацию для {path}? Привязка к рабочей области сохранится.",
+  'panel.remoteConfirmRemoveBound': 'Удалить {path}? Это отзовёт его регистрацию и отвяжет его от этой рабочей области.',
   'panel.remoteRemove': 'Удалить',
   'panel.remoteRegisterGuide': "Для регистрации откройте меню «…» у каталога. Подключения и помощник настраиваются в управлении SSH.",
   'panel.remoteNoCapabilities': 'Нет',

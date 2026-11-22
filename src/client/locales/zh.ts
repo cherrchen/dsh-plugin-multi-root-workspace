@@ -188,6 +188,7 @@ export const zh = {
   'panel.remoteEmpty': '此项目没有部署的远端条目。',
   'panel.remoteRegister': '登记',
   'panel.remoteConfirmRemove': "要移除 {path} 的登记吗？工作区绑定会保留。",
+  'panel.remoteConfirmRemoveBound': '要移除 {path} 吗？这会同时撤销它的登记并解除与此工作区的绑定。',
   'panel.remoteRemove': '移除',
   'panel.remoteRegisterGuide': "通过目录右侧的「…」登记。连接和 Helper 可在 SSH 管理中设置。",
   'panel.remoteNoCapabilities': '不可用',

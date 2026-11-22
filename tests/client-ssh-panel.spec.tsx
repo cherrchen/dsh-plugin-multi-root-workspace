@@ -1208,6 +1208,60 @@ describe('the SSH management dialog', () => {
     await waitFor(() => expect(screen.queryByRole('dialog', { name: 'ssh.dialog.title' })).toBeNull())
     expect(screen.getByRole('dialog', { name: 'panel.title' })).toBeTruthy()
   })
+
+  it('removes an unregistered row by dropping only its personal binding', async () => {
+    const endpoint = {
+      environmentId: 'env-prod', rootId: 'web', path: '/srv/app', platform: 'linux',
+      target: 'ssh://deploy@prod.internal:22',
+      state: 'unregistered' as const, actions: ['read'], transfers: [],
+      capabilities: { read: false, write: false, exec: false, receive: false, send: false },
+    }
+    const binding = { environmentId: 'env-prod', rootId: 'web', path: '/srv/app', actions: ['read'] as const }
+    const ssh = fakeSsh(sshState({ bindings: [binding] }))
+    const remoteCalls: { method: string; args: unknown[] }[] = []
+    let listCalls = 0
+    renderDialog({ ssh, endpoints: [endpoint], remoteCalls, onList: () => { listCalls++ } })
+    const row = (await screen.findByText('ssh://deploy@prod.internal:22/srv/app')).closest('.mrfw-row') as HTMLElement
+    fireEvent.click(within(row).getByRole('button', { name: 'panel.more' }))
+    // Registration stays offered, with the row's removal below it.
+    const menu = await screen.findByRole('menu')
+    expect(within(menu).getByRole('button', { name: 'panel.remoteRegister' })).toBeTruthy()
+    fireEvent.click(within(menu).getByRole('button', { name: 'panel.remoteRemove' }))
+    const confirm = await screen.findByRole('dialog', { name: 'panel.remoteRemove' })
+    expect(within(confirm).getByText('panel.remoteConfirmRemoveBound')).toBeTruthy()
+    fireEvent.click(within(confirm).getByRole('button', { name: 'ssh.confirmDelete' }))
+    // Nothing was registered: no `remove` on the remotes client — a state
+    // read, the CAS binding removal at that revision, then a fresh list.
+    expect(remoteCalls).toEqual([])
+    expect(await callsOf(ssh, 'bindingRemove')).toEqual([['session-1', 7, 'env-prod', 'web']])
+    expect(ssh.calls.map(call => call.method)).toEqual(['state', 'bindingRemove'])
+    await waitFor(() => expect(listCalls).toBeGreaterThan(1))
+  })
+
+  it('keeps removal registration-only when no personal SSH client exists', async () => {
+    // The deployment path — and any surface without `props.ssh` — must not
+    // unbind: the menu shows the registration-only confirm and only
+    // `remotes.remove` runs.
+    const endpoint = {
+      environmentId: 'env-prod', rootId: 'web', path: '/srv/app', platform: 'linux',
+      target: 'ssh://deploy@prod.internal:22',
+      state: 'registered' as const, actions: ['read'], transfers: [],
+      capabilities: { read: true, write: false, exec: false, receive: false, send: false },
+    }
+    const remoteCalls: { method: string; args: unknown[] }[] = []
+    let listCalls = 0
+    renderDialog({ endpoints: [endpoint], remoteCalls, onList: () => { listCalls++ } })
+    const row = (await screen.findByText('ssh://deploy@prod.internal:22/srv/app')).closest('.mrfw-row') as HTMLElement
+    fireEvent.click(within(row).getByRole('button', { name: 'panel.more' }))
+    const menu = await screen.findByRole('menu')
+    expect(within(menu).queryByRole('button', { name: 'ssh.binding.editCapabilities' })).toBeNull()
+    fireEvent.click(within(menu).getByRole('button', { name: 'panel.remoteRemove' }))
+    const confirm = await screen.findByRole('dialog', { name: 'panel.remoteRemove' })
+    expect(within(confirm).getByText('panel.remoteConfirmRemove')).toBeTruthy()
+    fireEvent.click(within(confirm).getByRole('button', { name: 'ssh.confirmDelete' }))
+    await waitFor(() => expect(remoteCalls).toEqual([{ method: 'remove', args: ['session-1', 'env-prod', 'web'] }]))
+    expect(listCalls).toBe(1)
+  })
 })
 
 

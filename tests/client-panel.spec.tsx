@@ -17,6 +17,7 @@ import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testi
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { PANEL_CHANNEL, type PanelRequest, type RevealedView, type RootView, type RootsView } from '../src/contract.ts'
 import type { RemoteEndpointView, RemotesView } from '../src/remote/panel-contract.ts'
+import type { SshStateView } from '../src/remote/personal-contract.ts'
 import * as client from '../src/client/index.ts'
 import { WorkspaceFoldersAction } from '../src/client/WorkspaceFoldersAction.tsx'
 import { createWorkspaceFoldersDialogController } from '../src/client/workspace-folders-dialog.ts'
@@ -58,6 +59,8 @@ interface Harness {
   setRevealed: (value: unknown) => void
   /** What the remote section reads (and re-reads after add/remove). */
   setRemotes: (view: RemotesView) => void
+  /** What `sshState` answers; `sshBindingRemove` rewrites it in place. */
+  setSsh: (view: SshStateView) => void
   /** Flip the remote-tools switch on the composed config form. */
   setRemoteEnabled: (enabled: boolean) => void
   /** Make the NEXT channel call hang until `release` is called. */
@@ -132,6 +135,14 @@ function mount(options: MountOptions = {}): Harness {
   let failure: { code: string; message: string } | undefined
   let revealed: unknown = { revealed: '/repos/payments' } satisfies RevealedView
   let remoteView: RemotesView = { primaryRoot: '/repos/primary', mode: 'workspace-write', status: { state: 'disabled' }, endpoints: [] }
+  // The personal SSH state the menu's unbind flow CAS-writes against. The
+  // matching endpoint rows live in `remoteView`; `sshBindingRemove` drops both
+  // the binding and the row, exactly as the host's list answers afterwards.
+  let sshView: SshStateView = {
+    mode: 'personal', enabled: true, linked: true, revision: 7,
+    environments: [], credentials: [],
+    bindings: [{ environmentId: 'build', rootId: 'app', path: '/srv/root', actions: ['read', 'write', 'exec'] }],
+  }
   let gate: Promise<void> | undefined
   let releaseGate: (() => void) | undefined
   let holdFor: string | undefined
@@ -189,6 +200,20 @@ function mount(options: MountOptions = {}): Harness {
               : entry)),
           }
           return { ok: true, value: remoteView }
+        }
+        if (endpoint === 'sshState') return { ok: true, value: sshView }
+        if (endpoint === 'sshBindingRemove') {
+          const body = payload as unknown as { revision?: number; environmentId?: string; rootId?: string }
+          sshView = {
+            ...sshView,
+            revision: (body.revision ?? sshView.revision) + 1,
+            bindings: sshView.bindings.filter(binding => !(binding.environmentId === body.environmentId && binding.rootId === body.rootId)),
+          }
+          remoteView = {
+            ...remoteView,
+            endpoints: remoteView.endpoints.filter(entry => !(entry.environmentId === body.environmentId && entry.rootId === body.rootId)),
+          }
+          return { ok: true, value: sshView }
         }
         // One shape per endpoint, exactly as the host sends them: `reveal`
         // answers with the revealed path, the remote endpoints answer a
@@ -287,6 +312,7 @@ function mount(options: MountOptions = {}): Harness {
     setFailure: next => { failure = next },
     setRevealed: next => { revealed = next },
     setRemotes: next => { remoteView = next },
+    setSsh: next => { sshView = next },
     setRemoteEnabled: next => {
       remoteEnabledFlag = next
       for (const listener of remoteListeners) listener()
@@ -1636,12 +1662,56 @@ describe('the remote-environment section', () => {
     expect(screen.queryByRole('button', { name: `${NS}.panel.remoteRemove` })).toBeNull()
     fireEvent.click(within(remoteRow).getByRole('button', { name: `${NS}.panel.more` }))
     fireEvent.click(screen.getByRole('button', { name: `${NS}.panel.remoteRemove` }))
+    // Personal custody removes the whole row: the confirm says the binding
+    // goes too, not the registration-only copy of the deployment path.
     const confirm = await screen.findByRole('dialog', { name: `${NS}.panel.remoteRemove` })
+    expect(within(confirm).getByText(`${NS}.panel.remoteConfirmRemoveBound`)).toBeTruthy()
     expect(harness.calls.some(call => call.endpoint === 'removeRemote')).toBe(false)
     fireEvent.click(within(confirm).getByRole('button', { name: `${NS}.ssh.confirmDelete` }))
-    await waitFor(() => { expect(screen.getByTitle(`${NS}.remote.state.unregistered`)).toBeTruthy() })
+    // Registration first, then the CAS binding removal, then a fresh list —
+    // and the row is gone rather than parked on "unregistered".
+    await waitFor(() => { expect(screen.queryByText(ENDPOINT_LOCATION)).toBeNull() })
+    const sequence = harness.calls.map(call => call.endpoint)
+      .filter(endpoint => endpoint === 'removeRemote' || endpoint === 'sshState' || endpoint === 'sshBindingRemove')
+    expect(sequence).toEqual(['removeRemote', 'sshState', 'sshBindingRemove'])
     expect(harness.calls.find(call => call.endpoint === 'removeRemote')?.payload)
       .toEqual({ sessionId: 'session-1', environmentId: 'build', rootId: 'app' })
+    expect(harness.calls.find(call => call.endpoint === 'sshBindingRemove')?.payload)
+      .toEqual({ sessionId: 'session-1', revision: 7, environmentId: 'build', rootId: 'app' })
+    expect(harness.calls.at(-1)?.endpoint).toBe('remotes')
+  })
+
+  it('removes an unregistered personal row by dropping only its binding', async () => {
+    const harness = mount()
+    harness.setRemotes({
+      primaryRoot: '/repos/primary',
+      mode: 'workspace-write',
+      custodyMode: 'personal',
+      status: { state: 'ready' },
+      endpoints: [ENDPOINT],
+    })
+    renderPanel(harness)
+    fireEvent.click(screen.getByRole('button', { name: /action.label/ }))
+    const remoteRow = (await screen.findByText(ENDPOINT_LOCATION)).closest('.mrfw-row') as HTMLElement
+    fireEvent.click(within(remoteRow).getByRole('button', { name: `${NS}.panel.more` }))
+    // The menu still offers registration, and below it the row's removal —
+    // the only cleanup an unregistered ("待绑定") row has.
+    const menu = await screen.findByRole('menu')
+    expect(within(menu).getByRole('button', { name: `${NS}.panel.remoteRegister` })).toBeTruthy()
+    fireEvent.click(within(menu).getByRole('button', { name: `${NS}.panel.remoteRemove` }))
+    const confirm = await screen.findByRole('dialog', { name: `${NS}.panel.remoteRemove` })
+    expect(within(confirm).getByText(`${NS}.panel.remoteConfirmRemoveBound`)).toBeTruthy()
+    fireEvent.click(within(confirm).getByRole('button', { name: `${NS}.ssh.confirmDelete` }))
+    await waitFor(() => { expect(screen.queryByText(ENDPOINT_LOCATION)).toBeNull() })
+    // Nothing was ever registered, so there is no `removeRemote` to skip —
+    // the flow is state read, CAS binding removal, fresh list.
+    expect(harness.calls.some(call => call.endpoint === 'removeRemote')).toBe(false)
+    const sequence = harness.calls.map(call => call.endpoint)
+      .filter(endpoint => endpoint === 'sshState' || endpoint === 'sshBindingRemove')
+    expect(sequence).toEqual(['sshState', 'sshBindingRemove'])
+    expect(harness.calls.find(call => call.endpoint === 'sshBindingRemove')?.payload)
+      .toEqual({ sessionId: 'session-1', revision: 7, environmentId: 'build', rootId: 'app' })
+    expect(harness.calls.at(-1)?.endpoint).toBe('remotes')
   })
 
   it('copies a remote workspace target through the shared row control', async () => {

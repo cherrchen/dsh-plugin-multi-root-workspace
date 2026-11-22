@@ -368,7 +368,7 @@ export function WorkspaceFoldersDialog(props: WorkspaceFoldersActionProps & { on
   const [sshDialog, setSshDialog] = useState<SshDialogTab | undefined>(undefined)
   const [sshBindingsOpen, setSshBindingsOpen] = useState(false)
   /** The remote row whose register/remove request is in flight, keyed like `copyKey`. */
-  const [remoteOp, setRemoteOp] = useState<{ key: string; action: 'register' | 'remove' } | undefined>(undefined)
+  const [remoteOp, setRemoteOp] = useState<{ key: string; action: 'register' | 'remove' | 'unbind' } | undefined>(undefined)
   /** Why the last cleanup request failed; it belongs to the confirmation only. */
   const [cleanupError, setCleanupError] = useState<PanelError | undefined>(undefined)
   /**
@@ -520,10 +520,13 @@ export function WorkspaceFoldersDialog(props: WorkspaceFoldersActionProps & { on
   const refreshRemoteSection = useCallback(() => { void refreshRemotes() }, [refreshRemotes])
 
   /**
-   * Register or remove one deployment endpoint. Registration is the host's
+   * Register, remove, or unbind one endpoint. Registration is the host's
    * explicit verify-and-commit action; the section adopts the refreshed view.
+   * `unbind` is the personal-custody remove: it revokes the registration first
+   * (when one exists), then drops the workspace binding at the current
+   * revision, and finally re-reads the section.
    */
-  const mutateRemote = useCallback(async (action: 'register' | 'remove', endpoint: RemoteEndpointView): Promise<void> => {
+  const mutateRemote = useCallback(async (action: 'register' | 'remove' | 'unbind', endpoint: RemoteEndpointView): Promise<void> => {
     const client = props.remotes
     if (client === undefined) return
     const base = requestBase()
@@ -532,9 +535,37 @@ export function WorkspaceFoldersDialog(props: WorkspaceFoldersActionProps & { on
     setRemoteOp({ key: `remote:${endpoint.environmentId}/${endpoint.rootId}`, action })
     setState(previous => ({ ...previous, busy: true }))
     try {
-      const view = action === 'register'
-        ? await client.add(base.sessionId, endpoint.environmentId, endpoint.rootId)
-        : await client.remove(base.sessionId, endpoint.environmentId, endpoint.rootId)
+      let view: RemotesView
+      if (action === 'unbind') {
+        const ssh = props.ssh
+        if (ssh === undefined) throw new PanelError('unavailable', 'personal SSH management is not available')
+        // The registration goes first: a failure here leaves a still-bound,
+        // retryable row instead of an orphan registration without a binding.
+        if (endpoint.state !== 'unregistered') {
+          await client.remove(base.sessionId, endpoint.environmentId, endpoint.rootId)
+        }
+        try {
+          const sshState = await ssh.state(base.sessionId)
+          await ssh.bindingRemove(base.sessionId, sshState.revision, endpoint.environmentId, endpoint.rootId)
+        } catch (error: unknown) {
+          // The registration may already be gone: refresh before surfacing
+          // the failure so the row shows its real state, then report it.
+          try {
+            const latest = await client.list(base.sessionId)
+            if (mounted.current && epoch === remoteEpoch.current && props.sessionId?.() === base.sessionId) {
+              setRemoteState({ view: latest })
+            }
+          } catch {
+            // The list failure must not hide the binding failure.
+          }
+          throw error
+        }
+        view = await client.list(base.sessionId)
+      } else {
+        view = action === 'register'
+          ? await client.add(base.sessionId, endpoint.environmentId, endpoint.rootId)
+          : await client.remove(base.sessionId, endpoint.environmentId, endpoint.rootId)
+      }
       if (!mounted.current || epoch !== remoteEpoch.current || props.sessionId?.() !== base.sessionId) return
       setRemoteState({ view })
     } catch (error: unknown) {
@@ -546,7 +577,7 @@ export function WorkspaceFoldersDialog(props: WorkspaceFoldersActionProps & { on
         setState(previous => ({ ...previous, busy: false }))
       }
     }
-  }, [props.remotes, requestBase, props.sessionId])
+  }, [props.remotes, props.ssh, requestBase, props.sessionId])
 
   useEffect(() => { void refresh() }, [refresh])
   useEffect(() => {

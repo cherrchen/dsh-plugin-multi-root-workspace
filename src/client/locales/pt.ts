@@ -189,6 +189,7 @@ export const pt = {
   'panel.remoteEmpty': 'A implantação não declara nenhum endpoint remoto para este projeto.',
   'panel.remoteRegister': 'Registrar',
   'panel.remoteConfirmRemove': "Remover o registro de {path}? O vínculo com o espaço de trabalho será mantido.",
+  'panel.remoteConfirmRemoveBound': 'Remover {path}? Isso revoga o registro e o desvincula deste espaço de trabalho.',
   'panel.remoteRemove': 'Remover',
   'panel.remoteRegisterGuide': "Use o menu “…” do diretório para registrá-lo. Configure as conexões e o auxiliar no gerenciamento de SSH.",
   'panel.remoteNoCapabilities': 'nenhuma',

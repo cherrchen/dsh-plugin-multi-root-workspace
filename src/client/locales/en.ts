@@ -189,6 +189,7 @@ export const en = {
   'panel.remoteEmpty': 'The deployment declares no remote endpoint for this project.',
   'panel.remoteRegister': 'Register',
   'panel.remoteConfirmRemove': "Remove registration for {path}? Its workspace binding is kept.",
+  'panel.remoteConfirmRemoveBound': 'Remove {path}? This revokes its registration and unbinds it from this workspace.',
   'panel.remoteRemove': 'Remove',
   'panel.remoteRegisterGuide': "Use a directory’s More menu to register it. Configure connections and Helpers in SSH management.",
   'panel.remoteNoCapabilities': 'none',

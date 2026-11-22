@@ -189,6 +189,7 @@ export const fr = {
   'panel.remoteEmpty': 'Le déploiement ne déclare aucun point de terminaison distant pour ce projet.',
   'panel.remoteRegister': 'Enregistrer',
   'panel.remoteConfirmRemove': "Supprimer l’enregistrement de {path} ? Le lien avec l’espace de travail sera conservé.",
+  'panel.remoteConfirmRemoveBound': 'Supprimer {path} ? Cela révoque son enregistrement et le dissocie de cet espace de travail.',
   'panel.remoteRemove': 'Supprimer',
   'panel.remoteRegisterGuide': "Enregistrez le répertoire via son menu « … ». Configurez les connexions et l’assistant dans la gestion SSH.",
   'panel.remoteNoCapabilities': 'aucune',
