@@ -367,6 +367,8 @@ export function WorkspaceFoldersDialog(props: WorkspaceFoldersActionProps & { on
   /** The standalone SSH management dialog's requested tab; undefined when closed. */
   const [sshDialog, setSshDialog] = useState<SshDialogTab | undefined>(undefined)
   const [sshBindingsOpen, setSshBindingsOpen] = useState(false)
+  /** The binding the row menu's Edit entry lands on inside the bindings dialog. */
+  const [sshBindingEdit, setSshBindingEdit] = useState<{ environmentId: string; rootId: string } | undefined>(undefined)
   /** The remote row whose register/remove request is in flight, keyed like `copyKey`. */
   const [remoteOp, setRemoteOp] = useState<{ key: string; action: 'register' | 'remove' | 'unbind' } | undefined>(undefined)
   /** Why the last cleanup request failed; it belongs to the confirmation only. */
@@ -595,6 +597,7 @@ export function WorkspaceFoldersDialog(props: WorkspaceFoldersActionProps & { on
       setCleanupFor(undefined)
       setRemoteState({})
       setSshBindingsOpen(false)
+      setSshBindingEdit(undefined)
       setCleanupError(undefined)
       void refresh()
       void refreshRemotes()
@@ -1054,7 +1057,7 @@ export function WorkspaceFoldersDialog(props: WorkspaceFoldersActionProps & { on
                     {t('panel.remoteManage')}
                   </Action>
                   {props.ssh !== undefined && remoteState.view?.custodyMode === 'personal' && remoteState.view.status.state === 'ready' ? (
-                    <Action onClick={() => setSshBindingsOpen(true)}>{t('panel.remoteBindings')}</Action>
+                    <Action onClick={() => { setSshBindingEdit(undefined); setSshBindingsOpen(true) }}>{t('panel.remoteBindings')}</Action>
                   ) : null}
                 </div>
               </div>
@@ -1115,6 +1118,11 @@ export function WorkspaceFoldersDialog(props: WorkspaceFoldersActionProps & { on
                         if (!state.busy) void mutateRemote(action, endpoint)
                       }}
                       onChanged={refreshRemoteSection}
+                      onEditBinding={remoteState.view?.status.state === 'ready' ? () => {
+                        setMenuFor(undefined)
+                        setSshBindingEdit({ environmentId: endpoint.environmentId, rootId: endpoint.rootId })
+                        setSshBindingsOpen(true)
+                      } : undefined}
                       anchor={<IconButton pending={state.busy}
                         loading={remoteOp?.key === copyKey}
                         onClick={() => setMenuFor(current => current === copyKey ? undefined : copyKey)}
@@ -1142,7 +1150,8 @@ export function WorkspaceFoldersDialog(props: WorkspaceFoldersActionProps & { on
           {sshBindingsOpen && props.ssh !== undefined && sessionId !== undefined
             && remoteState.view?.custodyMode === 'personal' && remoteState.view.status.state === 'ready' ? (
               <SshWorkspaceBindingsDialog key={sessionId} ssh={props.ssh} sessionId={sessionId} remotes={props.remotes} roots={state.view}
-                onClose={() => setSshBindingsOpen(false)} onChanged={refreshRemoteSection} t={t} />
+                initialEdit={sshBindingEdit}
+                onClose={() => { setSshBindingsOpen(false); setSshBindingEdit(undefined) }} onChanged={refreshRemoteSection} t={t} />
             ) : null}
             </>
           )}

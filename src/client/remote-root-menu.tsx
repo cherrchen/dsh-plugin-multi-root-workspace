@@ -43,6 +43,8 @@ interface RemoteRootMenuProps {
   readonly onClose: () => void
   readonly onRegistration: (action: 'register' | 'remove' | 'unbind') => void
   readonly onChanged: () => void
+  /** Opens the workspace bindings dialog straight into this row's edit form. */
+  readonly onEditBinding?: (() => void) | undefined
 }
 
 export function RemoteRootMenu(props: RemoteRootMenuProps): ReactNode {
@@ -112,7 +114,10 @@ export function RemoteRootMenu(props: RemoteRootMenuProps): ReactNode {
   const items: MenuEntry[] = []
   const registering = endpoint.state !== 'registered'
   if (!editing || !canEdit) {
-    if (canEdit) items.push({ id: 'edit', label: t('ssh.binding.editCapabilities'), icon: <IconEdit />, disabled: controlsPending })
+    if (canEdit && props.onEditBinding !== undefined) {
+      items.push({ id: 'edit-binding', label: t('panel.remoteEdit'), icon: <IconEdit />, disabled: controlsPending })
+    }
+    if (canEdit) items.push({ id: 'edit', label: t('ssh.binding.editCapabilities'), disabled: controlsPending })
     if (registering) {
       items.push({
         id: 'register', label: t(endpoint.state === 'withheld' ? 'panel.reRegister' : 'panel.remoteRegister'), disabled: controlsPending,
@@ -181,6 +186,7 @@ export function RemoteRootMenu(props: RemoteRootMenuProps): ReactNode {
   return <><Menu open={open} anchor={props.anchor} items={items} selectedIds={editing ? [...checked] : []}
     portal align="end" closeOnPointerLeave={!editing} autoFocus onClose={props.onClose} onSelect={id => {
       if (id === 'register') props.onRegistration(id)
+      else if (id === 'edit-binding') { props.onClose(); props.onEditBinding?.() }
       else if (id === 'remove') { props.onClose(); setConfirmRemove(true) }
       else if (id === 'edit') { setError(undefined); setEditing(true) }
       else if (id === 'cancel') {

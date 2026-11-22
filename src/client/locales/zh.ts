@@ -274,6 +274,7 @@ export const zh = {
   'ssh.binding.import': '允许拷贝文件到远端',
   'ssh.binding.export': '允许拷贝文件到本地',
   'panel.remoteBindings': "管理远端 Root 绑定",
+  'panel.remoteEdit': "编辑",
   'ssh.binding.edit': "编辑绑定",
   'ssh.binding.confirmRemove': "要解除 {path} 与此工作区的绑定吗？这会撤销该目录的登记。",
   'ssh.binding.remove': "解除绑定",

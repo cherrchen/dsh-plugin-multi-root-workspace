@@ -1104,6 +1104,8 @@ export interface SshWorkspaceBindingsDialogProps {
   readonly sessionId: string
   readonly remotes: RemotesClient | undefined
   readonly roots: RootsView | undefined
+  /** A row-menu Edit entry pre-selects this binding's inline form once the state loads. */
+  readonly initialEdit?: { readonly environmentId: string; readonly rootId: string } | undefined
   readonly onClose: () => void
   readonly onChanged: () => void
   readonly t: Translate
@@ -1123,6 +1125,8 @@ export function SshWorkspaceBindingsDialog(props: SshWorkspaceBindingsDialogProp
   const [copiedId, setCopiedId] = useState<string>()
   const lifetime = useRef<AbortController | undefined>(undefined)
   const copyTimer = useRef<number>(undefined)
+  const formRef = useRef<HTMLDivElement | null>(null)
+  const initialEditApplied = useRef(false)
   const load = useCallback(async (signal: AbortSignal): Promise<void> => {
     try {
       const next = await ssh.state(sessionId, signal)
@@ -1195,6 +1199,20 @@ export function SshWorkspaceBindingsDialog(props: SshWorkspaceBindingsDialogProp
   const save = async (value: BindingDraft): Promise<BindingSaveResult> =>
     await mutate({ kind: 'save' }, async (revision, signal) => await ssh.bindingSave(sessionId, revision, bindingDraftOf(value), signal))
   const validPath = draft !== undefined && remotePath(draft.path.trim())
+  const formOpen = draft !== undefined
+  // A row-menu Edit entry lands on one binding's form exactly once; a binding
+  // that no longer matches falls back to the plain list.
+  useEffect(() => {
+    if (initialEditApplied.current || view === undefined) return
+    initialEditApplied.current = true
+    const wanted = props.initialEdit
+    if (wanted === undefined) return
+    const binding = view.bindings.find(entry => entry.environmentId === wanted.environmentId && entry.rootId === wanted.rootId)
+    if (binding !== undefined) edit(binding)
+  }, [view, props.initialEdit])
+  useEffect(() => {
+    if (formOpen) formRef.current?.scrollIntoView?.({ block: 'nearest' })
+  }, [formOpen])
   return <><Modal open title={t('ssh.bindings')} closeLabel={t('panel.close')} onClose={props.onClose}
     className="mrfw-sshDialog" contentClassName="mrfw-sshDialogContent">
     <PendingBar active={busy} />
@@ -1262,7 +1280,7 @@ export function SshWorkspaceBindingsDialog(props: SshWorkspaceBindingsDialogProp
         <SshSettingsAdd label={t('ssh.bindingAdd')} disabled={busy || draft !== undefined || view.environments.length === 0}
           expanded={addOpen} onClick={() => setAddOpen(true)} />
         {draft === undefined ? null : (
-          <div className="mrfw-sshForm">
+          <div className="mrfw-sshForm" ref={formRef}>
             <WizardField label={t('ssh.binding.environment')}>
               <WizardPicker label={t('ssh.binding.environment')} value={draft.environmentId} disabled={busy || editing}
                 items={view.environments.map(entry => ({ id: entry.environmentId, label: entry.displayName ?? entry.environmentId }))}

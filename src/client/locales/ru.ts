@@ -275,6 +275,7 @@ export const ru = {
   'ssh.binding.import': 'Разрешить копирование файлов на удалённый компьютер',
   'ssh.binding.export': 'Разрешить копирование файлов на локальный компьютер',
   'panel.remoteBindings': "Управление привязками удалённых корней",
+  'panel.remoteEdit': "Изменить",
   'ssh.binding.edit': "Изменить привязку",
   'ssh.binding.confirmRemove': "Отвязать {path} от этой рабочей области? Регистрация будет отозвана.",
   'ssh.binding.remove': "Отвязать корень",

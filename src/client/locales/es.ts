@@ -275,6 +275,7 @@ export const es = {
   'ssh.binding.import': 'Permitir copiar archivos al equipo remoto',
   'ssh.binding.export': 'Permitir copiar archivos al equipo local',
   'panel.remoteBindings': "Gestionar vínculos de raíces remotas",
+  'panel.remoteEdit': "Editar",
   'ssh.binding.edit': "Editar vínculo",
   'ssh.binding.confirmRemove': "¿Desvincular {path} de este espacio de trabajo? Se revocará su registro.",
   'ssh.binding.remove': "Desvincular raíz",

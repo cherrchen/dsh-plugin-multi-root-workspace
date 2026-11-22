@@ -275,6 +275,7 @@ export const en = {
   'ssh.binding.import': 'Allow copying files to the remote host',
   'ssh.binding.export': 'Allow copying files to the local machine',
   'panel.remoteBindings': "Manage remote Root bindings",
+  'panel.remoteEdit': "Edit",
   'ssh.binding.edit': "Edit binding",
   'ssh.binding.confirmRemove': "Unbind {path} from this workspace? This revokes its registration.",
   'ssh.binding.remove': "Unbind Root",

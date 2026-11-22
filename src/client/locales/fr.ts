@@ -275,6 +275,7 @@ export const fr = {
   'ssh.binding.import': 'Autoriser la copie de fichiers vers l’hôte distant',
   'ssh.binding.export': 'Autoriser la copie de fichiers vers la machine locale',
   'panel.remoteBindings': "Gérer les liaisons des racines distantes",
+  'panel.remoteEdit': "Modifier",
   'ssh.binding.edit': "Modifier la liaison",
   'ssh.binding.confirmRemove': "Dissocier {path} de cet espace de travail ? Son enregistrement sera révoqué.",
   'ssh.binding.remove': "Délier la racine",

@@ -15,7 +15,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 import type { RootView, RootsView } from '../src/contract.ts'
 import type { RemotesView } from '../src/remote/panel-contract.ts'
 import { PanelError } from '../src/client/panel-client.ts'
-import { SshManagementDialog, type SshManagementDialogProps } from '../src/client/ssh-panel.tsx'
+import { SshManagementDialog, SshWorkspaceBindingsDialog, type SshManagementDialogProps } from '../src/client/ssh-panel.tsx'
 import { WorkspaceFoldersDialog, type Translate } from '../src/client/WorkspaceFoldersAction.tsx'
 import type { SshBindingDraft, SshClient, SshEnvironmentView, SshStateView } from '../src/client/ssh-client.ts'
 import { zh } from '../src/client/locales.ts'
@@ -1189,6 +1189,62 @@ describe('the SSH management dialog', () => {
     expect(screen.queryByRole('dialog', { name: 'ssh.bindings' })).toBeNull()
   })
 
+  it('offers Edit above the capability item and lands on that binding’s form', async () => {
+    const binding = {
+      environmentId: 'env-prod', rootId: 'web', path: '/srv/app',
+      actions: ['read'] as const,
+    }
+    const endpoint = {
+      environmentId: binding.environmentId, rootId: binding.rootId, path: binding.path,
+      displayName: 'Production', platform: 'linux', target: 'ssh://deploy@prod.internal:22',
+      state: 'registered' as const, actions: [...binding.actions], transfers: [],
+      capabilities: { read: true, write: false, exec: false, receive: false, send: true },
+    }
+    const ssh = fakeSsh(sshState({ bindings: [binding] }))
+    renderDialog({ ssh, endpoints: [endpoint] })
+    const row = (await screen.findByText('ssh://deploy@prod.internal:22/srv/app')).closest('.mrfw-row') as HTMLElement
+    fireEvent.click(within(row).getByRole('button', { name: 'panel.more' }))
+    const menu = await screen.findByRole('menu')
+    const labels = within(menu).getAllByRole('button').map(item => item.textContent)
+    expect(labels.indexOf('panel.remoteEdit')).toBeGreaterThanOrEqual(0)
+    expect(labels.indexOf('panel.remoteEdit')).toBeLessThan(labels.indexOf('ssh.binding.editCapabilities'))
+    fireEvent.click(within(menu).getByRole('button', { name: 'panel.remoteEdit' }))
+    const dialog = await screen.findByRole('dialog', { name: 'ssh.bindings' })
+    await waitFor(() => expect(screen.queryByRole('menu')).toBeNull())
+    const path = within(dialog).getByLabelText<HTMLInputElement>('ssh.binding.path')
+    await waitFor(() => expect(path.value).toBe('/srv/app'))
+    expect((within(dialog).getByRole('button', { name: 'ssh.binding.environment' }) as HTMLButtonElement).disabled).toBe(true)
+  })
+
+  it('pre-selects the binding form when the dialog gets a matching initialEdit', async () => {
+    const binding = { environmentId: 'env-prod', rootId: 'web', path: '/srv/app', actions: ['read'] as const }
+    const ssh = fakeSsh(sshState({ bindings: [binding] }))
+    render(createElement(SshWorkspaceBindingsDialog, {
+      ssh, sessionId: 'session-1', remotes: undefined, roots: ROOTS,
+      initialEdit: { environmentId: 'env-prod', rootId: 'web' },
+      onClose() {}, onChanged() {}, t,
+    }))
+    const dialog = await screen.findByRole('dialog', { name: 'ssh.bindings' })
+    const path = within(dialog).getByLabelText<HTMLInputElement>('ssh.binding.path')
+    await waitFor(() => expect(path.value).toBe('/srv/app'))
+    // Editing an existing binding locks the environment picker, exactly like
+    // the pencil entry.
+    expect((within(dialog).getByRole('button', { name: 'ssh.binding.environment' }) as HTMLButtonElement).disabled).toBe(true)
+  })
+
+  it('stays on the binding list when initialEdit matches nothing', async () => {
+    const binding = { environmentId: 'env-prod', rootId: 'web', path: '/srv/app', actions: ['read'] as const }
+    const ssh = fakeSsh(sshState({ bindings: [binding] }))
+    render(createElement(SshWorkspaceBindingsDialog, {
+      ssh, sessionId: 'session-1', remotes: undefined, roots: ROOTS,
+      initialEdit: { environmentId: 'env-prod', rootId: 'missing' },
+      onClose() {}, onChanged() {}, t,
+    }))
+    const dialog = await screen.findByRole('dialog', { name: 'ssh.bindings' })
+    await within(dialog).findByText('app')
+    expect(within(dialog).queryByLabelText('ssh.binding.path')).toBeNull()
+  })
+
   it('leaves Workspace Folders open when closing the separate binding dialog', async () => {
     const onClose = vi.fn()
     const ssh = fakeSsh(sshState())
@@ -1255,6 +1311,7 @@ describe('the SSH management dialog', () => {
     fireEvent.click(within(row).getByRole('button', { name: 'panel.more' }))
     const menu = await screen.findByRole('menu')
     expect(within(menu).queryByRole('button', { name: 'ssh.binding.editCapabilities' })).toBeNull()
+    expect(within(menu).queryByRole('button', { name: 'panel.remoteEdit' })).toBeNull()
     fireEvent.click(within(menu).getByRole('button', { name: 'panel.remoteRemove' }))
     const confirm = await screen.findByRole('dialog', { name: 'panel.remoteRemove' })
     expect(within(confirm).getByText('panel.remoteConfirmRemove')).toBeTruthy()

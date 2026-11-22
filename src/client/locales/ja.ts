@@ -275,6 +275,7 @@ export const ja = {
   'ssh.binding.import': 'リモートへのファイルコピーを許可',
   'ssh.binding.export': 'ローカルへのファイルコピーを許可',
   'panel.remoteBindings': "リモートルートのバインドを管理",
+  'panel.remoteEdit': "編集",
   'ssh.binding.edit': "バインドを編集",
   'ssh.binding.confirmRemove': "{path} とこのワークスペースの関連付けを解除しますか？登録も取り消されます。",
   'ssh.binding.remove': "ルートのバインドを解除",

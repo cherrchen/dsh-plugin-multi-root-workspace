@@ -275,6 +275,7 @@ export const de = {
   'ssh.binding.import': 'Kopieren von Dateien auf den Remote-Host erlauben',
   'ssh.binding.export': 'Kopieren von Dateien auf den lokalen Rechner erlauben',
   'panel.remoteBindings': "Bindungen für entfernte Wurzeln verwalten",
+  'panel.remoteEdit': "Bearbeiten",
   'ssh.binding.edit': "Bindung bearbeiten",
   'ssh.binding.confirmRemove': "Die Zuordnung von {path} zu diesem Arbeitsbereich aufheben? Dadurch wird die Registrierung widerrufen.",
   'ssh.binding.remove': "Wurzelbindung lösen",
