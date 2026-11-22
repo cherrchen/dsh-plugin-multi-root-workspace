@@ -19,12 +19,13 @@ By default, [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness) 
 
 Not every project is a monorepo. A real development project is usually several independent Git repositories, and working across them meant juggling sessions. Peer harnesses already support adding multiple folders to a single workspace. This plugin brings the same capability to DSH — register the other repositories as additional roots, set each to read-only, read-write, or the session's current permission, and the agent can work in them within that grant.
 
-- **No new tools**: the agent keeps using the native `read` / `write` / `edit` / `bash`; it just gains a few more directories to work in.
+- **Native tools**: in local workspaces, the agent keeps using the native `read` / `write` / `edit` / `bash`; it just gains a few more directories to work in.
 - **Permissions that actually hold**: each additional root can be read-only, read-write, or follow the current session's permissions; the system sandbox enforces this rather than relying on a prompt to keep the model in line. The agent's file operations and bash commands fall under the same grant; processes started by other plugins are outside this guarantee.
 - **Browse additional roots in the Files tab**: the Files tab header switches between the primary root and any additional root; the tree, opening files, opening in an external app, context menus, auto-refresh, and search behave the same as in the primary root, and the document preview's navigator also lands on the root containing the file. On older hosts some of these actions may be unavailable, and the additional root keeps the host's native view.
 - **Skills in additional roots**: discovers `.dsh/skills` and `.agents/skills` inside additional roots and invokes them as `/alias:skill-name`; each root has its own switch, on by default.
 - **Auto Review (experimental, off by default)**: once enabled in the Plugin Manager, automatic review also sees the additional roots' directory structure, access levels, and instruction files, and reviews those roots too.
 - **Worktree suggestions (experimental, off by default)**: when the primary root is a Git worktree, the plugin offers to add other worktrees of the same repository as additional roots; nothing is registered until you confirm, and nothing is added or removed automatically.
+- **SSH remote environments (experimental, off by default, unreleased)**: Enable personal SSH on the plugin detail page to use `remote_copy` and `remote_bash` on registered remote directories. Connections and workspace bindings are managed separately, and each call goes through Registry admission.
 - **Absent when absent**: with no additional root registered, behavior is identical to an uninstalled plugin; misconfiguration reports an error instead of silently degrading.
 
 Current released version: `v0.1.23`. The user-visible changes of each version live in the [CHANGELOG](./CHANGELOG.en.md); progress and release state live in the [roadmap progress ledger](./docs/plans/active/2026-09-12-multi-root-workspace.md#进度总账).
@@ -284,6 +285,14 @@ When a worktree is deleted or moved, the dialog shows a badge, but **nothing is 
 ### Auto Review integration (experimental, off by default)
 
 For multi-root review context, enable the default-disabled Auto Review row in the component list of the Multi-root Workspace detail page on the **Plugins** page; the experimental **Multi-root Auto Review** switch on the same settings card is equivalent and also off by default. Ordinary installation neither enables nor selects Auto Review; the integration is available only on the DSH exact releases that ship it.
+
+### SSH remote environments (experimental, off by default, unreleased)
+
+Issue #32 currently exposes personal SSH only. Turn on **SSH remote environments** in the plugin settings and confirm the risk prompt. The local DSH Host holds the SSH credentials, which processes running under the same OS account may be able to access. Open **Remote SSH → Manage** from plugin settings or **Manage SSH remotes** from Workspace Folders.
+
+**Personal mode.** Open “Manage SSH remotes” → “Add connection”. Enter the host and credentials, then confirm the host key to save the connection. In step two, detect Node, install the helper, then select “Allow command execution” and click “Finish” to save. Return to Workspace Folders and open “Manage remote Root bindings”. Choose a saved connection, choose a directory and set its permissions, then register it from the More menu in its remote directory row. You can bind several directories through the same connection.
+
+The tools require a compatible SSH runtime, and the Registry authorizes each call against the registered directories for the current workspace. Turning SSH off unloads the tools and closes the remote control plane. See the [SSH remote environments guide](./docs/guide/user/ssh-remote-environments.en.md) for the full workflow.
 
 ### UI entries
 

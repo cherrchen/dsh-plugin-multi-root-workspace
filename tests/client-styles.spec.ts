@@ -463,6 +463,18 @@ describe('the navigator search takeover (0.2.2-rc.2)', () => {
     expect(native!.querySelector('[data-files-search-status]')!.matches(STATUS)).toBe(false)
   })
 
+  it('lays the SSH form out in a field grid instead of a column of row-sized inputs', () => {
+    // .mrfw-input was a horizontal-row control: its flex-basis is a width
+    // there, but a height in a column. The form must never inherit it, and the
+    // fields themselves must sit in a real grid.
+    expect(STYLES).toMatch(/\.mrfw-sshForm \.mrfw-input\s*\{[^}]*flex:\s*0 0 auto/s)
+    expect(STYLES).toMatch(/\.mrfw-sshGrid\s*\{[^}]*grid-template-columns:\s*repeat\(2,\s*minmax\(0,\s*1fr\)\)/s)
+    expect(STYLES).toMatch(/\.mrfw-sshDialog\s*\{[^}]*width:\s*min\(760px,\s*100%\)/s)
+    expect(STYLES).toMatch(/\.mrfw-sshInput,\s*\.mrfw-sshHelperInput,\s*\.mrfw-teamInput,\s*button\.mrfw-sshButton\s*\{[^}]*height:\s*32px;/)
+    expect(STYLES).toMatch(/\.mrfw-sshInput\s*\{[^}]*width:\s*100%/s)
+    expect(STYLES).toMatch(/\.mrfw-sshField\s*\{[^}]*flex-direction:\s*column/s)
+  })
+
   it('hides the Files-page search toggle under an additional root only', () => {
     const base = '[data-files-page]:has(.mrfw-rootSwitcher[data-root-kind="additional"])'
     expect(STYLES).toContain(`${base} [data-files-search-toggle]`)
@@ -472,6 +484,12 @@ describe('the navigator search takeover (0.2.2-rc.2)', () => {
     expect(document.querySelector('[data-files-search-toggle]')!.matches(selector)).toBe(true)
     document.querySelector('.mrfw-rootSwitcher')!.setAttribute('data-root-kind', 'primary')
     expect(document.querySelector('[data-files-search-toggle]')!.matches(selector)).toBe(false)
+  })
+})
+
+describe('the alert rules', () => {
+  it('keeps the SSH dialog alert on the error-primary token', () => {
+    expect(STYLES).toMatch(/\.mrfw-alert\s*\{[^}]*color:\s*var\(--dsw-alias-state-error-primary\)/s)
   })
 })
 
@@ -701,9 +719,9 @@ describe('the worktree suggestion notice rules', () => {
 })
 
 describe('the workspace folder add row', () => {
-  it('keeps the controls on one line by letting the manual path field shrink first', () => {
+  it('keeps the controls on one line by letting the add button stretch', () => {
     expect(STYLES).toMatch(/\.mrfw-actions\s*\{[^}]*flex-wrap:\s*wrap/s)
-    expect(STYLES).toMatch(/\.mrfw-manualPath\s*\{[^}]*flex:\s*1 1 120px[^}]*min-width:\s*80px/s)
+    expect(STYLES).toMatch(/\.mrfw-addBtn\s*\{[^}]*flex:\s*1 1 auto/s)
   })
 
   it('gives the root-limit hint its own line above the controls, under the divider', () => {

@@ -20,3 +20,8 @@ export interface OpsConfirmationProps {
 export function opsRiskConfirmation(): ComponentType<OpsConfirmationProps> | undefined {
   return (primitives as unknown as { RiskConfirmation?: ComponentType<OpsConfirmationProps> }).RiskConfirmation
 }
+
+/** The same host component, probed for the remote-environments switch. */
+export function remoteRiskConfirmation(): ComponentType<OpsConfirmationProps> | undefined {
+  return opsRiskConfirmation()
+}

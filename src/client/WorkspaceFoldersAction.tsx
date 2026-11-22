@@ -26,30 +26,41 @@
  * @module @dsh-electron/dsh-plugin-multi-root-workspace/client/WorkspaceFoldersAction
  */
 
-import { useCallback, useEffect, useLayoutEffect, useRef, useState, type KeyboardEvent as ReactKeyboardEvent, type ReactNode } from 'react'
+import { useCallback, useEffect, useLayoutEffect, useRef, useState, useSyncExternalStore, type KeyboardEvent as ReactKeyboardEvent, type ReactNode } from 'react'
+import { createPortal } from 'react-dom'
+import { sshLocation } from '../remote/ssh-location.ts'
 import { Menu, Modal } from '@deepseek-ai/dsh-client-ui-primitives'
 import {
   IconAccessInherit,
   IconAccessReadOnly,
   IconAccessReadWrite,
-  IconChevronDown,
-  IconChevronUp,
-  IconCopy,
   IconEdit,
   IconEllipsis,
   IconFolderOpen,
+  IconLink,
   IconPlus,
   IconRefresh,
   IconTrash,
   IconWorkspaceTree,
 } from '../compat/client-icons.ts'
-import { errorKeyOf, PanelError, type PanelClient } from './panel-client.ts'
+import { PanelError, type PanelClient } from './panel-client.ts'
 import type { WorkspaceFoldersDialogController } from './workspace-folders-dialog.ts'
+import type { RemotesClient } from './remotes-client.ts'
+import type { SshClient } from './ssh-client.ts'
+import { SshManagementDialog, SshWorkspaceBindingsDialog, type SshDialogTab } from './ssh-panel.tsx'
+import { RemoteWizard } from './wizard/add-remote.tsx'
+import { AddRootConfirm } from './add-root-confirm.tsx'
+import { RemoteRootMenu } from './remote-root-menu.tsx'
+import { Action, IconButton } from './panel-buttons.tsx'
+import { StatusLine } from './pending.tsx'
+import { ErrorToast, PanelErrorToast } from './error-toast.tsx'
+import { WorkspaceRow } from './workspace-row.tsx'
 import { requestWorktreePrompt } from './worktree-prompt-bus.ts'
 import { measureRootRowHeight } from './root-row-room.ts'
 import type { Key } from './locales.ts'
 import type { RootAccess, RootEntryView, RootState, RootView, RootsView, WorktreeRootView } from '../contract.ts'
 import type { WorktreeClient } from './worktree-client.ts'
+import type { RemoteCapabilitiesView, RemoteEndpointView, RemotesView } from '../remote/panel-contract.ts'
 
 /** Translate one key of this plugin's namespace. */
 export type Translate = (key: Key, params?: Record<string, unknown>) => string
@@ -58,6 +69,14 @@ export type Translate = (key: Key, params?: Record<string, unknown>) => string
 export interface WorkspaceFoldersActionProps {
   /** The channel client; absent when this composition has no host Connection. */
   readonly panel: PanelClient | undefined
+  /** The remote-environment section's client; absent when this host cannot serve it. */
+  readonly remotes?: RemotesClient | undefined
+  /** The personal-custody management client; absent when this host cannot serve it. */
+  readonly ssh?: SshClient | undefined
+  /** The shared remote-tools settings form; absent when the host exposes no config form. */
+  readonly subscribeRemoteSettings?: ((listener: () => void) => () => void) | undefined
+  /** Whether the remote-tools settings switch is on — the `+` control's two forms ride on it. */
+  readonly remoteEnabled?: (() => boolean) | undefined
   /** Opens the composed directory picker, when one is composed. */
   readonly pickDirectory: (() => Promise<string | null>) | undefined
   /** Bound translator for this plugin's namespace. */
@@ -97,74 +116,6 @@ export interface WorkspaceFoldersActionProps {
   readonly worktreePromptEnabled?: (() => boolean) | undefined
 }
 
-/** The visual family of one capsule button, mirroring the host Button kit. */
-type ActionVariant = 'ghost' | 'outline' | 'primary' | 'danger'
-
-const VARIANT_CLASS: Record<ActionVariant, string> = {
-  ghost: 'mrfw-btnGhost',
-  outline: 'mrfw-btnOutline',
-  primary: 'mrfw-btnPrimary',
-  danger: 'mrfw-btnDanger',
-}
-
-/** One small capsule button matching the panel's own styling.
- * Pending requests block activation through aria-disabled without changing
- * opacity, hover or keyboard focus. Native disabled is for unavailable actions.
- */
-function Action(props: {
-  onClick: () => void
-  children: ReactNode
-  disabled?: boolean
-  pending?: boolean
-  variant?: ActionVariant
-}): ReactNode {
-  const variant = props.variant ?? 'ghost'
-  return (
-    <button
-      type="button"
-      className={`mrfw-btn ${VARIANT_CLASS[variant]}`}
-      onClick={props.pending === true ? undefined : props.onClick}
-      disabled={props.disabled === true}
-      aria-disabled={props.disabled === true || props.pending === true || undefined}
-      aria-busy={props.pending === true || undefined}
-    >
-      {props.children}
-    </button>
-  )
-}
-
-/**
- * One icon-only button (a host "iconButton"): a fixed square of the capsule
- * family whose meaning travels in `title`/`aria-label` instead of text.
- */
-function IconButton(props: {
-  onClick: () => void
-  icon: ReactNode
-  label: string
-  disabled?: boolean
-  pending?: boolean
-  pressed?: boolean
-  hint?: string
-  variant?: ActionVariant
-}): ReactNode {
-  const variant = props.variant ?? 'ghost'
-  return (
-    <button
-      type="button"
-      className={`mrfw-btn mrfw-iconBtn ${VARIANT_CLASS[variant]}`}
-      title={props.hint ?? props.label}
-      aria-label={props.label}
-      aria-pressed={props.pressed}
-      onClick={props.pending === true ? undefined : props.onClick}
-      disabled={props.disabled === true}
-      aria-disabled={props.disabled === true || props.pending === true || undefined}
-      aria-busy={props.pending === true || undefined}
-    >
-      {props.icon}
-    </button>
-  )
-}
-
 /** A skill is a reusable instruction document; the star denotes its capability. */
 function SkillsIcon({ enabled }: { enabled: boolean }): ReactNode {
   return (
@@ -182,33 +133,6 @@ function CloseIcon(): ReactNode {
     <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round" aria-hidden="true">
       <path d="M4 4l8 8M12 4l-8 8" />
     </svg>
-  )
-}
-
-/**
- * One path that copies itself: text that paints like the surrounding copy
- * and reveals a trailing icon on hover — clicking the text or the icon
- * copies the same canonical path. The accessible name swaps to "copied"
- * for the feedback window, the icon button's old recipe. Shared by the
- * primary row and every additional root.
- */
-function PathCopy(props: {
-  readonly path: string
-  readonly copied: boolean
-  readonly onCopy: () => void
-  readonly t: Translate
-}): ReactNode {
-  return (
-    <button
-      type="button"
-      className="mrfw-rootPath mrfw-pathCopy"
-      title={props.path}
-      aria-label={props.copied ? props.t('panel.copied') : props.t('panel.copyPath')}
-      onClick={props.onCopy}
-    >
-      {props.path}
-      <span className="mrfw-pathCopyIcon" aria-hidden="true"><IconCopy size={14} /></span>
-    </button>
   )
 }
 
@@ -232,6 +156,9 @@ export function stateKey(state: RootState): Key {
     case 'invalid': return 'state.invalid'
   }
 }
+
+/** The `useSyncExternalStore` no-op for compositions without the settings signal. */
+const noRemoteSettings = (): (() => void) => () => {}
 
 /** The locale key for one registration's access level. */
 export function accessKey(access: RootAccess): Key {
@@ -369,6 +296,35 @@ function rowKey(root: RootView): string {
   return `${root.ordinal}\u0000${root.id}\u0000${root.path}\u0000${root.addedAt}`
 }
 
+/** The operator-facing reason for one remote control-plane state. */
+function remoteStatusText(status: RemotesView['status'], t: Translate): string {
+  // A stable host code wins over the raw socket/connect text; the raw reason
+  // stays available for diagnostics but is not the operator-facing sentence.
+  if (status.code === 'owner-without-remote-plane') return t('remote.status.ownerWithoutRemotePlane')
+  return status.reason ?? status.state
+}
+
+/** The locale key for one remote registration state. */
+function remoteStateKey(state: RemoteEndpointView['state']): Key {
+  switch (state) {
+    case 'unregistered': return 'remote.state.unregistered'
+    case 'registered': return 'remote.state.registered'
+    case 'withheld': return 'remote.state.withheld'
+    case 'revoked': return 'remote.state.revoked'
+  }
+}
+
+/** Render the effective remote capabilities as one localized list. */
+function remoteCapabilityList(capabilities: RemoteCapabilitiesView, t: Translate): string {
+  const names: string[] = []
+  if (capabilities.read) names.push(t('remote.capability.read'))
+  if (capabilities.write) names.push(t('remote.capability.write'))
+  if (capabilities.exec) names.push(t('remote.capability.exec'))
+  if (capabilities.receive) names.push(t('remote.capability.receive'))
+  if (capabilities.send) names.push(t('remote.capability.send'))
+  return names.length === 0 ? t('panel.remoteNoCapabilities') : names.join(', ')
+}
+
 /**
  * The dialog: reads the view once per open, then after every mutation.
  *
@@ -386,23 +342,19 @@ export function WorkspaceFoldersDialog(props: WorkspaceFoldersActionProps & { on
     busy: false,
     noSession: false,
   })
-  const [manualPath, setManualPath] = useState('')
-  /** The access the Add controls register new roots with; `inherit` is the default. */
-  const [addAccess, setAddAccess] = useState<RootAccess>('inherit')
-  /**
-   * Whether the operator actually picked a level. The select shows its default
-   * before they do, and sending that default would be an explicit value the
-   * operator never named: on a revive the registry upgrades a read-only record
-   * to it. Only a chosen level may travel in the request.
-   */
-  const [accessChosen, setAccessChosen] = useState(false)
-  const [accessMenuOpen, setAccessMenuOpen] = useState(false)
+  /** The picked path waiting on the trust dialog's confirmation. */
+  const [addCandidate, setAddCandidate] = useState<string | undefined>(undefined)
+  /** The `+` control's dropdown, only ever opened while the remote feature is on. */
+  const [addMenuOpen, setAddMenuOpen] = useState(false)
+  /** The add-remote guided flow's open state. */
+  const [remoteWizard, setRemoteWizard] = useState(false)
   /** The widening access change waiting on the confirmation's red button. */
   const [upgradeFor, setUpgradeFor] = useState<{ root: RootView; access: RootAccess } | undefined>(undefined)
   const [aliasFor, setAliasFor] = useState<string | undefined>(undefined)
   const [aliasDraft, setAliasDraft] = useState('')
   const [aliasField, setAliasField] = useState<'alias' | 'aliasId'>('alias')
   const [copiedId, setCopiedId] = useState<string | undefined>(undefined)
+  const copyFeedbackTimer = useRef<number | undefined>(undefined)
   const [menuFor, setMenuFor] = useState<string | undefined>(undefined)
   /**
    * Tracked worktree roots awaiting the operator's cleanup confirmation. The
@@ -410,6 +362,15 @@ export function WorkspaceFoldersDialog(props: WorkspaceFoldersActionProps & { on
    * therefore one confirmation Modal.
    */
   const [cleanupFor, setCleanupFor] = useState<readonly string[] | undefined>(undefined)
+  /** The remote section, read independently of the roots view. */
+  const [remoteState, setRemoteState] = useState<{ view?: RemotesView; error?: PanelError }>({})
+  /** The standalone SSH management dialog's requested tab; undefined when closed. */
+  const [sshDialog, setSshDialog] = useState<SshDialogTab | undefined>(undefined)
+  const [sshBindingsOpen, setSshBindingsOpen] = useState(false)
+  /** The binding the row menu's Edit entry lands on inside the bindings dialog. */
+  const [sshBindingEdit, setSshBindingEdit] = useState<{ environmentId: string; rootId: string } | undefined>(undefined)
+  /** The remote row whose register/remove request is in flight, keyed like `copyKey`. */
+  const [remoteOp, setRemoteOp] = useState<{ key: string; action: 'register' | 'remove' | 'unbind' } | undefined>(undefined)
   /** Why the last cleanup request failed; it belongs to the confirmation only. */
   const [cleanupError, setCleanupError] = useState<PanelError | undefined>(undefined)
   /**
@@ -421,6 +382,8 @@ export function WorkspaceFoldersDialog(props: WorkspaceFoldersActionProps & { on
   const rootListRef = useRef<HTMLDivElement | null>(null)
   const dialogRef = useRef<HTMLDivElement | null>(null)
   const requestEpoch = useRef(0)
+  /** Fences remote-section answers independently of roots answers. */
+  const remoteEpoch = useRef(0)
   const mounted = useRef(true)
 
   useEffect(() => {
@@ -428,6 +391,7 @@ export function WorkspaceFoldersDialog(props: WorkspaceFoldersActionProps & { on
     return () => {
       mounted.current = false
       requestEpoch.current += 1
+      window.clearTimeout(copyFeedbackTimer.current)
     }
   }, [])
 
@@ -465,7 +429,8 @@ export function WorkspaceFoldersDialog(props: WorkspaceFoldersActionProps & { on
       // listener closes just that layer, and this handler must not close the
       // dialog underneath it — the portaled dropdown and Modal bubble their
       // events through this dialog's React tree too.
-      if (menuFor !== undefined || accessMenuOpen || upgradeFor !== undefined || cleanupFor !== undefined) return
+      if (menuFor !== undefined || addMenuOpen || addCandidate !== undefined || remoteWizard
+        || upgradeFor !== undefined || cleanupFor !== undefined || sshDialog !== undefined || sshBindingsOpen) return
       event.stopPropagation()
       props.onClose()
       return
@@ -475,7 +440,8 @@ export function WorkspaceFoldersDialog(props: WorkspaceFoldersActionProps & { on
     // focus trap. The portaled Modal still bubbles keys through this dialog's
     // React tree (like Escape above), and trapping here would yank focus to a
     // control behind the active confirmation.
-    if (upgradeFor !== undefined || cleanupFor !== undefined) return
+    if (upgradeFor !== undefined || cleanupFor !== undefined || sshDialog !== undefined || sshBindingsOpen
+      || addCandidate !== undefined || remoteWizard) return
     const dialog = dialogRef.current
     if (dialog === null) return
     const focusable = Array.from(
@@ -527,6 +493,94 @@ export function WorkspaceFoldersDialog(props: WorkspaceFoldersActionProps & { on
     }
   }, [panel, requestBase])
 
+  /**
+   * Read the remote section. This never opens a remote connection: the host
+   * answers from the control-plane state, the deployment manifest, and the
+   * registered grants alone. The epoch fences an answer that arrives after a
+   * session switch or a newer read.
+   */
+  const refreshRemotes = useCallback(async (): Promise<void> => {
+    const client = props.remotes
+    if (client === undefined) return
+    const base = requestBase()
+    if (base === undefined) return
+    const epoch = ++remoteEpoch.current
+    try {
+      const view = await client.list(base.sessionId)
+      if (!mounted.current || epoch !== remoteEpoch.current || props.sessionId?.() !== base.sessionId) return
+      setRemoteState({ view })
+    } catch (error: unknown) {
+      if (!mounted.current || epoch !== remoteEpoch.current) return
+      // Keep the last good view like `mutateRemote` does: a transient list
+      // failure must not blank the section or drop an open SSH dialog's
+      // status into a permanent "loading" state.
+      setRemoteState(previous => ({ ...previous, error: asPanelError(error) }))
+    }
+  }, [props.remotes, requestBase, props.sessionId])
+
+  /** The dialog's "state changed" signal; keeps one refresh path for the section. */
+  const refreshRemoteSection = useCallback(() => { void refreshRemotes() }, [refreshRemotes])
+
+  /**
+   * Register, remove, or unbind one endpoint. Registration is the host's
+   * explicit verify-and-commit action; the section adopts the refreshed view.
+   * `unbind` is the personal-custody remove: it revokes the registration first
+   * (when one exists), then drops the workspace binding at the current
+   * revision, and finally re-reads the section.
+   */
+  const mutateRemote = useCallback(async (action: 'register' | 'remove' | 'unbind', endpoint: RemoteEndpointView): Promise<void> => {
+    const client = props.remotes
+    if (client === undefined) return
+    const base = requestBase()
+    if (base === undefined) return
+    const epoch = ++remoteEpoch.current
+    setRemoteOp({ key: `remote:${endpoint.environmentId}/${endpoint.rootId}`, action })
+    setState(previous => ({ ...previous, busy: true }))
+    try {
+      let view: RemotesView
+      if (action === 'unbind') {
+        const ssh = props.ssh
+        if (ssh === undefined) throw new PanelError('unavailable', 'personal SSH management is not available')
+        // The registration goes first: a failure here leaves a still-bound,
+        // retryable row instead of an orphan registration without a binding.
+        if (endpoint.state !== 'unregistered') {
+          await client.remove(base.sessionId, endpoint.environmentId, endpoint.rootId)
+        }
+        try {
+          const sshState = await ssh.state(base.sessionId)
+          await ssh.bindingRemove(base.sessionId, sshState.revision, endpoint.environmentId, endpoint.rootId)
+        } catch (error: unknown) {
+          // The registration may already be gone: refresh before surfacing
+          // the failure so the row shows its real state, then report it.
+          try {
+            const latest = await client.list(base.sessionId)
+            if (mounted.current && epoch === remoteEpoch.current && props.sessionId?.() === base.sessionId) {
+              setRemoteState({ view: latest })
+            }
+          } catch {
+            // The list failure must not hide the binding failure.
+          }
+          throw error
+        }
+        view = await client.list(base.sessionId)
+      } else {
+        view = action === 'register'
+          ? await client.add(base.sessionId, endpoint.environmentId, endpoint.rootId)
+          : await client.remove(base.sessionId, endpoint.environmentId, endpoint.rootId)
+      }
+      if (!mounted.current || epoch !== remoteEpoch.current || props.sessionId?.() !== base.sessionId) return
+      setRemoteState({ view })
+    } catch (error: unknown) {
+      if (!mounted.current || epoch !== remoteEpoch.current) return
+      setRemoteState(previous => ({ ...previous, error: asPanelError(error) }))
+    } finally {
+      if (mounted.current) {
+        setRemoteOp(undefined)
+        setState(previous => ({ ...previous, busy: false }))
+      }
+    }
+  }, [props.remotes, props.ssh, requestBase, props.sessionId])
+
   useEffect(() => { void refresh() }, [refresh])
   useEffect(() => {
     let previous = props.sessionId?.()
@@ -535,15 +589,28 @@ export function WorkspaceFoldersDialog(props: WorkspaceFoldersActionProps & { on
       if (current === previous) return
       previous = current
       requestEpoch.current += 1
+      remoteEpoch.current += 1
       setState({ view: undefined, error: undefined, busy: false, noSession: current === undefined })
       setMenuFor(undefined)
       setAliasFor(undefined)
       cleanupForRef.current = undefined
       setCleanupFor(undefined)
+      setRemoteState({})
+      setSshBindingsOpen(false)
+      setSshBindingEdit(undefined)
       setCleanupError(undefined)
       void refresh()
+      void refreshRemotes()
     })
-  }, [props.subscribeSession, props.sessionId, refresh])
+  }, [props.subscribeSession, props.sessionId, refresh, refreshRemotes])
+
+  useEffect(() => { void refreshRemotes() }, [refreshRemotes])
+  // The settings switch lives on another surface. Follow the shared remote
+  // form so an open dialog reflects an enable/disable or custody-mode write
+  // immediately, instead of waiting for a remount or a DSH restart.
+  useEffect(() => {
+    return props.subscribeRemoteSettings?.(() => { void refreshRemotes() })
+  }, [props.subscribeRemoteSettings, refreshRemotes])
 
   /**
    * Submit one change to the host and adopt the view it answers with.
@@ -582,7 +649,6 @@ export function WorkspaceFoldersDialog(props: WorkspaceFoldersActionProps & { on
     setCleanupError(undefined)
     setUpgradeFor(undefined)
     setMenuFor(undefined)
-    setAccessMenuOpen(false)
     setCleanupFor(ids)
   }, [])
 
@@ -640,10 +706,9 @@ export function WorkspaceFoldersDialog(props: WorkspaceFoldersActionProps & { on
   }, [props.worktrees, props.sessionId, requestBase, clearCleanupIfCurrent])
 
   /**
-   * Open the composed picker and add whatever it returns. A picker that is not
-   * composed, or a dialog the operator dismissed, adds nothing — it never falls
-   * back to the manual field, because the operator who clicked "Add folder…"
-   * asked for the picker, not for the text they may have typed earlier.
+   * Open the composed picker and stage whatever it returns for the trust
+   * dialog — the grant is named there, together with the access level, so a
+   * dismissed picker or an uncomposed one stages nothing.
    */
   const addViaPicker = useCallback(async () => {
     if (props.pickDirectory === undefined) return
@@ -655,21 +720,8 @@ export function WorkspaceFoldersDialog(props: WorkspaceFoldersActionProps & { on
       return
     }
     if (picked === null || picked.trim() === '') return
-    await mutate('add', { path: picked, ...(accessChosen ? { access: addAccess } : {}) })
-  }, [mutate, props, addAccess, accessChosen])
-
-  /**
-   * Add the path in the manual field — the one the operator typed. The picker
-   * plays no part here: this is the entry point the confirm button and the
-   * Enter key use.
-   */
-  const addManualPath = useCallback(async () => {
-    const path = manualPath.trim()
-    if (path === '') return
-    // Cleared only on success: a rejected path stays in the field so the operator
-    // can fix it instead of retyping it.
-    if (await mutate('add', { path, ...(accessChosen ? { access: addAccess } : {}) })) setManualPath('')
-  }, [manualPath, mutate, addAccess, accessChosen])
+    setAddCandidate(picked)
+  }, [props])
 
   /**
    * Re-register one MISSING root in place. The request carries the stored
@@ -708,12 +760,16 @@ export function WorkspaceFoldersDialog(props: WorkspaceFoldersActionProps & { on
   const copyPath = useCallback(async (key: string, path: string) => {
     try {
       await navigator.clipboard.writeText(path)
+      if (!mounted.current) return
+      window.clearTimeout(copyFeedbackTimer.current)
       setCopiedId(key)
       setState(previous => ({ ...previous, error: undefined }))
-      window.setTimeout(() => { setCopiedId(current => (current === key ? undefined : current)) }, 1500)
+      copyFeedbackTimer.current = window.setTimeout(() => { setCopiedId(undefined) }, 1500)
     } catch (error: unknown) {
       // A clipboard refusal is the browser environment's, not the host's, so it
       // is reported here with its own code rather than left silent.
+      if (!mounted.current) return
+      window.clearTimeout(copyFeedbackTimer.current)
       setCopiedId(undefined)
       setState(previous => ({
         ...previous,
@@ -733,13 +789,27 @@ export function WorkspaceFoldersDialog(props: WorkspaceFoldersActionProps & { on
   // The host refuses the add as `root-limit-reached` anyway; disabling here is
   // what makes the refusal explain itself before the operator clicks.
   const atLimit = state.view !== undefined && state.view.count >= state.view.limit
-  const IconAccessTrigger = addAccess === 'read-only' ? IconAccessReadOnly
-    : addAccess === 'read-write' ? IconAccessReadWrite : IconAccessInherit
+  // The settings switch alone picks the `+` control's form — a missing form
+  // reads as off, and the remote item additionally needs both clients to run.
+  const remoteFeatureOn = useSyncExternalStore(
+    props.subscribeRemoteSettings ?? noRemoteSettings,
+    () => props.remoteEnabled?.() === true,
+    () => false,
+  )
+  const remoteAddPossible = props.remotes !== undefined && props.ssh !== undefined
   // Captured as consts: narrowing does not reach the onCopy closures below.
   const primaryPath = state.view?.primaryRoot
   const workingRoot = workingRootOf(state.view)
+  const sessionId = requestBase()?.sessionId
   return (
     <>
+    {/* The overlay lives under document.body, not beside the trigger: the
+        right sidebar / dockkit panes apply transform/backdrop-filter, which
+        would make position:fixed relative to the pane and clip the dialog.
+        Key events still reach onDialogKeyDown through React's portal
+        bubbling, and the handler's stopPropagation keeps them off upstream
+        pane listeners. */}
+    {createPortal(
     <div className="mrfw-overlay" role="presentation">
       <div
         className="mrfw-mask"
@@ -777,40 +847,26 @@ export function WorkspaceFoldersDialog(props: WorkspaceFoldersActionProps & { on
               {t('panel.toolCaps', { tools: state.view!.cappedTools!.join(', ') })}
             </p> : null}
 
-          {state.error === undefined ? null : (
-            <p role="alert" className="mrfw-alert">
-              {t(errorKeyOf(state.error.code))}
-              {(state.error.code === 'unavailable' || state.error.code === 'panel/internal') ? ` (${state.error.message})` : ''}
-            </p>
-          )}
-          {state.view?.unavailable === undefined ? null : (
-            <p role="alert" className="mrfw-alert">{state.view.unavailable}</p>
-          )}
+          <PanelErrorToast error={state.error} t={t} />
+          <ErrorToast error={state.view?.unavailable} format={message => message} />
           <section className="mrfw-section">
             <div className="mrfw-sectionTitleRow">
               <span className="mrfw-sectionTitle">{t('panel.primary')}</span>
               <span className="mrfw-sectionNote">{t('panel.primaryNote')}</span>
             </div>
-            <div className="mrfw-row mrfw-rowBare">
-              <div className="mrfw-rootText">
-                <span className="mrfw-rootName">
-                  <span className="mrfw-rootNameText">
-                    {state.view === undefined ? '…' : (state.view.primaryName ?? basename(state.view.primaryRoot))}
-                  </span>
-                  {primaryPath !== undefined && workingRoot === primaryPath ? <span className="mrfw-cwdTag">{t('panel.currentAgentCwd')}</span> : null}
+            <WorkspaceRow
+              bare
+              t={t}
+              name={(
+                <span className="mrfw-rootNameText">
+                  {state.view === undefined ? '…' : (state.view.primaryName ?? basename(state.view.primaryRoot))}
                 </span>
-                {primaryPath === undefined
-                  ? <span className="mrfw-rootPath">…</span>
-                  : (
-                    <PathCopy
-                      path={primaryPath}
-                      copied={copiedId === 'primary'}
-                      onCopy={() => { void copyPath('primary', primaryPath) }}
-                      t={t}
-                    />
-                  )}
-              </div>
-            </div>
+              )}
+              badges={primaryPath !== undefined && workingRoot === primaryPath ? <span className="mrfw-cwdTag">{t('panel.currentAgentCwd')}</span> : null}
+              path={primaryPath}
+              copied={copiedId === 'primary'}
+              onCopy={primaryPath === undefined ? undefined : () => { void copyPath('primary', primaryPath) }}
+            />
           </section>
 
           <section className="mrfw-section mrfw-sectionAdditional">
@@ -834,8 +890,6 @@ export function WorkspaceFoldersDialog(props: WorkspaceFoldersActionProps & { on
                 </span>
               ) : null}
             </div>
-            {/* The rows are the panel's only scroll region; the section title
-                and its batch action stay fixed above them. */}
             <div className="mrfw-rootList" ref={rootListRef}>
               {state.view === undefined ? <p className="mrfw-note">{t('panel.loading')}</p> : null}
               {state.view !== undefined && roots.length === 0 ? (
@@ -850,130 +904,130 @@ export function WorkspaceFoldersDialog(props: WorkspaceFoldersActionProps & { on
                 // Only a confirmed-missing tracked worktree may be cleaned up;
                 // every other row keeps its full action set and status text.
                 const cleanable = root.worktree?.cleanupEligible === true
-                return <div key={key} className="mrfw-row">
-                  <div className="mrfw-rootText">
-                    <span className="mrfw-rootName">
-                      <span className="mrfw-rootNameText">{displayNameOf(root)}</span>
-                      {workingRoot === root.path ? <span className="mrfw-cwdTag">{t('panel.currentAgentCwd')}</span> : null}
-                      {/* The access level rides beside the name as read-only
-                          text; changing it stays behind the row's … menu. */}
-                      <span className="mrfw-accessBadge">
-                        {IconAccess === undefined ? null : <IconAccess size={14} />}
-                        {root.effectiveAccess === undefined ? t(accessKey(root.access)) : t('panel.accessEffective', {
-                          access: t(accessKey(root.access)),
-                          effective: t(`effective.${root.effectiveAccess}`),
-                        })}
+                return <WorkspaceRow
+                  key={key}
+                  t={t}
+                  name={<span className="mrfw-rootNameText">{displayNameOf(root)}</span>}
+                  badges={<>
+                    {workingRoot === root.path ? <span className="mrfw-cwdTag">{t('panel.currentAgentCwd')}</span> : null}
+                    {/* The access level rides beside the name as read-only
+                        text; changing it stays behind the row's … menu. */}
+                    <span className="mrfw-accessBadge">
+                      {IconAccess === undefined ? null : <IconAccess size={14} />}
+                      {root.effectiveAccess === undefined ? t(accessKey(root.access)) : t('panel.accessEffective', {
+                        access: t(accessKey(root.access)),
+                        effective: t(`effective.${root.effectiveAccess}`),
+                      })}
+                    </span>
+                  </>}
+                  path={root.path}
+                  copied={copiedId === key}
+                  onCopy={() => { void copyPath(key, root.path) }}
+                  trailing={<>
+                    {cleanable || root.state === 'available' ? null : (
+                      <span title={root.detail} className="mrfw-stateWarn">
+                        {t(stateKey(root.state))}
                       </span>
-                    </span>
-                    <PathCopy
-                      path={root.path}
-                      copied={copiedId === key}
-                      onCopy={() => { void copyPath(key, root.path) }}
-                      t={t}
-                    />
-                  </div>
-                  {cleanable || root.state === 'available' ? null : (
-                    <span title={root.detail} className="mrfw-stateWarn">
-                      {t(stateKey(root.state))}
-                    </span>
-                  )}
-                  {cleanable || root.worktree === undefined || root.worktree.state === 'active' ? null : (
-                    <span className="mrfw-stateWarn">{t(worktreeStateKey(root.worktree.state))}</span>
-                  )}
-                  {cleanable || root.worktree?.state !== 'changed' ? null : (
-                    <span className="mrfw-note">{t('worktree.pathReused')}</span>
-                  )}
-                  {cleanable || root.state !== 'missing' ? null : (
-                    <IconButton
-                      pending={state.busy}
-                      onClick={() => { void reRegister(root) }}
-                      icon={<IconRefresh />}
-                      label={t('panel.reRegister')}
-                    />
-                  )}
-                  {root.state === 'redirected' ? (
-                    <span className="mrfw-note">{t('panel.redirectedHint')}</span>
-                  ) : null}
-                  {cleanable || root.skillsEnabled === undefined ? null : (
-                    <IconButton
-                      pending={state.busy}
-                      pressed={root.skillsEnabled}
-                      onClick={() => { void mutate('setSkillsEnabled', { entry: entryOf(root), skillsEnabled: !root.skillsEnabled }) }}
-                      icon={<SkillsIcon enabled={root.skillsEnabled} />}
-                      label={t('panel.skills')}
-                      hint={t(root.skillsEnabled ? 'panel.skillsEnabled' : 'panel.skillsDisabled')}
-                    />
-                  )}
-                  {cleanable ? (
-                    // The row's primary action: a red delete that opens the same
-                    // confirmation the batch entry does — the path-reuse warning
-                    // lives there, not in the row.
-                    <IconButton
-                      variant="danger"
-                      pending={state.busy}
-                      onClick={() => { openCleanup([root.id]) }}
-                      icon={<IconTrash />}
-                      label={t('worktree.cleanup')}
-                    />
-                  ) : (
-                    <IconButton
-                      pending={state.busy}
-                      onClick={() => { void reveal(root) }}
-                      icon={<IconFolderOpen />}
-                      label={t('panel.reveal')}
-                    />
-                  )}
-                  <Menu
-                    open={menuFor === key}
-                    onClose={() => { setMenuFor(undefined) }}
-                    items={[
-                      { id: 'rename', label: t('panel.rename'), icon: <IconEdit /> },
-                      { id: 'alias-id', label: t('panel.aliasIdEdit'), disabled: state.busy },
-                      { id: 'access:inherit', label: t('panel.accessInherit'), icon: IconAccessInherit === undefined ? undefined : <IconAccessInherit />, disabled: state.busy || root.access === 'inherit' },
-                      { id: 'access:read-only', label: t('panel.accessReadOnly'), icon: IconAccessReadOnly === undefined ? undefined : <IconAccessReadOnly />, disabled: state.busy || root.access === 'read-only' },
-                      { id: 'access:read-write', label: t('panel.accessReadWrite'), icon: IconAccessReadWrite === undefined ? undefined : <IconAccessReadWrite />, disabled: state.busy || root.access === 'read-write' },
-                      ...(root.worktree?.cleanupEligible === true
-                        ? [{ id: 'worktree-cleanup', label: t('worktree.cleanup'), icon: <IconTrash />, danger: true, disabled: state.busy }]
-                        : []),
-                      { id: 'remove', label: t('panel.remove'), icon: <IconTrash />, danger: true, disabled: state.busy },
-                    ]}
-                    onSelect={(id) => {
-                      setMenuFor(undefined)
-                      if (id === 'alias-id') {
-                        setAliasField('aliasId')
-                        setAliasFor(key)
-                        setAliasDraft(root.aliasId ?? '')
-                      }
-                      if (id === 'rename') {
-                        setAliasField('alias')
-                        setAliasFor(key)
-                        setAliasDraft(root.alias ?? '')
-                      }
-                      if (id.startsWith('access:')) {
-                        const access = id.slice('access:'.length) as RootAccess
-                        // Widening what the agent may modify — under ANY session
-                        // mode — asks first, through the confirmation layered
-                        // over this dialog, not the browser's window.confirm.
-                        // Only one confirmation may own the screen: opening
-                        // the upgrade layer drops an open cleanup confirmation.
-                        if (widensAccess(root.access, access)) { closeCleanup(); setUpgradeFor({ root, access }); return }
-                        void mutate('setAccess', { entry: entryOf(root), access })
-                      }
-                      if (id === 'worktree-cleanup') openCleanup([root.id])
-                      if (id === 'remove') void mutate('remove', { entry: entryOf(root) })
-                    }}
-                    portal
-                    align="end"
-                    closeOnPointerLeave
-                    anchor={(
+                    )}
+                    {cleanable || root.worktree === undefined || root.worktree.state === 'active' ? null : (
+                      <span className="mrfw-stateWarn">{t(worktreeStateKey(root.worktree.state))}</span>
+                    )}
+                    {cleanable || root.worktree?.state !== 'changed' ? null : (
+                      <span className="mrfw-note">{t('worktree.pathReused')}</span>
+                    )}
+                    {cleanable || root.state !== 'missing' ? null : (
                       <IconButton
                         pending={state.busy}
-                        onClick={() => { setMenuFor(current => (current === key ? undefined : key)) }}
-                        icon={<IconEllipsis />}
-                        label={t('panel.more')}
+                        onClick={() => { void reRegister(root) }}
+                        icon={<IconRefresh />}
+                        label={t('panel.reRegister')}
                       />
                     )}
-                  />
+                    {root.state === 'redirected' ? (
+                      <span className="mrfw-note">{t('panel.redirectedHint')}</span>
+                    ) : null}
+                    {cleanable || root.skillsEnabled === undefined ? null : (
+                      <IconButton
+                        pending={state.busy}
+                        pressed={root.skillsEnabled}
+                        onClick={() => { void mutate('setSkillsEnabled', { entry: entryOf(root), skillsEnabled: !root.skillsEnabled }) }}
+                        icon={<SkillsIcon enabled={root.skillsEnabled} />}
+                        label={t('panel.skills')}
+                        hint={t(root.skillsEnabled ? 'panel.skillsEnabled' : 'panel.skillsDisabled')}
+                      />
+                    )}
+                    {cleanable ? (
+                      // The row's primary action: a red delete that opens the same
+                      // confirmation the batch entry does — the path-reuse warning
+                      // lives there, not in the row.
+                      <IconButton
+                        variant="danger"
+                        pending={state.busy}
+                        onClick={() => { openCleanup([root.id]) }}
+                        icon={<IconTrash />}
+                        label={t('worktree.cleanup')}
+                      />
+                    ) : (
+                      <IconButton
+                        pending={state.busy}
+                        onClick={() => { void reveal(root) }}
+                        icon={<IconFolderOpen />}
+                        label={t('panel.reveal')}
+                      />
+                    )}
+                    <Menu
+                      open={menuFor === key}
+                      onClose={() => { setMenuFor(undefined) }}
+                      items={[
+                        { id: 'rename', label: t('panel.rename'), icon: <IconEdit /> },
+                        { id: 'alias-id', label: t('panel.aliasIdEdit'), disabled: state.busy },
+                        { id: 'access:inherit', label: t('panel.accessInherit'), icon: IconAccessInherit === undefined ? undefined : <IconAccessInherit />, disabled: state.busy || root.access === 'inherit' },
+                        { id: 'access:read-only', label: t('panel.accessReadOnly'), icon: IconAccessReadOnly === undefined ? undefined : <IconAccessReadOnly />, disabled: state.busy || root.access === 'read-only' },
+                        { id: 'access:read-write', label: t('panel.accessReadWrite'), icon: IconAccessReadWrite === undefined ? undefined : <IconAccessReadWrite />, disabled: state.busy || root.access === 'read-write' },
+                        ...(root.worktree?.cleanupEligible === true
+                          ? [{ id: 'worktree-cleanup', label: t('worktree.cleanup'), icon: <IconTrash />, danger: true, disabled: state.busy }]
+                          : []),
+                        { id: 'remove', label: t('panel.remove'), icon: <IconTrash />, danger: true, disabled: state.busy },
+                      ]}
+                      onSelect={(id) => {
+                        setMenuFor(undefined)
+                        if (id === 'alias-id') {
+                          setAliasField('aliasId')
+                          setAliasFor(key)
+                          setAliasDraft(root.aliasId ?? '')
+                        }
+                        if (id === 'rename') {
+                          setAliasField('alias')
+                          setAliasFor(key)
+                          setAliasDraft(root.alias ?? '')
+                        }
+                        if (id.startsWith('access:')) {
+                          const access = id.slice('access:'.length) as RootAccess
+                          // Widening what the agent may modify — under ANY session
+                          // mode — asks first, through the confirmation layered
+                          // over this dialog, not the browser's window.confirm.
+                          // Only one confirmation may own the screen: opening
+                          // the upgrade layer drops an open cleanup confirmation.
+                          if (widensAccess(root.access, access)) { closeCleanup(); setUpgradeFor({ root, access }); return }
+                          void mutate('setAccess', { entry: entryOf(root), access })
+                        }
+                        if (id === 'worktree-cleanup') openCleanup([root.id])
+                        if (id === 'remove') void mutate('remove', { entry: entryOf(root) })
+                      }}
+                      portal
+                      align="end"
+                      closeOnPointerLeave
+                      anchor={(
+                        <IconButton
+                          pending={state.busy}
+                          onClick={() => { setMenuFor(current => (current === key ? undefined : key)) }}
+                          icon={<IconEllipsis />}
+                          label={t('panel.more')}
+                        />
+                      )}
+                    />
+                  </>}
+                >
                   {aliasFor === key ? (
                     <span className="mrfw-aliasEditor">
                       <input
@@ -989,10 +1043,116 @@ export function WorkspaceFoldersDialog(props: WorkspaceFoldersActionProps & { on
                       <Action onClick={() => { setAliasFor(undefined) }}>{t('panel.aliasCancel')}</Action>
                     </span>
                   ) : null}
-                </div>
+                </WorkspaceRow>
               })}
             </div>
           </section>
+
+          {props.remotes === undefined || (remoteState.view !== undefined && (remoteState.view.status.state === 'disabled' || remoteState.view.custodyMode !== 'personal')) ? null : (
+            <section className="mrfw-section">
+              <div className="mrfw-sectionTitleRow mrfw-sectionTitleRowAction">
+                <span className="mrfw-sectionTitle">{t('panel.remoteList')}</span>
+                <div className="mrfw-sectionAction mrfw-sshAddRow">
+                  <Action disabled={remoteState.view === undefined} onClick={() => setSshDialog('connections')}>
+                    {t('panel.remoteManage')}
+                  </Action>
+                  {props.ssh !== undefined && remoteState.view?.custodyMode === 'personal' && remoteState.view.status.state === 'ready' ? (
+                    <Action onClick={() => { setSshBindingEdit(undefined); setSshBindingsOpen(true) }}>{t('panel.remoteBindings')}</Action>
+                  ) : null}
+                </div>
+              </div>
+              <PanelErrorToast error={remoteState.error} t={t} />
+              {remoteState.view?.custodyMode === 'personal' && remoteState.view.endpoints.some(endpoint => endpoint.state !== 'registered') ? (
+                <p className="mrfw-note">{t('panel.remoteRegisterGuide')}</p>
+              ) : null}
+              {remoteState.view === undefined
+                ? (remoteState.error === undefined ? <p className="mrfw-note">{t('panel.loading')}</p> : null)
+                : remoteState.view.status.state !== 'ready' ? (
+                  <p className="mrfw-note">
+                    {t('panel.remoteUnavailable', { reason: remoteStatusText(remoteState.view.status, t) })}
+                  </p>
+                ) : remoteState.view.endpoints.length === 0 ? (
+                  <p className="mrfw-note">{t('panel.remoteEmpty')}</p>
+                ) : remoteState.view.endpoints.map(endpoint => {
+                  const key = `${endpoint.environmentId}/${endpoint.rootId}`
+                  const copyKey = `remote:${key}`
+                  const capabilities = remoteCapabilityList(endpoint.capabilities, t)
+                  const folderName = endpoint.path.slice(endpoint.path.lastIndexOf('/') + 1) || endpoint.path
+                  const IconAccess = endpoint.capabilities.write || endpoint.capabilities.exec || endpoint.capabilities.receive
+                    ? IconAccessReadWrite : endpoint.capabilities.read || endpoint.capabilities.send ? IconAccessReadOnly : undefined
+                  // The panel row shows where the workspace lives, not just
+                  // its POSIX path: personal targets carry the resolved port,
+                  // deployment manifests have no port to show.
+                  const location = sshLocation(endpoint.target, endpoint.path)
+                  return <WorkspaceRow
+                    key={key}
+                    t={t}
+                    name={<span className="mrfw-rootNameText">{folderName}</span>}
+                    badges={<>
+                      <span className="mrfw-cwdTag" title={endpoint.displayName ?? endpoint.environmentId}>{endpoint.displayName ?? endpoint.environmentId}</span>
+                      <span className="mrfw-accessBadge" title={t(remoteStateKey(endpoint.state))}>
+                        {IconAccess === undefined ? null : <IconAccess size={14} />}
+                        {capabilities}
+                      </span>
+                    </>}
+                    path={location}
+                    copied={copiedId === copyKey}
+                    onCopy={() => { void copyPath(copyKey, location) }}
+                    details={remoteOp?.key === copyKey ? (
+                      <StatusLine state="ongoing">
+                        {t(remoteOp.action === 'register' ? 'panel.remoteRegistering' : 'panel.remoteRemoving')}
+                      </StatusLine>
+                    ) : undefined}
+                    trailing={<RemoteRootMenu
+                      key={sessionId + '/' + endpoint.path}
+                      endpoint={endpoint}
+                      ssh={remoteState.view?.custodyMode === 'personal' ? props.ssh : undefined}
+                      sessionId={sessionId}
+                      roots={state.view}
+                      t={t}
+                      pending={state.busy}
+                      open={menuFor === copyKey}
+                      onClose={() => setMenuFor(current => current === copyKey ? undefined : current)}
+                      onRegistration={action => {
+                        setMenuFor(undefined)
+                        if (!state.busy) void mutateRemote(action, endpoint)
+                      }}
+                      onChanged={refreshRemoteSection}
+                      onEditBinding={remoteState.view?.status.state === 'ready' ? () => {
+                        setMenuFor(undefined)
+                        setSshBindingEdit({ environmentId: endpoint.environmentId, rootId: endpoint.rootId })
+                        setSshBindingsOpen(true)
+                      } : undefined}
+                      anchor={<IconButton pending={state.busy}
+                        loading={remoteOp?.key === copyKey}
+                        onClick={() => setMenuFor(current => current === copyKey ? undefined : copyKey)}
+                        icon={<IconEllipsis />} label={t('panel.more')} />}
+                    />}
+                  />
+                })}
+            </section>
+          )}
+          {/* The dialog outlives the section's own render gate: a remote
+              switch-off must not unmount it mid-form and lose the operator's
+              drafts — `canManage` inside degrades to an unavailable note. */}
+          {sshDialog === undefined ? null : (
+            <SshManagementDialog
+              initialTab={sshDialog}
+              ssh={props.ssh}
+              sessionId={requestBase()?.sessionId}
+              custodyMode={remoteState.view?.custodyMode}
+              status={remoteState.view?.status}
+              onClose={() => { setSshDialog(undefined) }}
+              onChanged={refreshRemoteSection}
+              t={t}
+            />
+          )}
+          {sshBindingsOpen && props.ssh !== undefined && sessionId !== undefined
+            && remoteState.view?.custodyMode === 'personal' && remoteState.view.status.state === 'ready' ? (
+              <SshWorkspaceBindingsDialog key={sessionId} ssh={props.ssh} sessionId={sessionId} remotes={props.remotes} roots={state.view}
+                initialEdit={sshBindingEdit}
+                onClose={() => { setSshBindingsOpen(false); setSshBindingEdit(undefined) }} onChanged={refreshRemoteSection} t={t} />
+            ) : null}
             </>
           )}
 
@@ -1002,95 +1162,71 @@ export function WorkspaceFoldersDialog(props: WorkspaceFoldersActionProps & { on
                 above the controls, and both lines sit below the sheet's
                 divider (the footer's top border). */}
             {atLimit ? <p className="mrfw-note mrfw-actionsNote">{t('panel.limitReached')}</p> : null}
-            {state.noSession || props.pickDirectory === undefined ? null : (
-              <IconButton
-                variant="outline"
-                pending={state.busy}
-                disabled={atLimit}
+            {/* With the remote feature ON, `+` carries a hover-open dropdown —
+                local addition and the remote guided flow — so the trigger is
+                an opener, not the action itself. With it OFF, `+` IS the
+                action: a click runs the whole local-add flow (picker, then the
+                trust dialog). The wrap stretches so the worktree satellite
+                pins right, but the hover-open zone is the trigger alone: the
+                wrap's dead space neither opens the menu nor sits outside the
+                close region the Menu watches. */}
+            {state.noSession || (props.pickDirectory === undefined && !remoteAddPossible) ? null : remoteFeatureOn ? (
+              <span className="mrfw-addWrap">
+                <Menu
+                  open={addMenuOpen}
+                  onClose={() => setAddMenuOpen(false)}
+                  portal
+                  side="top"
+                  align="start"
+                  closeOnPointerLeave
+                  className="mrfw-addMenu"
+                  items={[
+                    {
+                      id: 'local',
+                      label: t('panel.addLocal'),
+                      icon: <IconFolderOpen />,
+                      disabled: state.busy || atLimit || props.pickDirectory === undefined,
+                    },
+                    {
+                      id: 'remote',
+                      label: t('panel.addRemote'),
+                      icon: <IconLink />,
+                      disabled: state.busy || !remoteAddPossible,
+                    },
+                  ]}
+                  onSelect={id => {
+                    setAddMenuOpen(false)
+                    if (id === 'local') void addViaPicker()
+                    else if (id === 'remote') setRemoteWizard(true)
+                  }}
+                  anchor={(
+                    <button
+                      type="button"
+                      className="mrfw-btn mrfw-btnOutline mrfw-addBtn"
+                      aria-label={t('panel.add')}
+                      aria-haspopup="menu"
+                      aria-expanded={addMenuOpen}
+                      aria-busy={state.busy || undefined}
+                      onPointerEnter={() => { if (!state.busy) setAddMenuOpen(true) }}
+                      onClick={() => { if (!state.busy) setAddMenuOpen(open => !open) }}
+                    >
+                      <IconPlus />
+                    </button>
+                  )}
+                />
+              </span>
+            ) : (
+              <button
+                type="button"
+                className="mrfw-btn mrfw-btnOutline mrfw-addBtn"
+                aria-label={atLimit ? t('panel.limitReached') : t('panel.add')}
+                aria-busy={state.busy || undefined}
+                disabled={state.busy || atLimit || props.pickDirectory === undefined}
                 onClick={() => { void addViaPicker() }}
-                icon={<IconPlus />}
-                label={atLimit ? t('panel.limitReached') : t('panel.add')}
-              />
+              >
+                <IconPlus />
+              </button>
             )}
-            {state.noSession ? null : (
-              <>
-            <input
-              className="mrfw-input mrfw-manualPath"
-              value={manualPath}
-              placeholder={t('panel.addManual')}
-              disabled={atLimit}
-              onChange={event => { setManualPath(event.target.value) }}
-              onKeyDown={event => { if (event.key === 'Enter') void addManualPath() }}
-            />
-            {/* The access picker is the host's own anchored menu — the same
-                dropdown kit the root switcher and the row menus use — not a
-                native select. Only an explicit selection marks the level
-                chosen, so the displayed default still travels in no request
-                (accessChosen keeps its meaning). Opens upward: the row sits
-                at the dialog's bottom edge. */}
-            <Menu
-              open={accessMenuOpen}
-              onClose={() => { setAccessMenuOpen(false) }}
-              className="mrfw-accessSelect"
-              items={[
-                {
-                  id: 'inherit',
-                  label: t('access.inherit'),
-                  icon: IconAccessInherit === undefined ? undefined : <IconAccessInherit />,
-                },
-                {
-                  id: 'read-write',
-                  label: t('access.readWrite'),
-                  icon: IconAccessReadWrite === undefined ? undefined : <IconAccessReadWrite />,
-                },
-                {
-                  id: 'read-only',
-                  label: t('access.readOnly'),
-                  icon: IconAccessReadOnly === undefined ? undefined : <IconAccessReadOnly />,
-                },
-              ]}
-              selectedId={addAccess}
-              onSelect={(id) => {
-                setAccessMenuOpen(false)
-                if (id === 'inherit' || id === 'read-write' || id === 'read-only') {
-                  setAccessChosen(true)
-                  setAddAccess(id)
-                }
-              }}
-              portal
-              side="top"
-              align="end"
-              closeOnPointerLeave
-              anchor={(
-                <button
-                  type="button"
-                  className="mrfw-btn mrfw-btnOutline mrfw-accessTrigger"
-                  title={t('panel.accessLabel')}
-                  aria-label={t('panel.accessLabel')}
-                  aria-haspopup="menu"
-                  aria-expanded={accessMenuOpen}
-                  disabled={atLimit}
-                  aria-disabled={state.busy || atLimit || undefined}
-                  aria-busy={state.busy || undefined}
-                  onClick={() => { if (!state.busy) setAccessMenuOpen(open => !open) }}
-                >
-                  {IconAccessTrigger === undefined ? null : <IconAccessTrigger />}
-                  {t(accessKey(addAccess))}
-                  {accessMenuOpen ? <IconChevronUp size={14} /> : <IconChevronDown size={14} />}
-                </button>
-              )}
-            />
-            <Action
-              onClick={() => { void addManualPath() }}
-              pending={state.busy}
-              disabled={atLimit || manualPath.trim() === ''}
-              variant="primary"
-            >
-              {t('panel.addConfirm')}
-            </Action>
-              </>
-            )}
-            <Action onClick={() => { void refresh() }} pending={state.busy} variant="outline">{t('panel.retry')}</Action>
             {props.worktrees !== undefined && !state.noSession
               && (props.worktreePromptEnabled === undefined || props.worktreePromptEnabled())
               ? (
@@ -1108,7 +1244,36 @@ export function WorkspaceFoldersDialog(props: WorkspaceFoldersActionProps & { on
           </div>
         </div>
       </div>
-    </div>
+    </div>,
+    document.body,
+    )}
+    {/* The picked path's trust step: the grant is named here together with
+        its access level, so only an explicit selection travels in the add. */}
+    {addCandidate === undefined ? null : (
+      <AddRootConfirm
+        path={addCandidate}
+        pending={state.busy}
+        t={t}
+        onCancel={() => setAddCandidate(undefined)}
+        onConfirm={access => {
+          const path = addCandidate
+          void mutate('add', { path, ...(access === undefined ? {} : { access }) })
+            .then(ok => { if (ok) setAddCandidate(undefined) })
+        }}
+      />
+    )}
+    {/* The add-remote guided flow: environment → binding → registration. */}
+    {remoteWizard ? (
+      <RemoteWizard
+        ssh={props.ssh}
+        remotes={props.remotes}
+        sessionId={sessionId}
+        roots={state.view}
+        onClose={() => setRemoteWizard(false)}
+        onChanged={refreshRemoteSection}
+        t={t}
+      />
+    ) : null}
     {/* A widening access change asks first: a host-modal confirmation layered
         over this dialog — cancel or a mask click dismisses, the red button
         commits the setAccess mutation. Narrowing changes skip it entirely. */}
@@ -1171,12 +1336,7 @@ export function WorkspaceFoldersDialog(props: WorkspaceFoldersActionProps & { on
           {t(cleanupFor.length === 1 ? 'worktree.pathReuse' : 'worktree.pathReuseMany')}
         </p>
       )}
-      {cleanupError === undefined ? null : (
-        <p role="alert" className="mrfw-alert">
-          {t(errorKeyOf(cleanupError.code))}
-          {(cleanupError.code === 'unavailable' || cleanupError.code === 'panel/internal') ? ` (${cleanupError.message})` : ''}
-        </p>
-      )}
+      <PanelErrorToast error={cleanupError} t={t} />
     </Modal>
     </>
   )

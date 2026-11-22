@@ -56,6 +56,10 @@ minimumReleaseAgeExclude:
   - '@deepseek-ai/dsh-util-values@0.2.2-rc.5'
   - '@deepseek-ai/dsh-agent-loop-testkit@0.2.2-rc.5'
   - '@deepseek-ai/dsh-tool-testkit@0.2.2-rc.5'
+  - '@deepseek-ai/dsh-fs-ssh@0.2.2-rc.5'
+  - '@deepseek-ai/dsh-sandbox-ssh@0.2.2-rc.5'
+  - '@deepseek-ai/dsh-ssh@0.2.2-rc.5'
+  - '@deepseek-ai/dsh-subprocess-ssh@0.2.2-rc.5'
   - '@deepseek-ai/schemastery@3.18.2 || 3.18.5 || 3.19.0'
 
   # Exact transitive DSH release; pnpm also verifies these before running scripts.

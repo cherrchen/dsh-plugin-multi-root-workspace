@@ -29,6 +29,7 @@
  * @module @dsh-electron/dsh-plugin-multi-root-workspace/command
  */
 
+import { sshTarget } from './remote/ssh-location.ts'
 import { AuthorityRpcError } from './authority/protocol.ts'
 import { statSync } from 'node:fs'
 import { isAbsolute } from 'node:path'
@@ -39,6 +40,21 @@ import { connectionRpcFor } from './compat/connection-rpc.ts'
 import { searchAdditionalRoot } from './files-search.ts'
 import type { CommandInvocation, CommandResult } from '@deepseek-ai/dsh-commands'
 import { effectiveRootAccess } from './contract.ts'
+import { RemoteAdmissionError } from './remote/contract.ts'
+import { ManifestError, type RemoteEnvironment } from './remote/manifest.ts'
+import { CredentialError } from './remote/personal/credentials.ts'
+import { loadPersonalConfig, type PersonalEnvironment } from './remote/personal/config.ts'
+import { RemoteOperationError } from './remote/personal/operations.ts'
+import {
+  parseRemoteRequest,
+  REMOTE_ENDPOINTS,
+  type RemoteCapabilitiesView,
+  type RemoteEndpointView,
+  type RemoteTransferView,
+  type RemotesView,
+} from './remote/panel-contract.ts'
+import { parseSshCall, parseSshSettingsCall, SSH_SETTINGS_CHANNEL, type SshSettingsView, SSH_ENDPOINTS, type SshEndpoint } from './remote/personal-contract.ts'
+import { handlePersonalEndpoint } from './remote/personal-endpoints.ts'
 import type { SandboxMode } from '@deepseek-ai/dsh-sandbox'
 import type {} from '@deepseek-ai/dsh-sandbox-policy'
 import type { SessionId } from '@deepseek-ai/dsh-session'
@@ -71,6 +87,7 @@ import {
   availableRoots,
   canonicalRoot,
   entryRootRef,
+  primaryKey,
   RootValidationError,
   resolveRootRef,
   type RootAccess,
@@ -237,9 +254,12 @@ export function apply(ctx: Context, config: CommandConfig = {}): void {
       ctx.logger.warn('multi-root: connection resolved without the service; the panel channel is not mounted')
       return
     }
-    const dispose = connectionRpcFor(connectionCtx, connection).handle(PANEL_CHANNEL, async (endpoint, payload, signal) =>
+    const rpc = connectionRpcFor(connectionCtx, connection)
+    const disposePanel = rpc.handle(PANEL_CHANNEL, async (endpoint, payload, signal) =>
       await dispatchPanelRequest(ctx, endpoint, payload, signal))
-    return () => { void dispose() }
+    const disposeSettings = rpc.handle(SSH_SETTINGS_CHANNEL, async (endpoint, payload) =>
+      await dispatchPanelRequest(ctx, endpoint, payload, undefined, true))
+    return () => { void disposeSettings(); void disposePanel() }
   })
 }
 
@@ -690,6 +710,51 @@ function primaryStateOf(primaryRoot: string): 'present' | 'missing' | 'inaccessi
 }
 
 /**
+ * The effective capabilities of one deployment entry: declared actions and
+ * pairings, narrowed by the session mode and the two tools' caps. A withheld,
+ * revoked, or unregistered endpoint can do nothing at all.
+ */
+function remoteCapabilitiesOf(
+  state: RemoteEndpointView['state'],
+  actions: readonly ('read' | 'write' | 'exec')[],
+  transfers: readonly RemoteTransferView[],
+  mode: SandboxMode,
+  cappedTools: readonly string[],
+): RemoteCapabilitiesView {
+  const usable = state === 'registered'
+  const readOnly = mode === 'read-only'
+  const imports = transfers.filter(transfer => transfer.direction === 'import')
+  const exports = transfers.filter(transfer => transfer.direction === 'export')
+  return {
+    read: usable && actions.includes('read'),
+    write: usable && !readOnly && actions.includes('write'),
+    exec: usable && !readOnly && actions.includes('exec') && !cappedTools.includes('remote_bash'),
+    // Receiving always writes the remote root; sending reads it. A send whose
+    // only peers are local stays legal in a read-only session (the local
+    // destination is what the local sink will re-authorize).
+    receive: usable && !readOnly && actions.includes('write') && imports.length > 0 && !cappedTools.includes('remote_copy'),
+    send: usable && actions.includes('read') && exports.length > 0
+      && (!readOnly || exports.every(transfer => transfer.environmentId === 'local')),
+  }
+}
+
+/**
+ * The row's connection target: a personal environment knows its exact
+ * `user@host:port`; a deployment manifest carries an account and an SSH host
+ * alias but no port, so it stays `user@host`.
+ * @param environment - the manifest environment the binding names.
+ * @param personal - the personal environment, when the custody mode is personal.
+ * @returns the display target prefix for the binding path.
+ */
+export function remoteTargetOf(
+  environment: Pick<RemoteEnvironment, 'account' | 'connection'>,
+  personal?: Pick<PersonalEnvironment, 'endpoint'> | undefined,
+): string {
+  if (personal !== undefined) return sshTarget(personal.endpoint.user, personal.endpoint.hostname, personal.endpoint.port)
+  return sshTarget(environment.account, environment.connection.host)
+}
+
+/**
  * Explicit worktree cleanup: each id must be a tracked B mapping, and the
  * Registry owner re-verifies `rootId + path + addedAt` before anything is
  * deleted. The answer carries the refreshed roots view, so the panel never
@@ -702,6 +767,72 @@ async function cleanupWorktreeRoots(ctx: Context, sessionId: string, rootIds: re
   const primaryRoot = resolvePanelPrimaryRoot(ctx, sessionId)
   const roots = await rootsViewOf(ctx, ctx.multiRootRegistry, primaryRoot, { endpoint: 'list', sessionId }, false)
   return { removed: result.removed, skipped: result.skipped, roots }
+}
+
+/**
+ * Build the panel's remote section without creating a connection: the live
+ * control-plane state, the deployment entries for this session's primary root,
+ * and each entry's registered state. Only `addRemote` connects.
+ */
+async function remotesViewOf(
+  ctx: Context,
+  registry: MultiRootRegistry,
+  primaryRoot: string,
+  sessionId: string,
+): Promise<RemotesView> {
+  const session = ctx.get('sessions')?.get(sessionId as SessionId)
+  if (session === undefined) throw new RootValidationError('session-not-found', 'the panel session closed during the request')
+  const mode = ctx.sandboxPolicy.resolve({ session }).mode
+  const status = registry.remoteStatus
+  const base = { primaryRoot: canonicalRoot(primaryRoot), mode, custodyMode: registry.remoteMode, status }
+  const manifest = registry.remoteManifest
+  if (manifest === undefined || status.state !== 'ready') {
+    return { ...base, endpoints: [] }
+  }
+  const key = primaryKey(primaryRoot)
+  const snapshot = await registry.remoteList(primaryRoot).catch((error: unknown) => {
+    // Keep a stable refusal code the panel already localizes; wrap only an
+    // unexpected failure.
+    if (error instanceof RemoteAdmissionError) throw error
+    throw new RemoteAdmissionError('remote-unavailable', error instanceof Error ? error.message : String(error))
+  })
+  // Personal environments keep the resolved user@host:port in their own
+  // config; the converted manifest only carries the managed alias. Read it
+  // after remoteList refreshed the file, and fall back to the manifest's
+  // account@host if the environment moved away.
+  const personalPath = registry.remoteMode === 'personal' ? registry.remotePersonalPath : undefined
+  let personal: ReturnType<typeof loadPersonalConfig> | undefined
+  if (personalPath !== undefined) {
+    try { personal = loadPersonalConfig(personalPath) } catch { personal = undefined }
+  }
+  const capped = ctx.get('multiRootScope')?.toolCaps() ?? []
+  const endpoints = manifest.bindings
+    .filter(binding => primaryKey(binding.primary) === key)
+    .map((binding): RemoteEndpointView => {
+      const environment = manifest.environments.find(entry => entry.environmentId === binding.environmentId)!
+      const personalEnvironment = personal?.environments.find(entry => entry.environmentId === binding.environmentId)
+      const grant = snapshot.grants.find(entry => entry.environmentId === binding.environmentId && entry.rootId === binding.rootId)
+      const state = grant?.state ?? 'unregistered'
+      const transfers: RemoteTransferView[] = (binding.transfers ?? []).map(transfer => ({
+        direction: transfer.direction, environmentId: transfer.peer.environmentId, rootId: transfer.peer.rootId,
+      }))
+      return {
+        environmentId: binding.environmentId,
+        rootId: binding.rootId,
+        path: binding.path,
+        platform: environment.platform,
+        ...(environment.displayName === undefined ? {} : { displayName: environment.displayName }),
+        target: remoteTargetOf(environment, personalEnvironment),
+        state,
+        actions: [...new Set(binding.actions)],
+        transfers,
+        capabilities: remoteCapabilitiesOf(state, binding.actions, transfers, mode, capped),
+        ...(state === 'unregistered' ? { reason: 'remote-unregistered' }
+          : state === 'withheld' ? { reason: 'remote-withheld' }
+          : state === 'revoked' ? { reason: 'remote-revoked' } : {}),
+      }
+    })
+  return { ...base, endpoints }
 }
 
 /**
@@ -718,9 +849,27 @@ async function dispatchPanelRequest(
   endpoint: string,
   payload: unknown,
   signal?: AbortSignal,
+  sshSettings = false,
 ): Promise<ConnectionRpcResult<unknown>> {
   let panelSessionId: string | undefined
   try {
+    if (sshSettings) {
+      const registry = ctx.multiRootRegistry
+      if (endpoint === 'status' && payload !== null && typeof payload === 'object' && !Array.isArray(payload) && Object.keys(payload).length === 0) {
+        await registry.refreshRemotePersonal()
+        const value: SshSettingsView = {
+          custodyMode: registry.remoteMode,
+          status: registry.remoteStatus,
+          // The legacy wire field remains for older clients. Personal
+          // connections are returned by sshState.
+          connections: [],
+        }
+        return { ok: true, value }
+      }
+      const call = parseSshSettingsCall(endpoint, payload)
+      if (!call.ok) return { ok: false, error: { code: 'panel/bad-request', message: call.message, details: {} } }
+      return { ok: true, value: await handlePersonalEndpoint(ctx, registry, undefined, call.value) }
+    }
     // Worktree endpoints are a separate contract with their own strict schema;
     // they never pass through the roots panel schema (ADR-0039 §7).
     if ((WORKTREE_ENDPOINTS as readonly string[]).includes(endpoint)) {
@@ -729,6 +878,7 @@ async function dispatchPanelRequest(
         return { ok: false, error: { code: 'panel/bad-request', message: parsedWorktree.message, details: {} } }
       }
       const call = parsedWorktree.value
+      panelSessionId = call.sessionId
       const worktrees = ctx.get('multiRootWorktrees')
       if (worktrees === undefined) {
         throw new WorktreeError('worktree/not-available', 'worktree root suggestions are not mounted in this composition')
@@ -771,6 +921,36 @@ async function dispatchPanelRequest(
         : endpoint === 'skillsPreview' ? await skills.previewSession(request.sessionId, request.name ?? '', signal)
         : await skills.changes(request.sessionId, request.generation ?? -1, signal)
       return { ok: true, value }
+    }
+    if ((SSH_ENDPOINTS as readonly string[]).includes(endpoint)) {
+      const parsedSsh = parseSshCall(endpoint as SshEndpoint, payload)
+      if (!parsedSsh.ok) {
+        return { ok: false, error: { code: 'panel/bad-request', message: parsedSsh.message, details: {} } }
+      }
+      // Record the session like the roots branch does, so a resume-race
+      // `session-not-found` can reclassify to `session-not-live` below.
+      panelSessionId = parsedSsh.value.sessionId
+      const primaryRoot = resolvePanelPrimaryRoot(ctx, parsedSsh.value.sessionId)
+      return { ok: true, value: await handlePersonalEndpoint(ctx, ctx.multiRootRegistry, primaryRoot, parsedSsh.value) }
+    }
+    if ((REMOTE_ENDPOINTS as readonly string[]).includes(endpoint)) {
+      const parsedRemote = parseRemoteRequest(payload)
+      if (!parsedRemote.ok) {
+        return { ok: false, error: { code: 'panel/bad-request', message: parsedRemote.message, details: {} } }
+      }
+      const registry = ctx.multiRootRegistry
+      const { sessionId, environmentId, rootId } = parsedRemote.value
+      panelSessionId = sessionId
+      const primaryRoot = resolvePanelPrimaryRoot(ctx, sessionId)
+      if (endpoint !== 'remotes') {
+        if (environmentId === undefined || rootId === undefined) {
+          throw new RootValidationError('invalid-ref', 'environmentId and rootId are required')
+        }
+        const ref = { environmentId, rootId }
+        if (endpoint === 'addRemote') await registry.addRemote(primaryRoot, ref)
+        else await registry.removeRemote(primaryRoot, ref)
+      }
+      return { ok: true, value: await remotesViewOf(ctx, registry, primaryRoot, sessionId) }
     }
     const parsed = parsePanelCall(endpoint, payload)
     if (!parsed.ok) {
@@ -861,7 +1041,11 @@ async function dispatchPanelRequest(
         : error.code
       return { ok: false, error: { code, message: error.message, details: {} } }
     }
-    if (error instanceof AuthorityRpcError || error instanceof WorktreeError) {
+    // Every coded domain error keeps its stable code: the panel localizes it
+    // and `submit` branches on it (a `personal-config-conflict` reloads the
+    // state). Laundering any of these into `panel/internal` loses both.
+    if (error instanceof AuthorityRpcError || error instanceof WorktreeError || error instanceof RemoteAdmissionError
+      || error instanceof ManifestError || error instanceof CredentialError || error instanceof RemoteOperationError) {
       return { ok: false, error: { code: error.code, message: error.message, details: {} } }
     }
     const workspaceFile = workspaceFileFailureOf(error)

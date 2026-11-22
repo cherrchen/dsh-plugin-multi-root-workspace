@@ -45,6 +45,7 @@ import {
   resolveScratchHome,
 } from './lib/dsh-runtime.mjs'
 import { bootProfile } from './lib/profile-boot.mjs'
+import { chatCompletionFrames, messagesFrames } from './lib/scripted-model-frames.mjs'
 import { requireKernelRunner } from '../tests/support/kernel-runner.ts'
 
 const DOMAIN = 'multi_root_workspace'
@@ -152,76 +153,6 @@ function rolesCarrying(request, marker) {
 /** Run one git command against a seeded repository and return its stdout. */
 function git(path, ...args) {
   return execFileSync('git', ['-C', path, ...args], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] })
-}
-
-/**
- * One scripted turn in the chat-completions wire dialect.
- *
- * Deltas carry the whole tool call in one chunk; the smoke is scripting a model,
- * not testing the harness's stream reassembly.
- * @param call - the tool call to emit, or `undefined` to close the turn.
- * @param text - the assistant text used when closing the turn.
- * @param id - the tool call id.
- * @returns SSE frames, in order.
- */
-function chatCompletionFrames(call, text, id) {
-  const frame = payload => `data: ${JSON.stringify(payload)}\n\n`
-  return [
-    frame({ choices: [{ delta: { role: 'assistant', content: null } }] }),
-    call === undefined
-      ? frame({ choices: [{ delta: { content: text } }] })
-      : frame({
-        choices: [{
-          delta: {
-            tool_calls: [{
-              index: 0,
-              id,
-              type: 'function',
-              function: { name: call.name, arguments: JSON.stringify(call.arguments) },
-            }],
-          },
-        }],
-      }),
-    frame({
-      choices: [{ delta: {}, finish_reason: call === undefined ? 'stop' : 'tool_calls' }],
-      usage: { prompt_tokens: 5, completion_tokens: 2 },
-    }),
-    'data: [DONE]\n\n',
-  ]
-}
-
-/**
- * The same scripted turn in the block-oriented Messages wire dialect.
- *
- * This protocol has a stricter contract than chat completions, and all of it is
- * load-bearing here: every event names its `type`, the named SSE event must
- * agree with it, each content block is explicitly opened and closed, and the
- * stream must settle with a stop reason before `message_stop` or the harness
- * rejects it as malformed.
- * @param call - the tool call to emit, or `undefined` to close the turn.
- * @param text - the assistant text used when closing the turn.
- * @param id - the tool call id.
- * @returns SSE frames, in order.
- */
-function messagesFrames(call, text, id) {
-  const frame = payload => `event: ${payload.type}\ndata: ${JSON.stringify(payload)}\n\n`
-  const block = call === undefined
-    ? [
-      { type: 'content_block_start', index: 0, content_block: { type: 'text', text: '' } },
-      { type: 'content_block_delta', index: 0, delta: { type: 'text_delta', text } },
-      { type: 'content_block_stop', index: 0 },
-    ]
-    : [
-      { type: 'content_block_start', index: 0, content_block: { type: 'tool_use', id, name: call.name, input: {} } },
-      { type: 'content_block_delta', index: 0, delta: { type: 'input_json_delta', partial_json: JSON.stringify(call.arguments) } },
-      { type: 'content_block_stop', index: 0 },
-    ]
-  return [
-    { type: 'message_start', message: { usage: { input_tokens: 5, output_tokens: 2 } } },
-    ...block,
-    { type: 'message_delta', delta: { stop_reason: call === undefined ? 'end_turn' : 'tool_use' } },
-    { type: 'message_stop' },
-  ].map(frame)
 }
 
 /**
@@ -531,6 +462,19 @@ async function runWebLeg() {
       observed.channelList = listed.status
       observed.channelView = listed.status === 200 ? (await listed.json())?.result : undefined
 
+      // The plugin settings entry uses its own authenticated route and
+      // cannot address a Workspace binding.
+      const sshSettings = (endpoint, payload, authenticate = true) => fetch(new URL(`/multi-root-workspace-ssh-settings/${endpoint}`, base), {
+        method: 'POST',
+        headers: { 'content-type': 'application/json', ...(!authenticate || cookie === undefined ? {} : { cookie }) },
+        body: JSON.stringify({ type: 'client-request', rpcId: `journey-ssh-${endpoint}`, method: endpoint, payload }),
+      })
+      observed.sshSettingsUnauthenticated = (await sshSettings('status', {}, false)).status
+      const sshStatus = await sshSettings('status', {})
+      observed.sshSettingsStatus = sshStatus.ok ? (await sshStatus.json())?.result?.value?.status?.state : undefined
+      const sshBinding = await sshSettings('sshBindingRemove', { sessionId: 'journey-web' })
+      observed.sshSettingsBindingError = sshBinding.ok ? (await sshBinding.json())?.result?.error?.code : undefined
+
       // ---- worktree A/B over the same real HTTP channel ---------------------
       // The audit's P6 gap: settings switch, prompt confirmation and cleanup
       // must be exercised by the browser composition, not by a captured
@@ -734,6 +678,9 @@ try {
     check.ok(web.channelView?.ok === true, 'web: the channel answers with an ok envelope', JSON.stringify(web.channelView)?.slice(0, 400))
     check.contains(JSON.stringify(web.channelView?.value), jsonText(canonical(additionalRepo)), 'web: the channel view lists the registered additional root', JSON.stringify(web.channelView)?.slice(0, 400))
     check.contains(JSON.stringify(web.channelView?.value), jsonText(canonical(primaryRepo)), 'web: the channel view names the primary root', JSON.stringify(web.channelView)?.slice(0, 400))
+    check.equal(web.sshSettingsUnauthenticated, 401, 'web: SSH settings require an authenticated Connection')
+    check.equal(web.sshSettingsStatus, 'disabled', 'web: SSH settings status is readable without a session and defaults to disabled')
+    check.equal(web.sshSettingsBindingError, 'panel/bad-request', 'web: SSH settings cannot remove a Workspace binding')
     check.equal(web.worktreeDefaultOff, 'worktree/not-enabled', 'web: the experimental worktree feature defaults to off')
     check.equal(web.worktreePromptStatus, 200, 'web: the worktree prompt answers over real HTTP', `status ${String(web.worktreePromptStatus)}`)
     check.equal(web.worktreePromptCount, 2, 'web: the automatic fresh check announces the sibling checkout and the main checkout together')

@@ -13,9 +13,11 @@
 import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { createElement, StrictMode } from 'react'
-import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { PANEL_CHANNEL, type PanelRequest, type RevealedView, type RootView, type RootsView } from '../src/contract.ts'
+import type { RemoteEndpointView, RemotesView } from '../src/remote/panel-contract.ts'
+import type { SshStateView } from '../src/remote/personal-contract.ts'
 import * as client from '../src/client/index.ts'
 import { WorkspaceFoldersAction } from '../src/client/WorkspaceFoldersAction.tsx'
 import { createWorkspaceFoldersDialogController } from '../src/client/workspace-folders-dialog.ts'
@@ -55,8 +57,16 @@ interface Harness {
   setFailure: (failure: { code: string; message: string } | undefined) => void
   /** What the next `reveal` answers (the real host answers a `RevealedView`). */
   setRevealed: (value: unknown) => void
+  /** What the remote section reads (and re-reads after add/remove). */
+  setRemotes: (view: RemotesView) => void
+  /** What `sshState` answers; `sshBindingRemove` rewrites it in place. */
+  setSsh: (view: SshStateView) => void
+  /** Flip the remote-tools switch on the composed config form. */
+  setRemoteEnabled: (enabled: boolean) => void
   /** Make the NEXT channel call hang until `release` is called. */
   holdNextCall: () => void
+  /** Make the next call to ONE endpoint hang until `release` is called. */
+  holdEndpoint: (endpoint: string) => void
   /** Release a call held by `holdNextCall`. */
   release: () => void
 }
@@ -102,6 +112,8 @@ interface MountOptions {
   readonly filesActions?: boolean
   /** The New Session hero options slot exists (0.2.1-alpha.3+). */
   readonly heroOptions?: boolean
+  /** A `multi-root-remote-tools` config form exists, so the panel reads the switch. */
+  readonly remoteForm?: boolean
   /**
    * Make `slots.inject` fire the callback even when the hero slot was not
    * declared. Proves the explicit `spec` guard, not just inject's own
@@ -122,16 +134,39 @@ function mount(options: MountOptions = {}): Harness {
   let catalog: readonly { id: string; mainView?: number }[] | undefined
   let failure: { code: string; message: string } | undefined
   let revealed: unknown = { revealed: '/repos/payments' } satisfies RevealedView
+  let remoteView: RemotesView = { primaryRoot: '/repos/primary', mode: 'workspace-write', status: { state: 'disabled' }, endpoints: [] }
+  // The personal SSH state the menu's unbind flow CAS-writes against. The
+  // matching endpoint rows live in `remoteView`; `sshBindingRemove` drops both
+  // the binding and the row, exactly as the host's list answers afterwards.
+  let sshView: SshStateView = {
+    mode: 'personal', enabled: true, linked: true, revision: 7,
+    environments: [], credentials: [],
+    bindings: [{ environmentId: 'build', rootId: 'app', path: '/srv/root', actions: ['read', 'write', 'exec'] }],
+  }
   let gate: Promise<void> | undefined
   let releaseGate: (() => void) | undefined
+  let holdFor: string | undefined
   const picked: string | null = '/repos/picked'
+  let remoteEnabledFlag = false
+  const remoteListeners = new Set<() => void>()
+  const remoteForm = {
+    getSnapshot: () => ({ status: 'ready', writable: true, revision: 0, value: { enabled: remoteEnabledFlag } }),
+    subscribe: (listener: () => void) => { remoteListeners.add(listener); return () => { remoteListeners.delete(listener) } },
+    mutate: async () => true,
+  }
 
   const connection = {
     rpc: {
       call: async (channel: string, endpoint: string, payload: PanelRequest) => {
         calls.push({ channel, endpoint, payload })
         const listedView = view
-        if (gate !== undefined) {
+        const remoteListed = remoteView
+        if (holdFor === endpoint) {
+          holdFor = undefined
+          const held = gate
+          gate = undefined
+          await held
+        } else if (gate !== undefined && holdFor === undefined) {
           const held = gate
           gate = undefined
           await held
@@ -149,10 +184,47 @@ function mount(options: MountOptions = {}): Harness {
             : [...without.slice(0, at), target, ...without.slice(at)]
           view = { ...view, roots: reordered.map((root, index) => ({ ...root, ordinal: index + 1 })) }
         }
+        if (endpoint === 'addRemote' || endpoint === 'removeRemote') {
+          const state = endpoint === 'addRemote' ? 'registered' as const : 'unregistered' as const
+          remoteView = {
+            ...remoteView,
+            endpoints: remoteView.endpoints.map(entry => (entry.environmentId === payload.environmentId && entry.rootId === payload.rootId
+              ? {
+                  ...entry,
+                  state,
+                  capabilities: state === 'registered'
+                    ? { read: true, write: true, exec: false, receive: true, send: false }
+                    : { read: false, write: false, exec: false, receive: false, send: false },
+                  ...(state === 'registered' ? {} : { reason: 'remote-unregistered' }),
+                }
+              : entry)),
+          }
+          return { ok: true, value: remoteView }
+        }
+        if (endpoint === 'sshState') return { ok: true, value: sshView }
+        if (endpoint === 'sshBindingRemove') {
+          const body = payload as unknown as { revision?: number; environmentId?: string; rootId?: string }
+          sshView = {
+            ...sshView,
+            revision: (body.revision ?? sshView.revision) + 1,
+            bindings: sshView.bindings.filter(binding => !(binding.environmentId === body.environmentId && binding.rootId === body.rootId)),
+          }
+          remoteView = {
+            ...remoteView,
+            endpoints: remoteView.endpoints.filter(entry => !(entry.environmentId === body.environmentId && entry.rootId === body.rootId)),
+          }
+          return { ok: true, value: sshView }
+        }
         // One shape per endpoint, exactly as the host sends them: `reveal`
-        // answers with the revealed path, everything else with the whole view.
-        // Answering a list for every endpoint is what used to hide the mismatch.
-        return { ok: true, value: endpoint === 'reveal' ? revealed : endpoint === 'list' ? listedView : view }
+        // answers with the revealed path, the remote endpoints answer a
+        // remotes view, everything else with the whole roots view. Answering a
+        // list for every endpoint is what used to hide the mismatch.
+        return {
+          ok: true,
+          value: endpoint === 'reveal' ? revealed
+            : endpoint === 'remotes' ? remoteListed
+            : endpoint === 'list' ? listedView : view,
+        }
       },
     },
   }
@@ -163,8 +235,15 @@ function mount(options: MountOptions = {}): Harness {
     },
     // This harness exercises the panel, not the workspace menu; a no-op inject
     // keeps the optional context-menu contribution out of it. The menu has its
-    // own spec (`client-workspace-menu.spec.ts`).
-    inject: () => () => {},
+    // own spec (`client-workspace-menu.spec.ts`). The configForms injection
+    // resolves immediately when the option composes the remote form.
+    inject: (services: readonly string[], callback: (scope: unknown) => unknown) => {
+      if (options.remoteForm === true && services.includes('configForms')) {
+        const out = callback(ctx)
+        return typeof out === 'function' ? out : () => {}
+      }
+      return () => {}
+    },
     locale: {
       register: (ns: string, dicts: Record<string, unknown>) => {
         dictionaries.push({ ns, dicts })
@@ -186,7 +265,7 @@ function mount(options: MountOptions = {}): Harness {
           if (options.permissiveHeroInject === true) callback()
           return () => {}
         }
-        expect(['sidebar.footer.action', 'sidebar.right.tab.files.actions', 'sidebar.right.tab.document.actions', 'shell.overlay', 'conversation.hero.options']).toContain(name)
+        expect(['sidebar.footer.action', 'sidebar.right.tab.files.actions', 'sidebar.right.tab.document.actions', 'shell.overlay', 'conversation.hero.options', 'plugins.bundle.config', 'settings.plugin.item']).toContain(name)
         callback()
         return () => {}
       },
@@ -198,6 +277,9 @@ function mount(options: MountOptions = {}): Harness {
     get: (name: string) => {
       if (name === 'connection') return connection
       if (name === 'uiWorkspace') return { pickDirectory: async () => picked }
+      if (name === 'configForms') return options.remoteForm === true
+        ? { get: (entryId: string) => entryId === 'multi-root-remote-tools' ? remoteForm : undefined }
+        : undefined
       if (name === 'sessions') {
         return {
           list: {
@@ -223,10 +305,20 @@ function mount(options: MountOptions = {}): Harness {
       catalog = undefined
       for (const listener of sessionListeners) listener()
     },
-    setCatalog: rows => { catalog = rows },
+    setCatalog: rows => {
+      catalog = rows
+      for (const listener of sessionListeners) listener()
+    },
     setFailure: next => { failure = next },
     setRevealed: next => { revealed = next },
-    holdNextCall: () => { gate = new Promise<void>(resolve => { releaseGate = resolve }) },
+    setRemotes: next => { remoteView = next },
+    setSsh: next => { sshView = next },
+    setRemoteEnabled: next => {
+      remoteEnabledFlag = next
+      for (const listener of remoteListeners) listener()
+    },
+    holdNextCall: () => { holdFor = undefined; gate = new Promise<void>(resolve => { releaseGate = resolve }) },
+    holdEndpoint: endpoint => { holdFor = endpoint; gate = new Promise<void>(resolve => { releaseGate = resolve }) },
     release: () => { releaseGate?.(); releaseGate = undefined },
   }
 }
@@ -252,6 +344,11 @@ function renderHero(
   const registration = harness.registrations.find(item => item.options.name === 'conversation.hero.options')!
   const panel = createElement(registration.component as never, props)
   return render(strictMode ? createElement(StrictMode, null, panel) : panel)
+}
+
+/** The roots list calls, in order (the remote section reads independently). */
+function rootsListing(harness: Harness): Call[] {
+  return harness.calls.filter(call => call.endpoint === 'list')
 }
 
 beforeEach(() => {
@@ -402,8 +499,13 @@ describe('the New Session hero entry', () => {
     renderHero(harness, { sessionId: 'session-9' })
     fireEvent.click(screen.getByRole('button', { name: `${NS}.action.label` }))
 
-    await waitFor(() => { expect(harness.calls).toHaveLength(1) })
-    expect(harness.calls[0]).toEqual({ channel: PANEL_CHANNEL, endpoint: 'list', payload: { sessionId: 'session-9' } })
+    await waitFor(() => {
+      expect(harness.calls.some(call => call.endpoint === 'list')).toBe(true)
+    })
+    // Every section of the shared dialog targets the composed session too.
+    expect(harness.calls.find(call => call.endpoint === 'list'))
+      .toEqual({ channel: PANEL_CHANNEL, endpoint: 'list', payload: { sessionId: 'session-9' } })
+    expect(harness.calls.find(call => call.endpoint === 'remotes')?.payload).toEqual({ sessionId: 'session-9' })
   })
 
   it('renders an icon and the visible label but no chevron', () => {
@@ -599,7 +701,7 @@ describe('the panel dialog', () => {
     expect(toggle.getAttribute('aria-pressed')).toBe(String(failure))
     expect(document.activeElement).toBe(toggle)
     expect([opacity(toggle), opacity(reveal)]).toEqual(before)
-    expect(screen.queryByRole('alert') !== null).toBe(failure)
+    expect(screen.queryByRole('status') !== null).toBe(failure)
   })
 
   it('accepts list and mutation results after StrictMode replays mount effects', async () => {
@@ -649,11 +751,12 @@ describe('the panel dialog', () => {
     renderPanel(harness)
     fireEvent.click(screen.getByRole('button', { name: /action.label/ }))
     await waitFor(() => { expect(screen.getByText('legacy-16')).toBeTruthy() })
-    expect(screen.queryByRole('alert')).toBeNull()
+    expect(screen.queryByRole('status')).toBeNull()
     expect(screen.getByRole('button', { name: `${NS}.panel.add` })).toHaveProperty('disabled', false)
-    fireEvent.change(screen.getByPlaceholderText(`${NS}.panel.addManual`), { target: { value: '/repos/new' } })
-    fireEvent.click(screen.getByRole('button', { name: `${NS}.panel.addConfirm` }))
-    await waitFor(() => { expect(harness.calls.at(-1)).toMatchObject({ endpoint: 'add', payload: { path: '/repos/new' } }) })
+    fireEvent.click(screen.getByRole('button', { name: `${NS}.panel.add` }))
+    const dialog = await screen.findByRole('dialog', { name: `${NS}.panel.addTrustTitle` })
+    fireEvent.click(within(dialog).getByRole('button', { name: `${NS}.panel.addConfirm` }))
+    await waitFor(() => { expect(harness.calls.at(-1)).toMatchObject({ endpoint: 'add', payload: { path: '/repos/picked' } }) })
   })
 
   it('shows No active session and does not call the host when there is no current session', async () => {
@@ -664,8 +767,9 @@ describe('the panel dialog', () => {
 
     await waitFor(() => { expect(screen.getByText(`${NS}.panel.noSession`)).toBeTruthy() })
     expect(harness.calls).toHaveLength(0)
-    expect(screen.queryByPlaceholderText(`${NS}.panel.addManual`)).toBeNull()
-    expect(screen.getByRole('button', { name: `${NS}.panel.retry` })).toBeTruthy()
+    // The add row sits out entirely: with no session there is nothing it could
+    // name, and the session listener owns the reload once one appears.
+    expect(screen.queryByRole('button', { name: `${NS}.panel.add` })).toBeNull()
   })
 
   it('calls the host after a session appears', async () => {
@@ -676,7 +780,6 @@ describe('the panel dialog', () => {
     await waitFor(() => { expect(screen.getByText(`${NS}.panel.noSession`)).toBeTruthy() })
 
     act(() => { harness.setSession('session-1') })
-    fireEvent.click(screen.getByRole('button', { name: `${NS}.panel.retry` }))
 
     await waitFor(() => { expect(harness.calls.length).toBeGreaterThanOrEqual(1) })
     expect(harness.calls[0]?.payload).toEqual({ sessionId: 'session-1' })
@@ -708,34 +811,34 @@ describe('the panel dialog', () => {
     expect(harness.calls).toHaveLength(0)
   })
 
-  it('follows a main-view change on retry', async () => {
+  it('follows a main-view change on the catalog notification', async () => {
     const harness = mount()
     harness.setCatalog([{ id: 'session-main', mainView: 1 }])
     renderPanel(harness)
     fireEvent.click(screen.getByRole('button', { name: /action.label/ }))
-    await waitFor(() => { expect(harness.calls).toHaveLength(1) })
+    await waitFor(() => { expect(rootsListing(harness)).toHaveLength(1) })
 
-    harness.setCatalog([
-      { id: 'session-main' },
-      { id: 'session-next', mainView: 1 },
-    ])
-    fireEvent.click(screen.getByRole('button', { name: `${NS}.panel.retry` }))
+    act(() => {
+      harness.setCatalog([
+        { id: 'session-main' },
+        { id: 'session-next', mainView: 1 },
+      ])
+    })
 
-    await waitFor(() => { expect(harness.calls.length).toBeGreaterThanOrEqual(2) })
-    expect(harness.calls[1]?.payload).toEqual({ sessionId: 'session-next' })
+    await waitFor(() => { expect(rootsListing(harness)).toHaveLength(2) })
+    expect(rootsListing(harness)[1]?.payload).toEqual({ sessionId: 'session-next' })
   })
 
   it('reads the current session again for each request', async () => {
     const harness = mount()
     renderPanel(harness)
     fireEvent.click(screen.getByRole('button', { name: /action.label/ }))
-    await waitFor(() => { expect(harness.calls).toHaveLength(1) })
+    await waitFor(() => { expect(rootsListing(harness)).toHaveLength(1) })
 
     act(() => { harness.setSession('session-2') })
-    fireEvent.click(screen.getByRole('button', { name: `${NS}.panel.retry` }))
 
-    await waitFor(() => { expect(harness.calls.length).toBeGreaterThanOrEqual(2) })
-    expect(harness.calls[1]?.payload).toEqual({ sessionId: 'session-2' })
+    await waitFor(() => { expect(rootsListing(harness)).toHaveLength(2) })
+    expect(rootsListing(harness)[1]?.payload).toEqual({ sessionId: 'session-2' })
   })
 
   it('shows the upstream workspace title as the primary row name', async () => {
@@ -779,13 +882,20 @@ describe('the panel dialog', () => {
     })
   })
 
-  it('adds through the composed picker, then through the manual path field', async () => {
+  it('adds through the composed picker only after the trust confirmation', async () => {
     const harness = mount()
     renderPanel(harness)
     fireEvent.click(screen.getByRole('button', { name: /action.label/ }))
     await waitFor(() => { expect(screen.getByText('/repos/payments')).toBeTruthy() })
 
     fireEvent.click(screen.getByRole('button', { name: `${NS}.panel.add` }))
+    // The picked path is staged, never submitted on its own: the trust dialog
+    // is the only writer.
+    await screen.findByRole('dialog', { name: `${NS}.panel.addTrustTitle` })
+    expect(harness.calls.some(call => call.endpoint === 'add')).toBe(false)
+
+    const dialog = screen.getByRole('dialog', { name: `${NS}.panel.addTrustTitle` })
+    fireEvent.click(within(dialog).getByRole('button', { name: `${NS}.panel.addConfirm` }))
     await waitFor(() => { expect(harness.calls.some(call => call.endpoint === 'add')).toBe(true) })
     // The access picker is untouched, so no level travels: a chosen level is
     // the only one a request may carry — a displayed default is not a choice.
@@ -793,69 +903,85 @@ describe('the panel dialog', () => {
       sessionId: 'session-1',
       path: '/repos/picked',
     })
-
-    const manual = screen.getByPlaceholderText(`${NS}.panel.addManual`)
-    fireEvent.change(manual, { target: { value: '/repos/typed' } })
-    fireEvent.click(screen.getByRole('button', { name: `${NS}.panel.addConfirm` }))
-    await waitFor(() => { expect(harness.calls.filter(call => call.endpoint === 'add')).toHaveLength(2) })
-    // The confirm button submits the TYPED path. It used to submit whatever the
-    // picker had returned, because both entry points shared one function.
-    expect(harness.calls.filter(call => call.endpoint === 'add')[1]?.payload).toEqual({
-      sessionId: 'session-1',
-      path: '/repos/typed',
-    })
-    expect(screen.getByPlaceholderText(`${NS}.panel.addManual`)).toHaveProperty('value', '')
+    await waitFor(() => { expect(screen.queryByRole('dialog', { name: `${NS}.panel.addTrustTitle` })).toBeNull() })
   })
 
-  it('keeps a rejected manual path in the field', async () => {
-    const harness = mount()
-    harness.setFailure({ code: 'missing', message: 'host prose' })
-    renderPanel(harness)
-    fireEvent.click(screen.getByRole('button', { name: /action.label/ }))
-    await waitFor(() => { expect(screen.getByRole('alert').textContent).toBe(`${NS}.error.missing`) })
-
-    const manual = screen.getByPlaceholderText(`${NS}.panel.addManual`)
-    fireEvent.change(manual, { target: { value: '/repos/typo' } })
-    fireEvent.click(screen.getByRole('button', { name: `${NS}.panel.addConfirm` }))
-
-    await waitFor(() => { expect(harness.calls.some(call => call.endpoint === 'add')).toBe(true) })
-    expect(screen.getByPlaceholderText(`${NS}.panel.addManual`)).toHaveProperty('value', '/repos/typo')
-  })
-
-  it('submits the typed path from the Enter key too', async () => {
+  it('keeps the trust dialog open when the host rejects the add', async () => {
     const harness = mount()
     renderPanel(harness)
     fireEvent.click(screen.getByRole('button', { name: /action.label/ }))
     await waitFor(() => { expect(screen.getByText('/repos/payments')).toBeTruthy() })
 
-    const manual = screen.getByPlaceholderText(`${NS}.panel.addManual`)
-    fireEvent.change(manual, { target: { value: '/repos/entered' } })
-    fireEvent.keyDown(manual, { key: 'Enter' })
-
-    await waitFor(() => { expect(harness.calls.some(call => call.endpoint === 'add')).toBe(true) })
-    expect(harness.calls.find(call => call.endpoint === 'add')?.payload).toEqual({
-      sessionId: 'session-1',
-      path: '/repos/entered',
-    })
-  })
-
-  it('leaves the manual field alone when the operator opens the picker', async () => {
-    const harness = mount()
-    renderPanel(harness)
-    fireEvent.click(screen.getByRole('button', { name: /action.label/ }))
-    await waitFor(() => { expect(screen.getByText('/repos/payments')).toBeTruthy() })
-
-    fireEvent.change(screen.getByPlaceholderText(`${NS}.panel.addManual`), { target: { value: '/repos/typed' } })
     fireEvent.click(screen.getByRole('button', { name: `${NS}.panel.add` }))
+    const dialog = await screen.findByRole('dialog', { name: `${NS}.panel.addTrustTitle` })
+
+    harness.setFailure({ code: 'missing', message: 'host prose' })
+    fireEvent.click(within(dialog).getByRole('button', { name: `${NS}.panel.addConfirm` }))
 
     await waitFor(() => { expect(harness.calls.some(call => call.endpoint === 'add')).toBe(true) })
-    expect(harness.calls.find(call => call.endpoint === 'add')?.payload).toEqual({
-      sessionId: 'session-1',
-      path: '/repos/picked',
+    expect(screen.getByRole('dialog', { name: `${NS}.panel.addTrustTitle` })).toBeTruthy()
+  })
+
+  it('sends nothing when the trust dialog is cancelled', async () => {
+    const harness = mount()
+    renderPanel(harness)
+    fireEvent.click(screen.getByRole('button', { name: /action.label/ }))
+    await waitFor(() => { expect(screen.getByText('/repos/payments')).toBeTruthy() })
+
+    fireEvent.click(screen.getByRole('button', { name: `${NS}.panel.add` }))
+    const dialog = await screen.findByRole('dialog', { name: `${NS}.panel.addTrustTitle` })
+    fireEvent.click(within(dialog).getByRole('button', { name: `${NS}.panel.aliasCancel` }))
+
+    await waitFor(() => { expect(screen.queryByRole('dialog', { name: `${NS}.panel.addTrustTitle` })).toBeNull() })
+    expect(harness.calls.some(call => call.endpoint === 'add')).toBe(false)
+  })
+
+  it('opens the hover dropdown only while the remote switch is on', async () => {
+    const harness = mount({ remoteForm: true })
+    renderPanel(harness)
+    fireEvent.click(screen.getByRole('button', { name: /action.label/ }))
+    await waitFor(() => { expect(screen.getByText('/repos/payments')).toBeTruthy() })
+
+    // The switch reads ON: `+` is a menu opener inside its hover wrapper, not
+    // the action itself — a plain click submits nothing.
+    act(() => { harness.setRemoteEnabled(true) })
+    const wrap = await waitFor(() => {
+      const element = document.querySelector('.mrfw-addWrap') as HTMLElement | null
+      expect(element).not.toBeNull()
+      return element as HTMLElement
     })
-    // The picker path and the typed path are two different actions; the typed
-    // text is neither submitted nor cleared by the picker.
-    expect(screen.getByPlaceholderText(`${NS}.panel.addManual`)).toHaveProperty('value', '/repos/typed')
+    fireEvent.pointerEnter(within(wrap).getByRole('button', { name: `${NS}.panel.add` }))
+    await screen.findByText(`${NS}.panel.addLocal`)
+    expect(screen.getByText(`${NS}.panel.addRemote`)).toBeTruthy()
+    expect(harness.calls.some(call => call.endpoint === 'add')).toBe(false)
+
+    // The local entry runs the same staged flow the OFF-shape button runs.
+    fireEvent.click(screen.getByText(`${NS}.panel.addLocal`))
+    const dialog = await screen.findByRole('dialog', { name: `${NS}.panel.addTrustTitle` })
+    fireEvent.click(within(dialog).getByRole('button', { name: `${NS}.panel.addConfirm` }))
+    await waitFor(() => {
+      expect(harness.calls.find(call => call.endpoint === 'add')?.payload).toEqual({
+        sessionId: 'session-1',
+        path: '/repos/picked',
+      })
+    })
+  })
+
+  it('drops the dropdown for a direct add button once the switch turns off', async () => {
+    const harness = mount({ remoteForm: true })
+    renderPanel(harness)
+    fireEvent.click(screen.getByRole('button', { name: /action.label/ }))
+    await waitFor(() => { expect(screen.getByText('/repos/payments')).toBeTruthy() })
+    expect(document.querySelector('.mrfw-addWrap')).toBeNull()
+
+    act(() => { harness.setRemoteEnabled(true) })
+    await waitFor(() => { expect(document.querySelector('.mrfw-addWrap')).not.toBeNull() })
+    act(() => { harness.setRemoteEnabled(false) })
+    await waitFor(() => { expect(document.querySelector('.mrfw-addWrap')).toBeNull() })
+
+    // OFF: `+` IS the action — a click stages the picked path directly.
+    fireEvent.click(screen.getByRole('button', { name: `${NS}.panel.add` }))
+    await screen.findByRole('dialog', { name: `${NS}.panel.addTrustTitle` })
   })
 
   it('reveals and copies a path from the row actions', async () => {
@@ -890,7 +1016,7 @@ describe('the panel dialog', () => {
 
     await waitFor(() => { expect(harness.calls.some(call => call.endpoint === 'reveal')).toBe(true) })
     // No failure is painted, and the list survives a reveal untouched.
-    await waitFor(() => { expect(screen.queryByRole('alert')).toBeNull() })
+    await waitFor(() => { expect(screen.queryByRole('status')).toBeNull() })
     expect(screen.getByText('/repos/payments')).toBeTruthy()
     expect(harness.calls.filter(call => call.endpoint === 'list')).toHaveLength(1)
   })
@@ -904,7 +1030,7 @@ describe('the panel dialog', () => {
 
     fireEvent.click(screen.getAllByRole('button', { name: `${NS}.panel.reveal` })[0]!)
 
-    await waitFor(() => { expect(screen.getByRole('alert').textContent).toBe(`${NS}.error.fallback`) })
+    await waitFor(() => { expect(screen.getByRole('status').textContent).toContain(`${NS}.error.panel/bad-response`) })
   })
 
   it('reports a clipboard that refuses the copy', async () => {
@@ -916,7 +1042,7 @@ describe('the panel dialog', () => {
     vi.mocked(navigator.clipboard.writeText).mockRejectedValueOnce(new Error('denied'))
     fireEvent.click(screen.getByTitle('/repos/payments'))
 
-    await waitFor(() => { expect(screen.getByRole('alert').textContent).toBe(`${NS}.error.copy-failed`) })
+    await waitFor(() => { expect(screen.getByRole('status').textContent).toBe(`${NS}.error.copy-failed`) })
   })
 
   it('disables the row actions while a mutation is in flight', async () => {
@@ -993,7 +1119,7 @@ describe('the panel dialog', () => {
     renderPanel(harness)
     fireEvent.click(screen.getByRole('button', { name: /action.label/ }))
 
-    await waitFor(() => { expect(screen.getByRole('alert').textContent).toBe(`${NS}.error.nested`) })
+    await waitFor(() => { expect(screen.getByRole('status').textContent).toBe(`${NS}.error.nested`) })
     expect(screen.queryByText(/host prose/)).toBeNull()
   })
 
@@ -1004,7 +1130,7 @@ describe('the panel dialog', () => {
     fireEvent.click(screen.getByRole('button', { name: /action.label/ }))
 
     await waitFor(() => {
-      expect(screen.getByRole('alert').textContent).toContain('cannot get property "sessions" without inject')
+      expect(screen.getByRole('status').textContent).toContain('cannot get property "sessions" without inject')
     })
   })
 
@@ -1014,7 +1140,11 @@ describe('the panel dialog', () => {
     renderPanel(harness)
     fireEvent.click(screen.getByRole('button', { name: /action.label/ }))
 
-    await waitFor(() => { expect(screen.getByRole('alert').textContent).toBe(`${NS}.error.fallback`) })
+    // The unknown code still earns its host detail: the generic key alone
+    // would say nothing about what actually failed.
+    await waitFor(() => {
+      expect(screen.getByRole('status').textContent).toBe(`${NS}.error.fallback (unexpected)`)
+    })
   })
 
   it('shows the store failure the host reported', async () => {
@@ -1052,12 +1182,14 @@ describe('the panel dialog', () => {
     expect(pathCopies[1]?.textContent).toContain('/repos/payments')
     expect(pathCopies[1]?.querySelector('.mrfw-pathCopyIcon')).toBeTruthy()
 
-    // The Add row selector defaults to read-write; choosing read-only goes into
-    // the same `add` request the path does. The picker is the host's anchored
-    // Menu — a trigger named by its aria-label, rows named by their text.
-    fireEvent.click(screen.getByRole('button', { name: `${NS}.panel.accessLabel` }))
-    fireEvent.click(screen.getByRole('button', { name: `${NS}.access.readOnly` }))
+    // The trust dialog's selector defaults to inherit; choosing read-only goes
+    // into the same `add` request the path does. The picker is the host's
+    // anchored Menu — a trigger named by its current label, rows by their text.
     fireEvent.click(screen.getByRole('button', { name: `${NS}.panel.add` }))
+    const dialog = await screen.findByRole('dialog', { name: `${NS}.panel.addTrustTitle` })
+    fireEvent.click(within(dialog).getByRole('button', { name: `${NS}.panel.accessInherit` }))
+    fireEvent.click(screen.getByRole('button', { name: `${NS}.panel.accessReadOnly` }))
+    fireEvent.click(within(dialog).getByRole('button', { name: `${NS}.panel.addConfirm` }))
     await waitFor(() => { expect(harness.calls.some(call => call.endpoint === 'add')).toBe(true) })
     expect(harness.calls.find(call => call.endpoint === 'add')?.payload).toEqual({
       sessionId: 'session-1',
@@ -1087,11 +1219,9 @@ describe('the panel dialog', () => {
     fireEvent.click(screen.getByRole('button', { name: /action.label/ }))
     await waitFor(() => { expect(screen.getByText('/repos/website')).toBeTruthy() })
 
-    // Every NEW-add control stays refused at the limit (the picker button even
-    // relabels itself to explain the refusal)…
+    // The NEW-add control stays refused at the limit (the button even relabels
+    // itself to explain the refusal)…
     expect(screen.getByRole('button', { name: `${NS}.panel.limitReached` })).toHaveProperty('disabled', true)
-    expect(screen.getByPlaceholderText(`${NS}.panel.addManual`)).toHaveProperty('disabled', true)
-    expect(screen.getByRole('button', { name: `${NS}.panel.addConfirm` })).toHaveProperty('disabled', true)
 
     // …but a withheld row keeps its re-register action: a revive consumes no
     // slot and the host accepts it at or above the limit. The request names
@@ -1117,15 +1247,15 @@ describe('the panel dialog', () => {
     const footer = document.querySelector('.mrfw-actions') as HTMLElement
     const hint = footer.firstElementChild as HTMLElement
     // The hint owns the footer's first line; it is not a control wedged between
-    // the add row and Retry/Worktree suggestions.
+    // the add button and the worktree satellite.
     expect(hint.className).toContain('mrfw-actionsNote')
     expect(hint.textContent).toBe(`${NS}.panel.limitReached`)
-    const retry = screen.getByRole('button', { name: `${NS}.panel.retry` })
-    expect(hint.contains(retry)).toBe(false)
+    const add = screen.getByRole('button', { name: `${NS}.panel.limitReached` })
+    expect(hint.contains(add)).toBe(false)
     // Everything after the hint is still one of the original controls, in order.
-    // The access picker is a Menu: its anchor wrapper span is the control's own
-    // element (the real primitive wraps every anchor in one), so the row counts
-    // it by the button inside rather than by a flattened tag name.
+    // The add menu wraps its anchor in a span (the real primitive wraps every
+    // anchor in one), so the row counts it by the button inside rather than by
+    // a flattened tag name.
     expect(Array.from(footer.children).slice(1).every(element => element.tagName === 'BUTTON'
       || element.tagName === 'INPUT'
       || (element.tagName === 'SPAN' && element.querySelector('button') !== null))).toBe(true)
@@ -1214,7 +1344,7 @@ describe('the panel dialog', () => {
     fireEvent.click(screen.getByRole('button', { name: `${NS}.panel.accessReadWrite` }))
     fireEvent.click(screen.getByRole('button', { name: `${NS}.panel.accessUpgradeDo` }))
 
-    await waitFor(() => { expect(screen.getByRole('alert').textContent).toBe(`${NS}.error.root-unavailable`) })
+    await waitFor(() => { expect(screen.getByRole('status').textContent).toBe(`${NS}.error.root-unavailable`) })
     // The badge still says what the last host view said.
     expect(document.querySelectorAll('.mrfw-accessBadge')[1]?.textContent).toBe(`${NS}.access.readOnly`)
   })
@@ -1239,7 +1369,7 @@ describe('the panel dialog', () => {
     render(createElement(footer.component as never))
 
     fireEvent.click(screen.getByRole('button', { name: /action.label/ }))
-    await waitFor(() => { expect(screen.getByRole('alert')).toBeTruthy() })
+    await waitFor(() => { expect(screen.getByRole('status')).toBeTruthy() })
   })
 })
 
@@ -1430,14 +1560,14 @@ it('ignores a response belonging to the previous session after catalog selection
   harness.holdNextCall()
   renderPanel(harness)
   fireEvent.click(screen.getByRole('button', { name: /action.label/ }))
-  await waitFor(() => { expect(harness.calls).toHaveLength(1) })
+  await waitFor(() => { expect(rootsListing(harness)).toHaveLength(1) })
   harness.setView({ primaryRoot: '/repos/second', effectiveCwd: '/repos/second/src', roots: [], limit: 16, count: 0 })
   act(() => { harness.setSession('session-2') })
   await waitFor(() => { expect(screen.getByText('/repos/second')).toBeDefined() })
   harness.release()
-  await waitFor(() => { expect(harness.calls).toHaveLength(2) })
+  await waitFor(() => { expect(rootsListing(harness)).toHaveLength(2) })
   expect(screen.queryByText('/repos/primary')).toBeNull()
-  expect(harness.calls[1]?.payload).toEqual({ sessionId: 'session-2' })
+  expect(rootsListing(harness)[1]?.payload).toEqual({ sessionId: 'session-2' })
 })
 
 it('offers re-register only for a missing root and explains a redirected one', async () => {
@@ -1455,4 +1585,316 @@ it('offers re-register only for a missing root and explains a redirected one', a
   expect(screen.getAllByRole('button', { name: `${NS}.panel.reRegister` })).toHaveLength(1)
   expect(screen.getByText(`${NS}.panel.redirectedHint`)).toBeTruthy()
   expect(screen.getByText(`${NS}.state.invalid`)).toBeTruthy()
+})
+
+
+describe('the remote-environment section', () => {
+  const ENDPOINT: RemoteEndpointView = {
+    environmentId: 'build',
+    rootId: 'app',
+    path: '/srv/root',
+    platform: 'linux',
+    target: 'ssh://deploy@build.example:2222',
+    state: 'unregistered',
+    actions: ['read', 'write', 'exec'],
+    transfers: [{ direction: 'import', environmentId: 'local', rootId: 'primary' }],
+    capabilities: { read: false, write: false, exec: false, receive: false, send: false },
+    reason: 'remote-unregistered',
+  }
+  const ENDPOINT_LOCATION = 'ssh://deploy@build.example:2222/srv/root'
+
+  it('hides the section entirely while the control plane is disabled and issues no remote action', async () => {
+    const harness = mount()
+    harness.setRemotes({ primaryRoot: '/repos/primary', mode: 'workspace-write', custodyMode: 'personal', status: { state: 'disabled' }, endpoints: [] })
+    renderPanel(harness)
+    fireEvent.click(screen.getByRole('button', { name: /action.label/ }))
+    await waitFor(() => { expect(harness.calls.some(call => call.endpoint === 'remotes')).toBe(true) })
+    // `disabled` is the operator's switch being off, not a failure: the whole
+    // section is suppressed rather than explained as unavailable.
+    expect(screen.queryByText(`${NS}.panel.remoteList`)).toBeNull()
+    expect(screen.queryByText(/panel.remoteUnavailable/)).toBeNull()
+    expect(harness.calls.filter(call => call.endpoint === 'addRemote' || call.endpoint === 'removeRemote')).toHaveLength(0)
+    // The listing is session-addressed and carries nothing else.
+    const listing = harness.calls.find(call => call.endpoint === 'remotes')
+    expect(listing?.payload).toEqual({ sessionId: 'session-1' })
+  })
+
+  it('still explains a degraded control plane that is not disabled', async () => {
+    const harness = mount()
+    harness.setRemotes({ primaryRoot: '/repos/primary', mode: 'workspace-write', custodyMode: 'personal', status: { state: 'config-invalid', reason: 'bad personal configuration' }, endpoints: [] })
+    renderPanel(harness)
+    fireEvent.click(screen.getByRole('button', { name: /action.label/ }))
+    await waitFor(() => { expect(screen.getByText(`${NS}.panel.remoteList`)).toBeTruthy() })
+    expect(screen.getByText(/panel.remoteUnavailable/)).toBeTruthy()
+    expect(harness.calls.filter(call => call.endpoint === 'addRemote' || call.endpoint === 'removeRemote')).toHaveLength(0)
+  })
+
+  it('registers a personal SSH endpoint and renders its new state', async () => {
+    const harness = mount()
+    harness.setRemotes({
+      primaryRoot: '/repos/primary',
+      mode: 'workspace-write',
+      custodyMode: 'personal',
+      status: { state: 'ready' },
+      endpoints: [ENDPOINT],
+    })
+    renderPanel(harness)
+    fireEvent.click(screen.getByRole('button', { name: /action.label/ }))
+    await waitFor(() => { expect(screen.getByText(ENDPOINT_LOCATION)).toBeTruthy() })
+    const remoteRow = screen.getByText(ENDPOINT_LOCATION).closest('.mrfw-row') as HTMLElement
+    const text = remoteRow.querySelector('.mrfw-rootText')!
+    expect([...text.children].map(element => element.className)).toEqual(['mrfw-rootName', 'mrfw-rootPath mrfw-pathCopy'])
+    expect([...text.children[0]!.children].map(element => [element.className, element.textContent])).toEqual([
+      ['mrfw-rootNameText', 'root'],
+      ['mrfw-cwdTag', 'build'],
+      ['mrfw-accessBadge', `${NS}.panel.remoteNoCapabilities`],
+    ])
+    expect(within(remoteRow).getByTitle(`${NS}.remote.state.unregistered`)).toBeTruthy()
+    expect(screen.queryByRole('button', { name: `${NS}.panel.remoteRegister` })).toBeNull()
+    fireEvent.click(within(remoteRow).getByRole('button', { name: `${NS}.panel.more` }))
+    fireEvent.click(screen.getByRole('button', { name: `${NS}.panel.remoteRegister` }))
+    await waitFor(() => {
+      expect(harness.calls.some(call => call.endpoint === 'addRemote')).toBe(true)
+    })
+    expect(harness.calls.find(call => call.endpoint === 'addRemote')?.payload)
+      .toEqual({ sessionId: 'session-1', environmentId: 'build', rootId: 'app' })
+    await waitFor(() => { expect(screen.getByTitle(`${NS}.remote.state.registered`)).toBeTruthy() })
+    expect(screen.queryByRole('button', { name: `${NS}.panel.remoteRemove` })).toBeNull()
+    fireEvent.click(within(remoteRow).getByRole('button', { name: `${NS}.panel.more` }))
+    fireEvent.click(screen.getByRole('button', { name: `${NS}.panel.remoteRemove` }))
+    // Personal custody removes the whole row: the confirm says the binding
+    // goes too, not the registration-only copy of the deployment path.
+    const confirm = await screen.findByRole('dialog', { name: `${NS}.panel.remoteRemove` })
+    expect(within(confirm).getByText(`${NS}.panel.remoteConfirmRemoveBound`)).toBeTruthy()
+    expect(harness.calls.some(call => call.endpoint === 'removeRemote')).toBe(false)
+    // The confirm-delete button shares the SSH buttons' danger styling.
+    const deleteButton = within(confirm).getByRole('button', { name: `${NS}.ssh.confirmDelete` })
+    expect(deleteButton.className).toContain('mrfw-sshDanger')
+    expect(deleteButton.className).toContain('mrfw-sshButton')
+    fireEvent.click(deleteButton)
+    // Registration first, then the CAS binding removal, then a fresh list —
+    // and the row is gone rather than parked on "unregistered".
+    await waitFor(() => { expect(screen.queryByText(ENDPOINT_LOCATION)).toBeNull() })
+    const sequence = harness.calls.map(call => call.endpoint)
+      .filter(endpoint => endpoint === 'removeRemote' || endpoint === 'sshState' || endpoint === 'sshBindingRemove')
+    expect(sequence).toEqual(['removeRemote', 'sshState', 'sshBindingRemove'])
+    expect(harness.calls.find(call => call.endpoint === 'removeRemote')?.payload)
+      .toEqual({ sessionId: 'session-1', environmentId: 'build', rootId: 'app' })
+    expect(harness.calls.find(call => call.endpoint === 'sshBindingRemove')?.payload)
+      .toEqual({ sessionId: 'session-1', revision: 7, environmentId: 'build', rootId: 'app' })
+    expect(harness.calls.at(-1)?.endpoint).toBe('remotes')
+  })
+
+  it('removes an unregistered personal row by dropping only its binding', async () => {
+    const harness = mount()
+    harness.setRemotes({
+      primaryRoot: '/repos/primary',
+      mode: 'workspace-write',
+      custodyMode: 'personal',
+      status: { state: 'ready' },
+      endpoints: [ENDPOINT],
+    })
+    renderPanel(harness)
+    fireEvent.click(screen.getByRole('button', { name: /action.label/ }))
+    const remoteRow = (await screen.findByText(ENDPOINT_LOCATION)).closest('.mrfw-row') as HTMLElement
+    fireEvent.click(within(remoteRow).getByRole('button', { name: `${NS}.panel.more` }))
+    // The menu still offers registration, and below it the row's removal —
+    // the only cleanup an unregistered ("待绑定") row has.
+    const menu = await screen.findByRole('menu')
+    expect(within(menu).getByRole('button', { name: `${NS}.panel.remoteRegister` })).toBeTruthy()
+    fireEvent.click(within(menu).getByRole('button', { name: `${NS}.panel.remoteRemove` }))
+    const confirm = await screen.findByRole('dialog', { name: `${NS}.panel.remoteRemove` })
+    expect(within(confirm).getByText(`${NS}.panel.remoteConfirmRemoveBound`)).toBeTruthy()
+    fireEvent.click(within(confirm).getByRole('button', { name: `${NS}.ssh.confirmDelete` }))
+    await waitFor(() => { expect(screen.queryByText(ENDPOINT_LOCATION)).toBeNull() })
+    // Nothing was ever registered, so there is no `removeRemote` to skip —
+    // the flow is state read, CAS binding removal, fresh list.
+    expect(harness.calls.some(call => call.endpoint === 'removeRemote')).toBe(false)
+    const sequence = harness.calls.map(call => call.endpoint)
+      .filter(endpoint => endpoint === 'sshState' || endpoint === 'sshBindingRemove')
+    expect(sequence).toEqual(['sshState', 'sshBindingRemove'])
+    expect(harness.calls.find(call => call.endpoint === 'sshBindingRemove')?.payload)
+      .toEqual({ sessionId: 'session-1', revision: 7, environmentId: 'build', rootId: 'app' })
+    expect(harness.calls.at(-1)?.endpoint).toBe('remotes')
+  })
+
+  it('copies a remote workspace target through the shared row control', async () => {
+    const harness = mount()
+    harness.setRemotes({
+      primaryRoot: '/repos/primary',
+      mode: 'workspace-write',
+      custodyMode: 'personal',
+      status: { state: 'ready' },
+      endpoints: [ENDPOINT],
+    })
+    renderPanel(harness)
+    fireEvent.click(screen.getByRole('button', { name: /action.label/ }))
+    const path = await screen.findByText(ENDPOINT_LOCATION)
+    const remoteRow = path.closest('.mrfw-row') as HTMLElement
+    fireEvent.click(remoteRow.querySelector('.mrfw-pathCopy') as HTMLElement)
+    await waitFor(() => { expect(navigator.clipboard.writeText).toHaveBeenCalledWith(ENDPOINT_LOCATION) })
+    // The shared control swaps its accessible name after a successful copy.
+    expect(remoteRow.querySelector('.mrfw-pathCopy')?.getAttribute('aria-label')).toBe(`${NS}.panel.copied`)
+  })
+
+  it('drops a remote answer that belongs to the previous session', async () => {
+    const harness = mount()
+    harness.setRemotes({ primaryRoot: '/repos/primary', mode: 'workspace-write', custodyMode: 'personal', status: { state: 'disabled' }, endpoints: [] })
+    harness.holdEndpoint('remotes')
+    renderPanel(harness)
+    fireEvent.click(screen.getByRole('button', { name: /action.label/ }))
+    await waitFor(() => { expect(harness.calls.some(call => call.endpoint === 'remotes')).toBe(true) })
+    harness.setRemotes({ primaryRoot: '/repos/primary', mode: 'workspace-write', custodyMode: 'personal', status: { state: 'ready' }, endpoints: [ENDPOINT] })
+    act(() => { harness.setSession('session-2') })
+    await waitFor(() => { expect(screen.getByText(ENDPOINT_LOCATION)).toBeTruthy() })
+    harness.release()
+    await new Promise<void>(resolve => { setTimeout(resolve, 20) })
+    // The late disabled answer must not replace the new session's view.
+    expect(screen.queryByText(/panel.remoteUnavailable/)).toBeNull()
+    expect(screen.getByText(ENDPOINT_LOCATION)).toBeTruthy()
+  })
+
+  it('submits one registration per click while the request is in flight', async () => {
+    const harness = mount()
+    harness.setRemotes({ primaryRoot: '/repos/primary', mode: 'workspace-write', custodyMode: 'personal', status: { state: 'ready' }, endpoints: [ENDPOINT] })
+    harness.holdEndpoint('addRemote')
+    renderPanel(harness)
+    fireEvent.click(screen.getByRole('button', { name: /action.label/ }))
+    const row = (await screen.findByText(ENDPOINT_LOCATION)).closest('.mrfw-row') as HTMLElement
+    const more = within(row).getByRole('button', { name: `${NS}.panel.more` })
+    fireEvent.click(more)
+    const register = await screen.findByRole('button', { name: `${NS}.panel.remoteRegister` })
+    fireEvent.click(register)
+    await waitFor(() => { expect(harness.calls.some(call => call.endpoint === 'addRemote')).toBe(true) })
+    const pending = within(row).getByRole('button', { name: `${NS}.panel.more` })
+    expect(pending.getAttribute('aria-busy')).toBe('true')
+    fireEvent.click(pending)
+    harness.release()
+    await waitFor(() => { expect(screen.getByTitle(`${NS}.remote.state.registered`)).toBeTruthy() })
+    expect(harness.calls.filter(call => call.endpoint === 'addRemote')).toHaveLength(1)
+  })
+})
+
+
+describe('the shared dialog across the four entries', () => {
+  // Whatever opened it, the panel is identical: the overlay portals to
+  // document.body — transform/backdrop-filter on the dockkit panes would
+  // clip a fixed overlay rendered beside the trigger — and every entry
+  // forwards the same dependency bundle, so the remote section and the
+  // worktree cleanup affordance appear from each trigger.
+  const READY: RemotesView = {
+    primaryRoot: '/repos/primary', mode: 'workspace-write', custodyMode: 'personal',
+    status: { state: 'ready' }, endpoints: [],
+  }
+  const overlay = (): Element | null => document.body.querySelector(':scope > .mrfw-overlay')
+  const expectSharedSections = async (): Promise<void> => {
+    await waitFor(() => { expect(screen.getByText(`${NS}.panel.remoteList`)).toBeTruthy() })
+    expect(screen.getByRole('button', { name: `${NS}.worktree.cleanupBatch` })).toBeTruthy()
+  }
+
+  it('portals the footer dialog to document.body with the shared sections', async () => {
+    const harness = mount()
+    harness.setView({ primaryRoot: '/repos/primary', roots: [], limit: 16, count: 0, worktreeCleanupCount: 1 })
+    harness.setRemotes(READY)
+    renderPanel(harness)
+    fireEvent.click(screen.getByRole('button', { name: /action.label/ }))
+    await screen.findByRole('dialog')
+    expect(overlay()?.parentElement).toBe(document.body)
+    await expectSharedSections()
+  })
+
+  it('portals the footer-owned dialog opened through the workspace-menu controller', async () => {
+    const { controller } = renderFoldersAction()
+    act(() => { expect(controller.open('session-9')).toBe(true) })
+    await screen.findByRole('dialog')
+    expect(overlay()?.parentElement).toBe(document.body)
+  })
+
+  it('portals the Files compact launcher dialog to document.body', async () => {
+    const harness = mount({ filesActions: true })
+    const registration = harness.registrations.find(item => item.options.name === 'sidebar.right.tab.files.actions')!
+    render(createElement(registration.component as never))
+    fireEvent.click(screen.getByRole('button', { name: /action.title/ }))
+    await screen.findByRole('dialog')
+    expect(overlay()?.parentElement).toBe(document.body)
+  })
+
+  it('portals the Files root-switcher dialog with the shared sections', async () => {
+    const harness = mount({ filesActions: true })
+    harness.setView({ primaryRoot: '/repos/primary', roots: [], limit: 16, count: 0, worktreeCleanupCount: 1 })
+    harness.setRemotes(READY)
+    const registration = harness.registrations.find(item => item.options.name === 'sidebar.right.tab.files.actions')!
+    render(createElement(registration.component as never, { absolutePath: '/repos/primary', sessionId: 'session-1' }))
+    fireEvent.click(document.querySelector('.mrfw-rootSwitchBtn')!)
+    fireEvent.click(await screen.findByRole('button', { name: `${NS}.switcher.manage` }))
+    await screen.findByRole('dialog')
+    expect(overlay()?.parentElement).toBe(document.body)
+    await expectSharedSections()
+  })
+
+  it('portals the hero dialog with the shared sections', async () => {
+    const harness = mount({ heroOptions: true })
+    harness.setView({ primaryRoot: '/repos/primary', roots: [], limit: 16, count: 0, worktreeCleanupCount: 1 })
+    harness.setRemotes(READY)
+    renderHero(harness)
+    fireEvent.click(document.querySelector('.mrfw-heroEntry') as HTMLButtonElement)
+    await screen.findByRole('dialog')
+    expect(overlay()?.parentElement).toBe(document.body)
+    await expectSharedSections()
+  })
+})
+
+describe('the shared stylesheet element', () => {
+  const STYLE_ID = 'multi-root-workspace-styles'
+  const OWNERS = Symbol.for('@dsh-electron/multi-root-workspace/style-owners')
+  type OwnedStyle = HTMLStyleElement & { [OWNERS]?: Set<symbol> }
+  const styleOf = (): OwnedStyle | null => document.getElementById(STYLE_ID) as OwnedStyle | null
+  beforeEach(() => { styleOf()?.remove() })
+  afterEach(() => { styleOf()?.remove() })
+
+  const styleMount = (): { disposeStyles: () => void } => {
+    const disposers = new Map<string, () => void>()
+    client.apply({
+      effect: (callback: () => unknown, label?: string) => {
+        const dispose = callback()
+        if (label !== undefined && typeof dispose === 'function') disposers.set(label + ':' + disposers.size, dispose as () => void)
+        return () => {}
+      },
+      inject: () => () => {},
+      locale: { register: () => () => {}, bind: () => (key: string) => key },
+      slots: { inject: () => () => {}, register: () => () => {} },
+      get: () => undefined,
+    } as never)
+    return {
+      disposeStyles: () => {
+        for (const [key, dispose] of [...disposers]) if (key.startsWith('multi-root-workspace: styles')) dispose()
+      },
+    }
+  }
+
+  it('replaces a stale legacy sheet; the old disposer cannot kill the new one', () => {
+    const legacy = document.createElement('style')
+    legacy.id = STYLE_ID
+    legacy.textContent = '.legacy{}'
+    document.head.append(legacy)
+    styleMount()
+    const current = styleOf()!
+    expect(current).not.toBe(legacy)
+    expect(current[OWNERS]?.size).toBe(1)
+    expect(current.textContent).toContain('.mrfw-alert')
+    legacy.remove()
+    expect(styleOf()).toBe(current)
+  })
+
+  it('shares one sheet across applies and removes it only when the last owner leaves', () => {
+    const first = styleMount()
+    const element = styleOf()!
+    const second = styleMount()
+    expect(styleOf()).toBe(element)
+    expect(element[OWNERS]?.size).toBe(2)
+    first.disposeStyles()
+    expect(styleOf()).toBe(element)
+    second.disposeStyles()
+    expect(styleOf()).toBeNull()
+  })
 })

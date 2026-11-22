@@ -6,7 +6,7 @@
 
 ## 对象与基线
 
-- 邮件报告：`安全报告：@dsh-electron/dsh-plugin-multi-root-workspace@0.1.8 发现严重问题`（F.B. / FishBoneEK@outlook.com，2026-10-20，Gmail 垃圾邮件文件夹）
+- 邮件报告：`安全报告：@dsh-electron/dsh-plugin-multi-root-workspace@0.1.8 发现严重问题`（F.B. / reporter@example.invalid，2026-10-20，Gmail 垃圾邮件文件夹）
 - 附件：`SECURITY-AUDIT.md`、`A-confinement.md`、`D-bypass.md`（审计基线：插件 `v0.1.8` / commit `15c1d263…`，宿主 DSH `0.2.1-rc.2`，Linux）
 - 本仓库核实基线：**`v0.1.14`（commit `306d65a`）**，开发宿主 `@deepseek-ai/*@0.2.2-rc.1`，cordis `4.1.0`，macOS arm64
 - 邮件与附件原件：`/tmp/dsh-mail-audit-{SECURITY-AUDIT,A-confinement,D-bypass}.md`

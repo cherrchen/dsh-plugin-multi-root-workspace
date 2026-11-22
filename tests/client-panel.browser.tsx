@@ -4,8 +4,11 @@ import { commands, page } from 'vitest/browser'
 import { WorkspaceFoldersDialog } from '../src/client/WorkspaceFoldersAction.tsx'
 import { en } from '../src/client/locales.ts'
 import type { PanelClient } from '../src/client/panel-client.ts'
+import type { RemotesClient } from '../src/client/remotes-client.ts'
+import { createSshClient } from '../src/client/ssh-client.ts'
 import { STYLES } from '../src/client/styles.ts'
 import type { PanelResponseMap } from '../src/contract.ts'
+import type { RemotesView } from '../src/remote/panel-contract.ts'
 
 declare module 'vitest/browser' {
   interface BrowserCommands {
@@ -23,7 +26,7 @@ beforeEach(() => {
   }
 })
 
-async function renderRoot(path: string) {
+async function renderRoot(path: string, remotes?: RemotesClient) {
   const responses: Partial<PanelResponseMap> = {
     list: {
       primaryRoot: '/workspaces/main',
@@ -50,6 +53,11 @@ async function renderRoot(path: string) {
   }
   render(<WorkspaceFoldersDialog
     panel={panel}
+    remotes={remotes}
+    ssh={remotes === undefined ? undefined : createSshClient({ rpc: { async call() {
+      throw new Error('Unexpected SSH request')
+    } } })}
+    remoteEnabled={() => remotes !== undefined}
     pickDirectory={async () => null}
     sessionId={() => 'layout-test'}
     t={key => en[key]}
@@ -60,9 +68,8 @@ async function renderRoot(path: string) {
   const row = alias.closest<HTMLElement>('.mrfw-row')!
   const list = row.closest<HTMLElement>('.mrfw-rootList')!
   const body = list.closest<HTMLElement>('.mrfw-body')!
-  const addInput = screen.getByPlaceholderText(en['panel.addManual'])
   const addButton = screen.getByRole('button', { name: en['panel.add'] })
-  return { row, list, body, addInput, addButton }
+  return { row, list, body, addButton }
 }
 
 function controlsFit(body: HTMLElement, controls: readonly HTMLElement[]): boolean {
@@ -75,7 +82,7 @@ function controlsFit(body: HTMLElement, controls: readonly HTMLElement[]): boole
 
 it('caps an oversized root row and chains wheel scrolling to the add controls', async () => {
   await page.viewport(320, 300)
-  const { row, list, body, addInput, addButton } = await renderRoot(
+  const { row, list, body, addButton } = await renderRoot(
     '/workspaces/' + 'nested-workspace-segment/'.repeat(16) + 'checkout',
   )
   const cap = window.innerHeight * 0.6
@@ -86,7 +93,7 @@ it('caps an oversized root row and chains wheel scrolling to the add controls', 
   // Start where the user can point at the list on a short dialog.
   body.scrollTop += list.getBoundingClientRect().top - body.getBoundingClientRect().top
   const bodyStart = body.scrollTop
-  expect(addInput.getBoundingClientRect().top).toBeGreaterThan(body.getBoundingClientRect().bottom)
+  expect(addButton.getBoundingClientRect().top).toBeGreaterThan(body.getBoundingClientRect().bottom)
 
   // A real wheel over the list must fill its scroll range first.
   await commands.wheelOverRootList(list.scrollHeight)
@@ -98,12 +105,12 @@ it('caps an oversized root row and chains wheel scrolling to the add controls', 
   // Keep the pointer over the list at its end so this wheel exercises chaining.
   await commands.wheelOverRootList(body.scrollHeight)
   await expect.poll(() => body.scrollTop).toBeGreaterThan(bodyStart)
-  await expect.poll(() => controlsFit(body, [addInput, addButton])).toBe(true)
+  await expect.poll(() => controlsFit(body, [addButton])).toBe(true)
 })
 
 it('fits a wrapped row below the cap and keeps the add controls visible without scrolling', async () => {
   await page.viewport(400, 640)
-  const { row, list, body, addInput, addButton } = await renderRoot(
+  const { row, list, body, addButton } = await renderRoot(
     '/workspaces/' + 'nested-workspace-segment/'.repeat(3) + 'checkout',
   )
   const cap = window.innerHeight * 0.6
@@ -114,5 +121,47 @@ it('fits a wrapped row below the cap and keeps the add controls visible without 
   expect(listHeight).toBeGreaterThanOrEqual(rowHeight)
   expect(listHeight - rowHeight).toBeLessThan(1)
   expect(body.scrollHeight).toBe(body.clientHeight)
-  expect(controlsFit(body, [addInput, addButton])).toBe(true)
+  expect(controlsFit(body, [addButton])).toBe(true)
+})
+
+it('keeps the SSH section and split add menu reachable after scrolling the local list', async () => {
+  await page.viewport(400, 480)
+  const view: RemotesView = {
+    primaryRoot: '/workspaces/main',
+    mode: 'workspace-write',
+    custodyMode: 'personal',
+    status: { state: 'ready' },
+    endpoints: [{
+      environmentId: 'build',
+      rootId: 'app',
+      path: '/srv/build-checkout',
+      platform: 'linux',
+      state: 'registered',
+      actions: ['read'],
+      transfers: [],
+      capabilities: { read: true, write: false, exec: false, receive: false, send: false },
+    }],
+  }
+  const readRemotes = async (): Promise<RemotesView> => view
+  const { list, body, addButton } = await renderRoot(
+    '/workspaces/' + 'nested-workspace-segment/'.repeat(30) + 'checkout',
+    { list: readRemotes, add: readRemotes, remove: readRemotes },
+  )
+  const remoteRow = (await screen.findByText('build-checkout')).closest<HTMLElement>('.mrfw-row')!
+  const manage = screen.getByRole('button', { name: en['panel.remoteManage'] })
+  expect(list.contains(remoteRow)).toBe(false)
+  expect(list.contains(manage)).toBe(false)
+
+  body.scrollTop += list.getBoundingClientRect().top - body.getBoundingClientRect().top
+  const bodyStart = body.scrollTop
+  await commands.wheelOverRootList(list.scrollHeight)
+  await expect.poll(() => list.scrollHeight - list.clientHeight - list.scrollTop).toBeLessThanOrEqual(1)
+  expect(list.scrollTop).toBeGreaterThan(0)
+  expect(body.scrollTop).toBe(bodyStart)
+
+  await commands.wheelOverRootList(body.scrollHeight)
+  await expect.poll(() => controlsFit(body, [remoteRow, manage, addButton])).toBe(true)
+  await page.getByRole('button', { name: en['panel.add'], exact: true }).hover()
+  await expect.element(page.getByRole('button', { name: en['panel.addLocal'] })).toBeEnabled()
+  await expect.element(page.getByRole('button', { name: en['panel.addRemote'] })).toBeEnabled()
 })

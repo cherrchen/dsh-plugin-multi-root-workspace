@@ -851,6 +851,11 @@ export class MultiRootScopeService extends Service {
     }
   }
 
+  /** Whether THIS call's tool is capped — the remote control plane's pre-admission check. */
+  capsTool(toolName: string): boolean {
+    return this.capForTool(toolName)
+  }
+
   /** Execution and review use exactly the same parent-narrowing rule. */
   private capForTool(toolName: string): boolean {
     return this.capsInvalid || toolCapStore.getStore()?.capped === true || this.caps[toolName] === 'read-only'

@@ -19,9 +19,10 @@ interface NativeDirectory {
 }
 export interface NativeHandle {
   info(): NativeEntry
+  posixFileState?(): { size: number; nlink: number; mtimeMs: number; ctimeMs: number }
   directory(): NativeDirectory
   canonical(): string
-  read(buffer: Buffer): number
+  read(buffer: Buffer, position?: number): number
   list(): string[]
   close(): void
 }
@@ -113,6 +114,7 @@ function posix() {
         const stat = fstatSync(fd, { bigint: true })
         return { ...stat, kind: kindOf(Number(stat.mode)) }
       },
+      posixFileState: () => fstatSync(fd),
       directory: () => ({
         inspect: name => inspect(fd, name),
         child(name) {
@@ -129,7 +131,7 @@ function posix() {
         if (fcntl(fd, 50 /* F_GETPATH */, 'void *', path) !== 0) failure('get metadata handle path')
         return utf8.decode(path.subarray(0, path.indexOf(0)))
       },
-      read: buffer => readSync(fd, buffer),
+      read: (buffer, position) => readSync(fd, buffer, 0, buffer.length, position ?? null),
       list: () => list(fd),
       close: () => closeSync(fd),
     }

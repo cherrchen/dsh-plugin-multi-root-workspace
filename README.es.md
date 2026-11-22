@@ -19,12 +19,13 @@ Por defecto, [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness)
 
 No todos los proyectos son monorepos. Un proyecto de desarrollo suele estar formado por varios repositorios Git independientes, y trabajar entre ellos obligaba antes a cambiar de sesión una y otra vez. Otras herramientas similares ya permiten añadir varias carpetas a un mismo espacio de trabajo, y este plugin lleva esa misma capacidad a DSH: registre los demás repositorios como raíces adicionales y asígneles solo lectura, lectura y escritura, o el permiso actual de la sesión, y el agente podrá leer y escribir dentro de ese permiso.
 
-- **Sin herramientas nuevas**: el agente sigue usando las nativas `read` / `write` / `edit` / `bash`; solo obtiene algunos directorios más en los que trabajar.
+- **Herramientas nativas**: en los espacios de trabajo locales, el agente sigue usando las herramientas nativas `read` / `write` / `edit` / `bash`; simplemente obtiene algunos directorios más en los que trabajar.
 - **Permisos que se aplican de verdad**: cada raíz adicional puede configurarse como solo lectura, lectura y escritura, o heredar el permiso de la sesión actual; el límite lo aplica realmente el sandbox del sistema, no un aviso en el prompt dirigido al modelo. Las operaciones de archivos y los comandos bash del agente están sujetos al mismo permiso; los procesos que otros plugins inicien por su cuenta quedan fuera de esta garantía.
 - **Navegue por las raíces adicionales en la pestaña Files**: la cabecera de la pestaña Files permite cambiar entre la raíz principal y cualquiera de las raíces adicionales; el árbol de directorios, la apertura de archivos, la apertura en una aplicación externa, los menús contextuales, la actualización automática y la búsqueda funcionan igual que en la raíz principal, y el navegador de la vista previa de documentos también se sitúa en la raíz que contiene el archivo. En versiones de host más antiguas puede que estas acciones de la interfaz no estén disponibles, y la raíz adicional se muestra tal como lo hace el host de forma nativa.
 - **Skills en las raíces adicionales**: descubre `.dsh/skills` y `.agents/skills` en las raíces adicionales y permite invocarlas con `/alias:nombre-de-skill`; cada raíz tiene su propio interruptor, activado por defecto.
 - **Auto Review (experimental, desactivado por defecto)**: una vez activado manualmente en el gestor de plugins, la revisión automática también ve la estructura de directorios, los niveles de acceso y los archivos de instrucciones de las raíces adicionales, y las incluye en la revisión.
 - **Sugerencias de Worktree (experimental, desactivado por defecto)**: cuando la raíz principal es un worktree de Git, el plugin propone añadir otros worktrees del mismo repositorio como raíces adicionales; solo se registran cuando usted lo confirma, y nunca se añaden ni se eliminan de forma automática.
+- **Entornos remotos SSH (experimental, desactivado por defecto, sin publicar)**: activa SSH personal en la página del complemento para usar `remote_copy` y `remote_bash` en directorios remotos registrados. Las conexiones y los vínculos del espacio de trabajo se gestionan por separado, y el Registry autoriza cada llamada.
 - **No registrar equivale a no tenerlo instalado**: sin raíces adicionales, el comportamiento es exactamente el mismo que con el plugin no instalado; una configuración incorrecta genera un error en lugar de degradarse en silencio.
 
 La versión publicada actual es la `v0.1.23`. Los cambios visibles para el usuario de cada versión están en el [CHANGELOG](./CHANGELOG.en.md); el progreso y el estado de publicación están en el [libro mayor de progreso de la hoja de ruta](./docs/plans/active/2026-09-12-multi-root-workspace.md#进度总账).
@@ -284,6 +285,14 @@ Cuando un worktree se elimina o se mueve, el diálogo muestra una insignia, pero
 ### Adaptación de Auto Review (experimental, desactivada por defecto)
 
 Si necesita contexto de revisión con varias raíces, active la fila Auto Review, desactivada por defecto, en la lista de componentes de la página de detalles de Multi-root Workspace en la página «Plugins» de la barra lateral; el interruptor «Auto Review multi-raíz (experimental)» de la misma tarjeta de ajustes es equivalente y también está desactivado por defecto. Una instalación normal no activa ni selecciona Auto Review; la integración solo está disponible en las versiones exactas de DSH que la incluyen.
+
+### Entornos remotos SSH (experimental, desactivado por defecto, sin publicar)
+
+La incidencia #32 ofrece por ahora solo SSH personal. Activa **Entornos remotos SSH** en los ajustes del complemento y confirma el aviso de riesgo. El host local de DSH conserva las credenciales SSH, a las que pueden acceder procesos que se ejecuten con la misma cuenta del sistema operativo. Puedes gestionar las conexiones desde «SSH remoto → Gestionar» en los ajustes o «Gestionar remotos SSH» en Carpetas del espacio de trabajo.
+
+**Modo personal.** Abre «Gestionar remotos SSH» → «Añadir conexión». Introduce el host y las credenciales, confirma la clave del host y guarda la conexión. En el segundo paso, detecta Node, instala el helper, marca «Permitir ejecución de comandos» y pulsa «Finalizar» para guardar. Vuelve a Carpetas del espacio de trabajo y abre «Gestionar vínculos de raíces remotas». Elige una conexión guardada, selecciona un directorio y configura sus permisos y regístrala desde el menú «…» de su fila en los directorios remotos. Una misma conexión admite varios directorios.
+
+Las herramientas requieren un entorno de ejecución SSH compatible. El Registry autoriza cada llamada según los directorios registrados en el espacio de trabajo actual. Al desactivar SSH se descargan las herramientas y se cierra el plano de control remoto. Consulta la [guía de entornos remotos SSH](./docs/guide/user/ssh-remote-environments.en.md) (en inglés).
 
 ### Accesos en la interfaz
 

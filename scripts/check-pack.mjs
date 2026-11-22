@@ -26,6 +26,7 @@ import { join, posix, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { gunzipSync } from 'node:zlib'
 import { parse } from 'yaml'
+import { importSpecifiers, staticSshImports } from './lib/static-ssh-imports.mjs'
 
 /** Repository root (this file lives in `scripts/`). */
 const REPO_ROOT = resolve(fileURLToPath(new URL('..', import.meta.url)))
@@ -141,16 +142,6 @@ function moduleTarget(name, pkg) {
   return file === undefined ? undefined : `package/${file.replace(/^\.\//, '')}`
 }
 
-/** Every specifier a packed ESM file references. */
-function importSpecifiers(source) {
-  const found = []
-  for (const match of source.matchAll(/(?:import|export)[^'"]*?\bfrom\s*['"]([^'"]+)['"]|import\s*['"]([^'"]+)['"]|import\(\s*['"]([^'"]+)['"]\s*\)/g)) {
-    const specifier = match[1] ?? match[2] ?? match[3]
-    if (specifier !== undefined) found.push(specifier)
-  }
-  return found
-}
-
 /** `a.js`, `a.json`, or `a/index.js`-style resolution inside the member set. */
 function resolveMember(from, specifier, members) {
   const base = posix.join(posix.dirname(from), specifier)
@@ -173,6 +164,10 @@ function main() {
     for (const name of names) console.log(`  ${name}`)
 
     for (const required of REQUIRED) assert(members.has(required), `missing required member ${required}`)
+    for (const name of names) {
+      assert(!name.startsWith('package/lib/remote-broker.js') && !name.startsWith('package/scripts/ssh-broker/')
+        && !name.startsWith('package/lib/types/remote/broker/'), `SSH broker artifact must stay out of the personal-only bundle: ${name}`)
+    }
 
     const manifestEntry = members.get('package/package.json')
     if (manifestEntry === undefined) {
@@ -219,7 +214,11 @@ function main() {
       const name = queue.pop()
       if (visited.has(name)) continue
       visited.add(name)
-      for (const specifier of importSpecifiers(members.get(name).toString('utf8'))) {
+      const source = members.get(name).toString('utf8')
+      for (const specifier of staticSshImports(source)) {
+        assert(false, `${name} statically imports ${specifier}: SSH peers must be host-anchored and loaded on demand`)
+      }
+      for (const specifier of importSpecifiers(source)) {
         if (!specifier.startsWith('.')) continue
         const resolved = resolveMember(name, specifier, members)
         assert(resolved !== undefined, `${name} imports ${specifier}, which is not in the tarball`)

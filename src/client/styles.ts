@@ -1219,9 +1219,8 @@ aside[data-mrfw-navigator] > [data-files-search-settings] {
   background: var(--dsw-alias-interactive-bg-hover);
 }
 
-/* The scroll region is the additional-root list; this body scroll is only the
-   fallback for a viewport too short to hold the header, the primary row and
-   the add row, so those controls are never clipped. */
+/* Local roots scroll in their own list. The body handles any remaining
+   overflow from the primary root, SSH section and add controls. */
 .mrfw-body {
   display: flex;
   flex-direction: column;
@@ -1262,7 +1261,12 @@ aside[data-mrfw-navigator] > [data-files-search-settings] {
   margin-top: 8px;
 }
 
-/* The panel's only normal scroll region. The rows are the variable part, so
+/* Keep the section gap when the preceding local section is flattened. */
+.mrfw-sectionAdditional + .mrfw-section {
+  margin-top: 8px;
+}
+
+/* The local list is the only inner scroll region. The rows are variable, so
    they take the space left below the fixed sections, capped relative to the
    window (never a pixel height), and scroll in place. It does NOT contain
    overscroll: on a short dialog the body is the fallback scroll, and a wheel at
@@ -1326,7 +1330,8 @@ aside[data-mrfw-navigator] > [data-files-search-settings] {
   border-bottom: 0.5px solid var(--dsw-alias-border-l2);
 }
 
-.mrfw-rowBare {
+.mrfw-rowBare,
+.mrfw-row:last-child {
   border-bottom: none;
 }
 
@@ -1664,11 +1669,35 @@ aside[data-mrfw-navigator] > [data-files-search-settings] {
 /* The access dropdown's capsule trigger: the Menu anchor wrapper is the flex
    item, the button inside keeps the control row's 32px capsule recipe. */
 .mrfw-accessTrigger {
+  box-sizing: border-box;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 32px;
   padding: 0 12px;
+  border: 0.5px solid var(--dsw-alias-border-l2);
+  border-radius: var(--dsw-radius-md);
+  background: var(--dsw-alias-bg-layer-1, var(--dsw-alias-bg-base));
+  color: var(--dsw-alias-label-primary);
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.mrfw-accessTrigger:hover:not(:disabled) {
+  background: var(--dsw-alias-interactive-bg-hover);
+}
+
+.mrfw-accessTrigger:disabled {
+  opacity: 0.5;
+  cursor: default;
 }
 
 .mrfw-cwdTag {
   flex: none;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
   padding: 0 6px;
   border-radius: 4px;
   background: var(--dsw-alias-interactive-bg-hover);
@@ -1700,10 +1729,8 @@ aside[data-mrfw-navigator] > [data-files-search-settings] {
 .mrfw-actions {
   display: flex;
   flex: none;
-  /* One control row by default: the manual path field is the only flexible
-     item and absorbs the spare width first. Wrapping is kept because the
-     root-limit hint claims a line of its own, and because the ≤560px dialog
-     still needs the controls to reflow instead of overflowing. */
+  /* The root-limit hint takes its own line. On narrow dialogs the buttons can
+     also wrap to stay inside the body. */
   flex-wrap: wrap;
   align-items: center;
   gap: 8px;
@@ -1718,13 +1745,7 @@ aside[data-mrfw-navigator] > [data-files-search-settings] {
   flex: 0 0 100%;
 }
 
-/* The manual path field absorbs the row's spare width and gives way first. */
-.mrfw-manualPath {
-  flex: 1 1 120px;
-  min-width: 80px;
-}
-
-/* One control row, one height: the capsule buttons match the 32px input. */
+/* Use one height for the add and worktree buttons. */
 .mrfw-actions .mrfw-btn {
   height: 32px;
   border-radius: 16px;
@@ -1732,6 +1753,1336 @@ aside[data-mrfw-navigator] > [data-files-search-settings] {
 
 .mrfw-actions .mrfw-iconBtn {
   width: 32px;
+}
+
+/* The add button is the row's primary control: the wrap stretches to the
+   worktree button so the row reads as one add affordance plus its satellite.
+   With the remote menu ON the trigger inside stays button-sized and
+   left-aligned — the wrap's filler space is inert because the hover-open
+   handler lives on the trigger, not the wrap. */
+.mrfw-addWrap,
+.mrfw-addBtn {
+  display: flex;
+}
+
+.mrfw-addWrap {
+  flex: 1 1 auto;
+}
+
+.mrfw-addBtn {
+  flex: 1 1 auto;
+  align-items: center;
+  justify-content: center;
+  min-width: 64px;
+}
+
+.mrfw-addWrap {
+  position: relative;
+}
+
+.mrfw-addWrap .mrfw-addBtn {
+  flex: 1 1 auto;
+}
+
+/* The add trust dialog: the named path on its own row, the access picker on
+   the next. */
+.mrfw-trustPath {
+  margin: 0 0 12px;
+  padding: 8px 10px;
+  border-radius: var(--dsw-radius-md);
+  background: var(--dsw-alias-interactive-bg-hover);
+  font-family: var(--dsw-font-mono, monospace);
+  font-size: 12px;
+  word-break: break-all;
+}
+
+.mrfw-trustAccess {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.mrfw-trustAccessLabel {
+  font-size: 12px;
+  color: var(--dsw-alias-label-secondary);
+}
+
+/* The guided-flow shell: a wide card with a step rail on the left. */
+.mrfw-wizCard {
+  position: relative;
+  display: flex;
+  width: min(720px, calc(100vw - 48px));
+  max-height: min(640px, calc(100vh - 48px));
+  border-radius: var(--dsw-radius-panel);
+  background: var(--dsw-alias-bg-layer-1, var(--dsw-alias-bg-base));
+  box-shadow: var(--dsw-elevation-prominent, 0 8px 40px rgba(0, 0, 0, 0.24));
+  overflow: hidden;
+  outline: none;
+}
+
+.mrfw-wizGrid {
+  display: grid;
+  grid-template-columns: 180px 1fr;
+  flex: 1 1 auto;
+  min-height: 0;
+  width: 100%;
+}
+
+.mrfw-wizRail {
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+  padding: 22px 16px;
+  border-inline-end: 0.5px solid var(--dsw-alias-border-l2);
+  background: var(--dsw-alias-bg-module-platform, var(--dsw-alias-bg-base));
+}
+
+.mrfw-wizTitle {
+  margin: 0;
+  font-size: 13px;
+  font-weight: 600;
+  line-height: 20px;
+  color: var(--dsw-alias-label-primary);
+}
+
+.mrfw-wizSteps {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.mrfw-wizStep {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 6px 4px;
+  border-radius: var(--dsw-radius-md);
+}
+
+.mrfw-wizDot {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  height: 20px;
+  flex: none;
+  border-radius: 50%;
+  font-size: 11px;
+  line-height: 1;
+  color: var(--dsw-alias-label-tertiary);
+  border: 1px solid var(--dsw-alias-border-l2);
+}
+
+.mrfw-wizDot[data-state='current'] {
+  color: var(--dsw-alias-label-primary-foreground);
+  background: var(--dsw-alias-brand-primary);
+  border-color: var(--dsw-alias-brand-primary);
+}
+
+.mrfw-wizDot[data-state='done'] {
+  border-color: transparent;
+}
+
+.mrfw-wizStepTitle {
+  font-size: 12px;
+  line-height: 18px;
+  color: var(--dsw-alias-label-tertiary);
+}
+
+.mrfw-wizStep[data-state='current'] .mrfw-wizStepTitle {
+  color: var(--dsw-alias-label-primary);
+  font-weight: 500;
+}
+
+.mrfw-wizStep[data-state='done'] .mrfw-wizStepTitle {
+  color: var(--dsw-alias-label-secondary);
+}
+
+.mrfw-wizMain {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  min-height: 0;
+}
+
+/* A fixed header strip owns the close control so it never overlaps the
+   scrollable step content underneath it. */
+.mrfw-wizHead {
+  flex: none;
+  display: flex;
+  justify-content: flex-end;
+  padding: 10px 12px 0;
+}
+
+.mrfw-wizBody {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  padding: 10px 20px 12px;
+}
+
+.mrfw-wizFoot {
+  flex: none;
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  padding: 12px 20px 16px;
+  border-top: 0.5px solid var(--dsw-alias-border-l2);
+}
+
+.mrfw-wizActions {
+  display: flex;
+  gap: 8px;
+}
+
+.mrfw-wizStack {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.mrfw-wizField {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.mrfw-wizFieldPair {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 12px;
+}
+
+/* The endpoint line in ssh-target shape: a user field, the @ separator, the
+   hostname taking the spare width, then the : separator and a short port. */
+.mrfw-wizTargetRow {
+  display: flex;
+  align-items: flex-start;
+  gap: 6px;
+}
+
+.mrfw-wizTargetRow .mrfw-wizField {
+  min-width: 0;
+}
+
+.mrfw-wizTargetUser {
+  flex: 0 1 104px;
+}
+
+.mrfw-wizTargetHost {
+  flex: 1 1 auto;
+}
+
+.mrfw-wizTargetPort {
+  flex: 0 0 68px;
+}
+
+.mrfw-wizTargetSep {
+  flex: none;
+  /* 24px clears the field label so the separator lands on the input line. */
+  margin-top: 24px;
+  color: var(--dsw-alias-label-tertiary);
+  font-size: 13px;
+  line-height: 32px;
+}
+
+.mrfw-wizFieldLabel {
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--dsw-alias-label-secondary);
+}
+
+.mrfw-wizFieldHint {
+  font-size: 11px;
+  line-height: 16px;
+  color: var(--dsw-alias-label-tertiary);
+}
+
+.mrfw-wizField[data-invalid='true'] .mrfw-wizFieldHint {
+  color: var(--dsw-alias-state-error-primary);
+}
+
+.mrfw-wizSection {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 12px;
+  border-radius: var(--dsw-radius-lg);
+  background: var(--dsw-alias-settings-card-fill, var(--dsw-alias-interactive-bg-hover));
+}
+
+.mrfw-wizCheck {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.mrfw-wizCheckRow {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 20px;
+}
+
+.mrfw-wizCheckHint {
+  padding-inline-start: 24px;
+  font-size: 11px;
+  line-height: 16px;
+  color: var(--dsw-alias-label-tertiary);
+}
+
+.mrfw-checkRow {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 12px;
+  color: var(--dsw-alias-label-primary);
+}
+
+/* The selectable row: icon, a title/subtitle stack, and a trailing status. */
+.mrfw-choice {
+  box-sizing: border-box;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  width: 100%;
+  padding: 10px 12px;
+  border: 0.5px solid var(--dsw-alias-border-l2);
+  border-radius: var(--dsw-radius-lg);
+  background: var(--dsw-alias-bg-layer-1, var(--dsw-alias-bg-base));
+  color: var(--dsw-alias-label-primary);
+  font: inherit;
+  text-align: start;
+  cursor: pointer;
+}
+
+button.mrfw-choice:hover:not(:disabled) {
+  background: var(--dsw-alias-interactive-bg-hover);
+}
+
+.mrfw-choice.mrfw-choiceOn {
+  border-color: var(--dsw-alias-brand-primary);
+  box-shadow: 0 0 0 1px var(--dsw-alias-brand-primary) inset;
+}
+
+.mrfw-choice:disabled {
+  opacity: 0.55;
+  cursor: default;
+}
+
+.mrfw-choiceIcon {
+  display: inline-flex;
+  flex: none;
+  color: var(--dsw-alias-label-secondary);
+}
+
+.mrfw-choiceText {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+  flex: 1 1 auto;
+}
+
+.mrfw-choiceTitle {
+  font-size: 12.5px;
+  font-weight: 500;
+  line-height: 18px;
+}
+
+.mrfw-choiceSub,
+.mrfw-choiceHint {
+  font-size: 11px;
+  line-height: 16px;
+  color: var(--dsw-alias-label-tertiary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.mrfw-choiceTrail {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  flex: none;
+  color: var(--dsw-alias-label-secondary);
+}
+
+/* One readiness line inside the environment step. */
+.mrfw-checkItem {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 6px 0;
+}
+
+.mrfw-checkDot {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  height: 20px;
+  flex: none;
+}
+
+.mrfw-checkDotFallback {
+  display: inline-block;
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  border: 1px solid var(--dsw-alias-border-l2);
+  color: var(--dsw-alias-state-success-primary);
+  font-size: 9px;
+  line-height: 10px;
+  text-align: center;
+}
+
+.mrfw-checkDotFallback[data-state='done'] {
+  border-color: var(--dsw-alias-state-success-primary);
+}
+
+.mrfw-checkDotFallback[data-state='warning'] {
+  border-color: var(--dsw-alias-state-warn-primary);
+}
+
+.mrfw-checkDotFallback[data-state='error'] {
+  border-color: var(--dsw-alias-state-error-primary);
+}
+
+.mrfw-checkText {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+  flex: 1 1 auto;
+}
+
+.mrfw-checkLabel {
+  font-size: 12px;
+  line-height: 18px;
+  color: var(--dsw-alias-label-primary);
+}
+
+.mrfw-checkDetail {
+  font-size: 11px;
+  line-height: 16px;
+  color: var(--dsw-alias-label-tertiary);
+}
+
+.mrfw-checkAction {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+}
+
+.mrfw-wizKeys {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.mrfw-wizFingerprint {
+  font-family: var(--dsw-font-mono, monospace);
+}
+
+.mrfw-wizPicker,
+.mrfw-wizPickerCompact {
+  flex: none;
+  display: inline-flex;
+}
+
+.mrfw-wizPicker {
+  flex: 1 1 auto;
+}
+
+.mrfw-wizPickerBtn {
+  box-sizing: border-box;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  height: 32px;
+  padding: 0 10px;
+  border: 0.5px solid var(--dsw-alias-border-l2);
+  border-radius: var(--dsw-radius-md);
+  background: var(--dsw-alias-bg-layer-1, var(--dsw-alias-bg-base));
+  color: var(--dsw-alias-label-primary);
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.mrfw-wizPickerFull {
+  flex: 1 1 auto;
+  justify-content: space-between;
+}
+
+.mrfw-wizPickerLabel {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* The browse dialog's own column: path bar, status line, then the floating
+   directory rows — spaced like the host directory browser so nothing glues. */
+.mrfw-wizBrowse {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  min-height: 0;
+}
+
+/* The directory column floats on the card (no boxed list): 2px row gaps, a
+   scrollbar lane on the right — the host browser's row form. */
+.mrfw-wizDirList {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  max-height: 280px;
+  overflow-y: auto;
+  padding-right: 8px;
+}
+
+.mrfw-wizDirRow {
+  box-sizing: border-box;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  flex: none;
+  height: 28px;
+  padding: 4px;
+  border: none;
+  border-radius: var(--dsw-radius-sm);
+  background: transparent;
+  font: inherit;
+  font-size: 13px;
+  line-height: 20px;
+  font-weight: 500;
+  color: var(--dsw-alias-label-primary);
+  text-align: start;
+  cursor: pointer;
+}
+
+.mrfw-wizDirRow:hover {
+  background: var(--dsw-alias-interactive-bg-hover);
+}
+
+.mrfw-wizDirIcon {
+  flex: none;
+  color: var(--dsw-alias-label-secondary);
+}
+
+.mrfw-wizDirName {
+  flex: 1 1 0;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.mrfw-wizDirArrow {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  color: var(--dsw-alias-label-tertiary);
+}
+
+.mrfw-wizSummary {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin: 0;
+  padding: 14px;
+  border-radius: var(--dsw-radius-lg);
+  background: var(--dsw-alias-settings-card-fill, var(--dsw-alias-interactive-bg-hover));
+}
+
+.mrfw-wizSummaryRow {
+  display: grid;
+  grid-template-columns: 96px 1fr;
+  gap: 12px;
+  font-size: 12px;
+}
+
+.mrfw-wizSummaryRow dt {
+  color: var(--dsw-alias-label-tertiary);
+}
+
+.mrfw-wizSummaryRow dd {
+  margin: 0;
+  color: var(--dsw-alias-label-primary);
+  word-break: break-all;
+}
+
+.mrfw-wizDone {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+  padding: 32px 16px;
+  text-align: center;
+}
+
+.mrfw-wizDoneMark {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 40px;
+  height: 40px;
+  border-radius: 50%;
+  color: var(--dsw-alias-state-success-primary);
+  background: var(--dsw-alias-interactive-bg-hover);
+}
+
+.mrfw-wizDoneTitle {
+  margin: 0;
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--dsw-alias-label-primary);
+}
+
+.mrfw-wizEmpty {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 8px;
+}
+
+.mrfw-subsection {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding-top: 8px;
+}
+
+.mrfw-sshArea {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.mrfw-sshDialog {
+  width: min(760px, 100%);
+  max-height: calc(100vh - 48px);
+}
+
+.mrfw-sshDialogContent {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+
+/* Follow the host SettingsRoot grid and ModelsSection surface tokens. */
+.mrfw-sshSettingsOverlay {
+  position: fixed;
+  inset: 0;
+  z-index: 1000;
+  display: grid;
+  place-items: center;
+}
+
+.mrfw-sshSettingsMask {
+  position: absolute;
+  inset: var(--dsh-frame-chrome-top, 0px) 0 0;
+  background: var(--dsw-alias-bg-mask-1);
+  backdrop-filter: var(--dsw-mask-blur);
+}
+
+.mrfw-sshSettingsDialog {
+  position: relative;
+  box-sizing: border-box;
+  width: min(800px, calc(100vw - 48px));
+  height: min(800px, calc(100dvh - 2 * max(24px, var(--dsh-frame-overlay-top, 24px))));
+  overflow: hidden;
+  border-radius: var(--dsw-radius-panel);
+  background: var(--dsw-alias-bg-layer-2);
+  box-shadow: var(--dsw-elevation-prominent);
+  --dsh-scrollbar-thumb: var(--dsw-alias-scrollbar-bg-l2);
+  --dsh-scrollbar-thumb-hover: var(--dsw-alias-scrollbar-hover-l2);
+}
+
+.mrfw-sshSettingsDialog:focus {
+  outline: none;
+}
+
+.mrfw-sshSettingsGrid {
+  display: grid;
+  grid-template-columns: 188px minmax(0, 1fr);
+  grid-template-rows: auto minmax(0, 1fr);
+  grid-template-areas: "title header" "nav pane";
+  min-height: 0;
+}
+
+.mrfw-sshSettingsDialog > .mrfw-pendingBar,
+.mrfw-sshSettingsFallback .mrfw-pendingBar {
+  position: absolute;
+  inset-inline: 0;
+}
+
+.mrfw-sshSettingsTitle {
+  grid-area: title;
+  min-width: 0;
+  margin: 0;
+  padding: 22px 12px 8px 24px;
+  color: var(--dsw-alias-label-primary);
+  font-size: 16px;
+  line-height: 24px;
+  font-weight: 500;
+  overflow-wrap: anywhere;
+}
+
+.mrfw-sshSettingsHeader {
+  grid-area: header;
+  display: flex;
+  justify-content: flex-end;
+  align-items: flex-start;
+  padding: 20px 14px 6px;
+}
+
+.mrfw-sshSettingsClose {
+  display: grid;
+  place-items: center;
+  width: 28px;
+  height: 28px;
+  border: 0;
+  border-radius: var(--dsw-radius-sm);
+  background: transparent;
+  color: var(--dsw-alias-label-primary);
+  cursor: pointer;
+}
+
+.mrfw-sshSettingsNav {
+  grid-area: nav;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-height: 0;
+  padding: 10px 12px 0;
+  overflow-y: auto;
+}
+
+.mrfw-sshSettingsNavItem {
+  display: flex;
+  flex: none;
+  align-items: center;
+  gap: 8px;
+  height: 40px;
+  min-width: 0;
+  padding: 0 16px 0 12px;
+  border: 0;
+  border-radius: var(--dsw-radius-md);
+  background: transparent;
+  color: var(--dsw-alias-label-primary);
+  font: inherit;
+  font-size: 14px;
+  line-height: 22px;
+  text-align: start;
+  cursor: pointer;
+}
+
+.mrfw-sshSettingsNavItem svg {
+  flex: none;
+}
+
+.mrfw-sshSettingsNavItem span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.mrfw-sshSettingsClose:hover,
+.mrfw-sshSettingsNavItem:hover {
+  background: var(--dsw-alias-interactive-bg-hover);
+}
+
+.mrfw-sshSettingsNavItem[aria-current='true'] {
+  background: var(--dsw-specific-sidebar-nav-item-active, var(--dsw-alias-interactive-bg-hover));
+}
+
+.mrfw-sshSettingsClose:focus-visible,
+.mrfw-sshSettingsNavItem:focus-visible,
+.mrfw-sshSettingsAdd:focus-visible,
+.mrfw-sshSettingsCard .mrfw-iconBtn:focus-visible {
+  outline: 2px solid var(--dsw-focus-ring-color, var(--dsw-alias-state-business-primary));
+  outline-offset: -2px;
+}
+
+.mrfw-sshSettingsPane {
+  grid-area: pane;
+  min-width: 0;
+  min-height: 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  padding: 0 24px 24px;
+}
+
+.mrfw-sshSettingsHeading {
+  display: grid;
+  gap: 12px;
+  margin-block-end: 24px;
+}
+
+.mrfw-sshSettingsHeading h3 {
+  margin: 0;
+  font-size: 16px;
+  line-height: 24px;
+  font-weight: 500;
+  color: var(--dsw-alias-label-primary);
+}
+
+.mrfw-sshSettingsHeading p {
+  margin: 0;
+  font-size: 14px;
+  line-height: 22px;
+  color: var(--dsw-alias-label-tertiary);
+}
+
+/* Older hosts provide Modal without the layer hook. Keep its built-in chrome. */
+.mrfw-sshSettingsFallback,
+.mrfw-sshSettingsFallback > :has(> .mrfw-sshSettingsGrid) {
+  flex: 1 1 auto;
+  min-height: 0;
+}
+
+.mrfw-sshSettingsFallback > :has(> .mrfw-sshSettingsGrid) {
+  margin: 0;
+  padding: 0;
+}
+
+.mrfw-sshSettingsFallback .mrfw-sshSettingsGrid {
+  flex: 1 1 auto;
+  grid-template-rows: minmax(0, 1fr);
+  grid-template-areas: "nav pane";
+}
+
+.mrfw-sshSettingsInventory,
+.mrfw-sshSettingsList {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  min-width: 0;
+}
+
+.mrfw-sshSettingsList {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+}
+
+.mrfw-sshSettingsCard {
+  min-width: 0;
+  padding: 12px 14px;
+  border: 0.5px solid var(--dsw-alias-settings-card-stroke, var(--dsw-alias-border-l4));
+  border-radius: var(--dsw-radius-xl, 20px);
+  background: var(--dsw-alias-settings-card-fill, var(--dsw-alias-bg-layer-2));
+}
+
+.mrfw-sshSettingsCardMain,
+.mrfw-sshSettingsCardActions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+}
+
+.mrfw-sshSettingsCardMain {
+  gap: 10px 16px;
+}
+
+.mrfw-sshSettingsCardText {
+  display: flex;
+  flex: 1 1 14rem;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.mrfw-sshSettingsCardTitle,
+.mrfw-sshSettingsFacts {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 8px;
+}
+
+.mrfw-sshSettingsCardTitle {
+  font-size: 14px;
+  line-height: 22px;
+  font-weight: 500;
+  color: var(--dsw-alias-label-primary);
+}
+
+.mrfw-sshSettingsCardActions {
+  justify-content: flex-end;
+  gap: 4px;
+  max-width: 100%;
+  margin-inline-start: auto;
+}
+
+.mrfw-sshSettingsIdentifier,
+.mrfw-sshSettingsFacts {
+  font-size: 12px;
+  line-height: 18px;
+  color: var(--dsw-alias-label-secondary);
+}
+
+.mrfw-sshSettingsIdentifier {
+  font-family: var(--ds-font-family-code, ui-monospace, monospace);
+}
+
+.mrfw-sshConnectionStatus {
+  flex: none;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--dsw-alias-state-warn-primary);
+}
+
+.mrfw-sshConnectionStatus[data-ready='true'] {
+  background: var(--dsw-alias-state-success-primary);
+}
+
+.mrfw-sshSettingsAdd.mrfw-sshButton {
+  width: 100%;
+  min-height: 44px;
+  height: auto;
+  padding: 8px 12px;
+  border: 1px dashed var(--dsw-alias-border-l3);
+  border-radius: var(--dsw-radius-lg, 16px);
+  background: transparent;
+  box-shadow: none;
+}
+
+.mrfw-sshSettingsAdd .mrfw-btnLabel {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  white-space: normal;
+}
+
+.mrfw-sshSettingsAdd:hover:not(:disabled) {
+  background: var(--dsw-alias-interactive-bg-hover);
+}
+
+.mrfw-sshSettingsInventory button[aria-pressed='true'] {
+  background: var(--dsw-alias-interactive-bg-hover);
+}
+
+.mrfw-sshSettingsCard .mrfw-iconBtn {
+  border-radius: var(--dsw-radius-sm);
+}
+
+.mrfw-sshSettingsCard .mrfw-sshDanger:hover:not(:disabled) {
+  background: var(--dsw-alias-interactive-bg-hover-danger);
+}
+
+.mrfw-sshSettingsCard > .mrfw-sshEnvExtra {
+  margin-top: 12px;
+  padding-top: 12px;
+  border-top: 1px solid var(--dsw-alias-border-l2);
+}
+
+.mrfw-sshSettingsCard > .mrfw-sshEdit {
+  margin-top: 12px;
+  padding: 14px 16px;
+  border-radius: var(--dsw-radius-lg);
+  background: var(--dsw-alias-bg-module-platform);
+}
+
+.mrfw-sshSettingsCard .mrfw-sshEdit > .mrfw-sshForm {
+  border: 0;
+  padding: 0;
+}
+
+@media (max-width: 767px) {
+  html:not([data-windows-titlebar]):not([data-platform='darwin']) .mrfw-sshSettingsOverlay {
+    background: var(--dsw-alias-bg-layer-2);
+  }
+
+  html:not([data-windows-titlebar]):not([data-platform='darwin']) .mrfw-sshSettingsOverlay > .mrfw-sshSettingsDialog {
+    width: 100%;
+    height: 100%;
+    border-radius: 0;
+  }
+
+  html:not([data-windows-titlebar]):not([data-platform='darwin']) .mrfw-sshSettingsGrid {
+    grid-template-columns: minmax(0, 1fr) auto;
+    grid-template-rows: auto auto minmax(0, 1fr);
+    grid-template-areas: "title header" "nav nav" "pane pane";
+  }
+
+  html:not([data-windows-titlebar]):not([data-platform='darwin']) .mrfw-sshSettingsFallback .mrfw-sshSettingsGrid {
+    grid-template-columns: minmax(0, 1fr);
+    grid-template-rows: auto minmax(0, 1fr);
+    grid-template-areas: "nav" "pane";
+  }
+
+  html:not([data-windows-titlebar]):not([data-platform='darwin']) .mrfw-sshSettingsTitle {
+    padding: 22px 0 0 16px;
+  }
+
+  html:not([data-windows-titlebar]):not([data-platform='darwin']) .mrfw-sshSettingsHeader {
+    padding: 20px 16px 0 10px;
+  }
+
+  html:not([data-windows-titlebar]):not([data-platform='darwin']) .mrfw-sshSettingsNav {
+    flex-direction: row;
+    padding: 12px 16px 14px;
+    overflow-x: auto;
+    overflow-y: hidden;
+    scrollbar-width: none;
+  }
+
+  html:not([data-windows-titlebar]):not([data-platform='darwin']) .mrfw-sshSettingsNavItem {
+    flex: 1 0 auto;
+    justify-content: center;
+    min-width: 108px;
+    padding: 0 14px;
+  }
+
+  html:not([data-windows-titlebar]):not([data-platform='darwin']) .mrfw-sshSettingsPane {
+    padding: 0 16px 24px;
+  }
+}
+
+.mrfw-sshStep {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding-top: 10px;
+  border-top: 0.5px solid var(--dsw-alias-border-l2);
+}
+
+.mrfw-sshStep:first-child {
+  padding-top: 0;
+  border-top: none;
+}
+
+.mrfw-sshStepTitle {
+  font-size: 13px;
+  line-height: 20px;
+  font-weight: 500;
+  color: var(--dsw-alias-label-primary);
+}
+
+.mrfw-sshForm {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 12px;
+  border: 0.5px solid var(--dsw-alias-border-l2);
+  border-radius: 8px;
+}
+
+.mrfw-sshEdit {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+/* The old panel class was designed for horizontal rows: flex-basis 220px is
+   a width there, but a height basis in a column. Keep it from ever stretching
+   a control inside the dialog forms. */
+.mrfw-sshForm .mrfw-input {
+  flex: 0 0 auto;
+  width: 100%;
+}
+
+.mrfw-sshGrid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px 12px;
+}
+
+.mrfw-sshField {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+}
+
+.mrfw-sshFieldWide {
+  grid-column: 1 / -1;
+}
+
+.mrfw-sshFieldInvalid .mrfw-sshInput {
+  border-color: var(--dsw-alias-state-error-primary);
+}
+
+.mrfw-sshFieldInvalid .mrfw-sshPickerTrigger {
+  --dsh-button-outline-color: var(--dsw-alias-state-error-primary);
+}
+
+.mrfw-sshTargetRow {
+  grid-column: 1 / -1;
+  display: flex;
+  align-items: flex-end;
+  gap: 6px;
+}
+
+.mrfw-sshTargetRow .mrfw-sshField {
+  min-width: 0;
+}
+
+.mrfw-sshTargetUser {
+  flex: 0 1 160px;
+}
+
+.mrfw-sshTargetHost {
+  flex: 1 1 auto;
+}
+
+.mrfw-sshTargetPort {
+  flex: 0 0 92px;
+}
+
+.mrfw-sshTargetSep {
+  flex: none;
+  align-self: flex-end;
+  color: var(--dsw-alias-label-tertiary);
+  font-size: 13px;
+  line-height: 32px;
+}
+
+.mrfw-sshTag {
+  flex: none;
+}
+
+.mrfw-sshFieldLabel {
+  font-size: 12px;
+  line-height: 18px;
+  color: var(--dsw-alias-label-secondary);
+}
+
+.mrfw-sshFieldHint {
+  font-size: 12px;
+  line-height: 18px;
+  color: var(--dsw-alias-label-tertiary);
+}
+
+.mrfw-sshInput,
+.mrfw-sshHelperInput,
+.mrfw-teamInput,
+button.mrfw-sshButton {
+  box-sizing: border-box;
+  height: 32px;
+}
+
+.mrfw-sshInput {
+  display: flex;
+  width: 100%;
+}
+
+.mrfw-sshPicker,
+button.mrfw-sshPickerTrigger {
+  width: 100%;
+  min-width: 0;
+}
+
+button.mrfw-sshPickerTrigger {
+  justify-content: space-between;
+}
+
+.mrfw-sshPickerLabel {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.mrfw-sshPickerTrigger svg,
+.mrfw-sshPickerCompact {
+  flex: none;
+}
+
+.mrfw-sshAliasInput {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.mrfw-sshAliasInput > .mrfw-sshInput {
+  min-width: 0;
+}
+
+.mrfw-sshTextarea {
+  box-sizing: border-box;
+  width: 100%;
+  min-height: 72px;
+  padding: 8px;
+  border: 0.5px solid var(--dsw-alias-border-l4);
+  border-radius: var(--dsw-radius-md);
+  background: var(--dsw-alias-bg-layer-1);
+  color: var(--dsw-alias-label-primary);
+  font-family: monospace;
+  font-size: 13px;
+  line-height: 20px;
+  outline: none;
+  resize: vertical;
+}
+
+.mrfw-sshTextarea:focus {
+  border-color: var(--dsw-alias-state-business-primary);
+}
+
+.mrfw-sshCheckRow {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px 16px;
+}
+
+.mrfw-sshCheckbox {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 14px;
+  line-height: 20px;
+  color: var(--dsw-alias-label-primary);
+  cursor: pointer;
+}
+
+.mrfw-sshCheckbox input {
+  flex: 0 0 auto;
+  width: 16px;
+  height: 16px;
+  margin: 0;
+  accent-color: var(--dsw-alias-brand-primary);
+  cursor: inherit;
+}
+
+.mrfw-sshRadioGroup {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 12px;
+}
+
+.mrfw-sshRadioOption {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 14px;
+  line-height: 20px;
+  color: var(--dsw-alias-label-primary);
+  cursor: pointer;
+}
+
+.mrfw-sshRadioOption input {
+  flex: 0 0 auto;
+  width: 16px;
+  height: 16px;
+  margin: 0;
+  accent-color: var(--dsw-alias-brand-primary);
+  cursor: inherit;
+}
+
+.mrfw-sshInlineNote {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+
+.mrfw-sshDanger:is(.mrfw-sshButton, .mrfw-iconBtn) {
+  color: var(--dsw-alias-state-error-primary);
+}
+
+.mrfw-sshHelperRow {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  margin-top: 4px;
+}
+
+.mrfw-sshHelperInput {
+  display: flex;
+  flex: 0 1 auto;
+  width: 240px;
+  max-width: 100%;
+}
+
+.mrfw-teamInput {
+  display: flex;
+  width: 100%;
+}
+
+@media (max-width: 640px) {
+  .mrfw-sshGrid {
+    grid-template-columns: 1fr;
+  }
+
+  .mrfw-sshFieldWide {
+    grid-column: auto;
+  }
+}
+
+.mrfw-sshRowActions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+}
+
+.mrfw-sshBindingList > .mrfw-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+}
+
+.mrfw-sshBindingList .mrfw-sshRowActions {
+  flex-wrap: nowrap;
+}
+
+.mrfw-sshBindingList .mrfw-accessBadge {
+  min-width: 0;
+  max-width: 100%;
+}
+
+.mrfw-sshBindingList .mrfw-accessBadge svg {
+  flex: none;
+}
+
+.mrfw-sshBindingList .mrfw-note {
+  overflow-wrap: anywhere;
+}
+
+.mrfw-sshAddRow {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.mrfw-sshScanRow {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.mrfw-sshPathBar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+}
+
+.mrfw-sshPathBar .mrfw-sshInput {
+  flex: 1 1 8rem;
+  min-width: 0;
+}
+
+.mrfw-sshPathBar > :is(.mrfw-sshRowActions, .mrfw-sshButton) {
+  margin-inline-start: auto;
+}
+
+/* Nested decisions are narrower than the management card. */
+.mrfw-sshCredentialDialog {
+  width: min(620px, 100%);
+  max-height: calc(100vh - 48px);
 }
 
 /* The worktree suggestion notice (ADR-0039 第二十一次修订): a persistent,
@@ -1957,5 +3308,146 @@ aside[data-mrfw-navigator] > [data-files-search-settings] {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+/* Pending feedback: spinner, status line, and the dialog progress bar. */
+.mrfw-pendingSpinner {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  justify-content: center;
+}
+
+.mrfw-spinnerRing {
+  box-sizing: border-box;
+  border: 1.5px solid currentColor;
+  border-right-color: transparent;
+  border-radius: 50%;
+  animation: mrfw-spin 0.9s linear infinite;
+}
+
+@keyframes mrfw-spin {
+  to { transform: rotate(360deg); }
+}
+
+.mrfw-doneDot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--dsw-alias-state-business-primary);
+}
+
+button.mrfw-sshButton {
+  position: relative;
+}
+
+.mrfw-btnLabel {
+  display: inline-flex;
+  align-items: center;
+  gap: inherit;
+  transition: opacity 120ms var(--ds-ease-in-out);
+}
+
+.mrfw-btnLoading .mrfw-btnLabel {
+  opacity: 0;
+}
+
+.mrfw-loadingSpinner {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  animation: mrfw-fade-in 120ms var(--ds-ease-in-out) both;
+}
+
+.mrfw-loadingSpinner > * {
+  color: inherit;
+}
+
+.mrfw-sshButton[aria-busy='true'] {
+  cursor: progress;
+}
+
+.mrfw-statusLine {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin: 0;
+  font-size: 12px;
+  line-height: 18px;
+  color: var(--dsw-alias-label-tertiary);
+  animation: mrfw-status-in 180ms var(--ds-ease-in-out) 120ms both;
+}
+
+.mrfw-statusLine[data-state='done'] {
+  animation-delay: 0s;
+}
+
+@keyframes mrfw-status-in {
+  from { opacity: 0; transform: translateY(-2px); }
+  to { opacity: 1; transform: none; }
+}
+
+@keyframes mrfw-fade-in {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+.mrfw-pendingBar {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  height: 2px;
+  margin-bottom: -2px;
+  overflow: hidden;
+  pointer-events: none;
+  opacity: 0;
+  transition: opacity 160ms var(--ds-ease-in-out);
+}
+
+.mrfw-pendingBar[data-active='true'] {
+  opacity: 1;
+  transition-delay: 120ms;
+}
+
+.mrfw-pendingBar::before {
+  content: '';
+  position: absolute;
+  inset-block: 0;
+  left: 0;
+  width: 40%;
+  border-radius: 1px;
+  background: var(--dsw-alias-brand-primary);
+  transform: translateX(-100%);
+}
+
+.mrfw-pendingBar[data-active='true']::before {
+  animation: mrfw-pending-slide 1.2s var(--ds-ease-in-out) infinite;
+}
+
+@keyframes mrfw-pending-slide {
+  from { transform: translateX(-100%); }
+  to { transform: translateX(250%); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .mrfw-spinnerRing,
+  .mrfw-statusLine,
+  .mrfw-loadingSpinner,
+  .mrfw-pendingBar[data-active='true']::before {
+    animation: none;
+  }
+
+  .mrfw-pendingBar::before {
+    width: 100%;
+    transform: none;
+    opacity: 0.6;
+  }
+
+  .mrfw-btnLabel,
+  .mrfw-pendingBar {
+    transition: none;
+  }
 }
 `

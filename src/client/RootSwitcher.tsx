@@ -511,6 +511,9 @@ export function RootSwitcher(props: RootSwitcherProps): ReactNode {
       {dialogOpen ? (
         <WorkspaceFoldersDialog
           panel={props.panel}
+          {...(props.remotes === undefined ? {} : { remotes: props.remotes })}
+          {...(props.ssh === undefined ? {} : { ssh: props.ssh })}
+          subscribeRemoteSettings={props.subscribeRemoteSettings}
           pickDirectory={props.pickDirectory}
           {...(props.sessionId === undefined ? {} : { sessionId: props.sessionId })}
           {...(props.subscribeSession === undefined ? {} : { subscribeSession: props.subscribeSession })}

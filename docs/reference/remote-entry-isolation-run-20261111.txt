@@ -1,0 +1,265 @@
+(node:2727310) ExperimentalWarning: stripTypeScriptTypes is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+{
+ "meta": {
+  "probe": "probe-remote-entry-isolation",
+  "runAt": "2026-11-11T06:22:04.804Z",
+  "platform": "linux/x64",
+  "node": "v24.22.2",
+  "dshCli": "$EVIDENCE_PATH_009",
+  "scope": "supported service seams plus live disk-reload and other-profile audits; this record is not deployment certification",
+  "dshVersion": {
+   "ok": true,
+   "value": "0.2.2-rc.1"
+  },
+  "pluginVersion": {
+   "ok": true,
+   "value": "0.1.17-ssh.1"
+  }
+ },
+ "profile": "remote-exp",
+ "primary": "$EVIDENCE_PATH_005",
+ "credRoot": "$EVIDENCE_PATH_002",
+ "socket": "$EVIDENCE_PATH_001",
+ "controls": {
+  "socket": {
+   "outcome": "hello",
+   "hello": {
+    "event": "hello",
+    "protocol": 3,
+    "brokerUid": 996,
+    "environmentIds": [
+     "vps-app",
+     "vps-lib",
+     "vps-xfer",
+     "vps-xfer2"
+    ],
+    "manifestDigest": "9ad5926a1ebb5a015f5db9454789532ea252ffc2bd66b82da4c36d1e258c3be3",
+    "sshCapability": {
+     "eligible": true
+    }
+   }
+  },
+  "credRead": {
+   "ok": false,
+   "error": "EACCES: EACCES: permission denied, access '$EVIDENCE_PATH_010'"
+  },
+  "brokerConfigRead": {
+   "ok": false,
+   "error": "EACCES: EACCES: permission denied, access '$EVIDENCE_PATH_011'"
+  },
+  "manifestRead": {
+   "ok": true,
+   "value": true
+  }
+ },
+ "presets": {
+  "defaultMode": "workspace-write",
+  "table": {
+   "read-only": {
+    "sandbox": "read-only",
+    "approval": "ask"
+   },
+   "workspace-write": {
+    "sandbox": "workspace-write",
+    "approval": "ask"
+   }
+  },
+  "hasFullAccess": false
+ },
+ "entries": {
+  "workspace-write": {
+   "resolvedMode": "workspace-write",
+   "bash": {
+    "exitCode": 0,
+    "denied": false,
+    "enforcement": "full",
+    "stdout": "CRED_READ:cat: $EVIDENCE_PATH_010: Permission denied \nCRED_LIST:ls: cannot open directory '$EVIDENCE_PATH_002': Permission denied \nSOCK_STAT:srw-rw---- 1 nobody nogroup 0 Nov 11 05:08 $EVIDENCE_PATH_001 \nCLIENTS:$EVIDENCE_PATH_300,$EVIDENCE_PATH_012,\nSOCK:closed-no-data\n",
+    "stderr": ""
+   },
+   "pty": {
+    "label": "workspace-write",
+    "outcome": "done",
+    "exitCode": 0,
+    "output": "dsh-test@initiator-host:~$EVIDENCE_PATH_013 echo \"CRED_READ:$(cat '$EVIDENCE_PATH_010' 2>&1 | head -c 80 | tr '\\n' ' ')\"\r\n\recho PTY_DONE_MARKER; exit\r\nCRED_READ:cat: $EVIDENCE_PATH_010: Permission denied \r\ndsh-test@initiator-host:~$EVIDENCE_PATH_013 echo \"CRED_LIST:$(ls '$EVIDENCE_PATH_002' 2>&1 | head -c 80 | tr '\\n' ' ')\"\r\n\rCRED_LIST:ls: cannot open directory '$EVIDENCE_PATH_002': Permission denied \r\ndsh-test@initiator-host:~$EVIDENCE_PATH_013 echo \"SOCK_STAT:$(ls -la '$EVIDENCE_PATH_001' 2>&1 | head -c 80 | tr '\\n' ' ')\"\r\n\rSOCK_STAT:srw-rw---- 1 nobody nogroup 0 Nov 11 05:08 $EVIDENCE_PATH_001 \r\ndsh-test@initiator-host:~$EVIDENCE_PATH_013 echo \"CLIENTS:$(command -v node socat python3 2>$EVIDENCE_PATH_014 | tr '\\n' ',')\"\r\n\rCLIENTS:$EVIDENCE_PATH_300,$EVIDENCE_PATH_012,\r\ndsh-test@initiator-host:~$EVIDENCE_PATH_013 if command -v node >$EVIDENCE_PATH_014 2>&1; then\r\n\r>   node -e 'const s=require(\"net\").connect(\"$EVIDENCE_PATH_001\");let d=\"\";let done=false;const fin=v=>{if(!done){done=true;console.log(\"SOCK:\"+v);s.destroy()}};const t=setTimeout(()=>fin(\"timeout\"),2000);s.on(\"data\",c=>{d+=c;if(d.includes(\"\\n\")){clearTimeout(t);fin(\"data:\"+d.slice(0,80))}});s.on(\"error\",e=>{clearTimeout(t);fin(\"err:\"+(e.code||e.message))});s.on(\"close\",()=>{clearTimeout(t);fin(d===\"\"?\"closed-no-data\":\"eof:\"+d.slice(0,80))})'\r\n\r> elif command -v socat >$EVIDENCE_PATH_014 2>&1; then\r\n\r>   echo \"SOCK:$(echo '' | timeout 2 socat - UNIX-CONNECT:$EVIDENCE_PATH_301 2>&1 | head -c 80 | tr '\\n' ' ')\"\r\n\r> elif command -v python3 >$EVIDENCE_PATH_014 2>&1; then\r\n\r>   python3 -c 'import socket,sys;s=socket.socket(socket.AF_UNIX);s.settimeout(2);s.connect(\"$EVIDENCE_PATH_001\");sys.stdout.write(\"SOCK:data:\"+s.recv(200).decode(\"utf-8\",\"replace\")[:80])' 2>&1 | head -c 120\r\n\r> else\r\n\r>   echo \"SOCK:no-client-available\"\r\n\r> fi\r\n\rSOCK:closed-no-data\r\ndsh-test@initiator-host:~$EVIDENCE_PATH_013 echo PTY_DONE_MARKER; exit\r\n\rPTY_DONE_MARKER\r\nexit\r\n"
+   },
+   "ptc": {
+    "status": "ok",
+    "value": "{\"keyDenied\":\"EACCES\",\"credListDenied\":\"EACCES\",\"sockStat\":true,\"sock\":\"closed-no-data\"}",
+    "sandbox": {
+     "mode": "workspace-write",
+     "denied": false,
+     "enforcement": "full"
+    }
+   },
+   "rawSpawn": {
+    "refusedByGuard": true,
+    "error": "remote-profile-unconfined-spawn: subprocess.spawn requires a live confined argv minted by this profile"
+   },
+   "lspLikeSpawn": {
+    "refusedByGuard": true,
+    "error": "remote-profile-unconfined-spawn: subprocess.spawn requires a live confined argv minted by this profile"
+   },
+   "jobLikeSpawn": {
+    "refusedByGuard": true,
+    "error": "remote-profile-unconfined-spawn: subprocess.spawn requires a live confined argv minted by this profile"
+   }
+  },
+  "read-only": {
+   "resolvedMode": "read-only",
+   "bash": {
+    "exitCode": 0,
+    "denied": false,
+    "enforcement": "full",
+    "stdout": "CRED_READ:cat: $EVIDENCE_PATH_010: Permission denied \nCRED_LIST:ls: cannot open directory '$EVIDENCE_PATH_002': Permission denied \nSOCK_STAT:srw-rw---- 1 nobody nogroup 0 Nov 11 05:08 $EVIDENCE_PATH_001 \nCLIENTS:$EVIDENCE_PATH_300,$EVIDENCE_PATH_012,\nSOCK:closed-no-data\n",
+    "stderr": ""
+   },
+   "pty": {
+    "label": "read-only",
+    "outcome": "done",
+    "exitCode": 0,
+    "output": "dsh-test@initiator-host:~$EVIDENCE_PATH_013 echo \"CRED_READ:$(cat '$EVIDENCE_PATH_010' 2>&1 | head -c 80 | tr '\\n' ' ')\"\r\n\recho PTY_DONE_MARKER; exit\r\nCRED_READ:cat: $EVIDENCE_PATH_010: Permission denied \r\ndsh-test@initiator-host:~$EVIDENCE_PATH_013 echo \"CRED_LIST:$(ls '$EVIDENCE_PATH_002' 2>&1 | head -c 80 | tr '\\n' ' ')\"\r\n\rCRED_LIST:ls: cannot open directory '$EVIDENCE_PATH_002': Permission denied \r\ndsh-test@initiator-host:~$EVIDENCE_PATH_013 echo \"SOCK_STAT:$(ls -la '$EVIDENCE_PATH_001' 2>&1 | head -c 80 | tr '\\n' ' ')\"\r\n\rSOCK_STAT:srw-rw---- 1 nobody nogroup 0 Nov 11 05:08 $EVIDENCE_PATH_001 \r\ndsh-test@initiator-host:~$EVIDENCE_PATH_013 echo \"CLIENTS:$(command -v node socat python3 2>$EVIDENCE_PATH_014 | tr '\\n' ',')\"\r\n\rCLIENTS:$EVIDENCE_PATH_300,$EVIDENCE_PATH_012,\r\ndsh-test@initiator-host:~$EVIDENCE_PATH_013 if command -v node >$EVIDENCE_PATH_014 2>&1; then\r\n\r>   node -e 'const s=require(\"net\").connect(\"$EVIDENCE_PATH_001\");let d=\"\";let done=false;const fin=v=>{if(!done){done=true;console.log(\"SOCK:\"+v);s.destroy()}};const t=setTimeout(()=>fin(\"timeout\"),2000);s.on(\"data\",c=>{d+=c;if(d.includes(\"\\n\")){clearTimeout(t);fin(\"data:\"+d.slice(0,80))}});s.on(\"error\",e=>{clearTimeout(t);fin(\"err:\"+(e.code||e.message))});s.on(\"close\",()=>{clearTimeout(t);fin(d===\"\"?\"closed-no-data\":\"eof:\"+d.slice(0,80))})'\r\n\r> elif command -v socat >$EVIDENCE_PATH_014 2>&1; then\r\n\r>   echo \"SOCK:$(echo '' | timeout 2 socat - UNIX-CONNECT:$EVIDENCE_PATH_301 2>&1 | head -c 80 | tr '\\n' ' ')\"\r\n\r> elif command -v python3 >$EVIDENCE_PATH_014 2>&1; then\r\n\r>   python3 -c 'import socket,sys;s=socket.socket(socket.AF_UNIX);s.settimeout(2);s.connect(\"$EVIDENCE_PATH_001\");sys.stdout.write(\"SOCK:data:\"+s.recv(200).decode(\"utf-8\",\"replace\")[:80])' 2>&1 | head -c 120\r\n\r> else\r\n\r>   echo \"SOCK:no-client-available\"\r\n\r> fi\r\n\rSOCK:closed-no-data\r\ndsh-test@initiator-host:~$EVIDENCE_PATH_013 echo PTY_DONE_MARKER; exit\r\n\rPTY_DONE_MARKER\r\nexit\r\n"
+   },
+   "ptc": {
+    "status": "ok",
+    "value": "{\"keyDenied\":\"EACCES\",\"credListDenied\":\"EACCES\",\"sockStat\":true,\"sock\":\"closed-no-data\"}",
+    "sandbox": {
+     "mode": "read-only",
+     "denied": false,
+     "enforcement": "full"
+    }
+   },
+   "rawSpawn": {
+    "refusedByGuard": true,
+    "error": "remote-profile-unconfined-spawn: subprocess.spawn requires a live confined argv minted by this profile"
+   },
+   "lspLikeSpawn": {
+    "refusedByGuard": true,
+    "error": "remote-profile-unconfined-spawn: subprocess.spawn requires a live confined argv minted by this profile"
+   },
+   "jobLikeSpawn": {
+    "refusedByGuard": true,
+    "error": "remote-profile-unconfined-spawn: subprocess.spawn requires a live confined argv minted by this profile"
+   }
+  }
+ },
+ "escalation": {
+  "forgedMode": {
+   "refusedByGuard": true,
+   "error": "remote-profile-full-access: remote-profile-full-access: this profile never resolves danger-full-access"
+  },
+  "fullAccessBash": {
+   "skipped": "never launch an unrestricted command from this probe"
+  },
+  "inSandboxTools": {
+   "exitCode": 0,
+   "stdout": "NONEVPRIVS:NoNewPrivs:\t1\nSUDO:sudo: $EVIDENCE_PATH_015 is owned by uid 65534, should be 0 sudo: The \"no new privil\nSU:Password: su: Authentication failure \nSETUID_FILES:$EVIDENCE_PATH_302 $EVIDENCE_PATH_016 $EVIDENCE_PATH_017 $EVIDENCE_PATH_018 $EVIDENCE_PATH_019 \nUNSHARE:unshare: write failed $EVIDENCE_PATH_020: Operation not permitted \n"
+  },
+  "otherProfiles": [
+   {
+    "profile": "remote-exp",
+    "mentionsFullAccess": false,
+    "patchPresent": true
+   },
+   {
+    "profile": "stock-exp",
+    "mentionsFullAccess": false,
+    "patchPresent": false
+   }
+  ]
+ },
+ "tools": {
+  "mounted": true
+ },
+ "remoteStatus": {
+  "state": "ready"
+ },
+ "authority": {
+  "kind": "active"
+ },
+ "sessionReload": {
+  "id": "probe-reload",
+  "cwd": "$EVIDENCE_PATH_005",
+  "persistedEvents": 1,
+  "artifact": "$EVIDENCE_PATH_021",
+  "restored": {
+   "label": "reloaded",
+   "backendEvents": 1,
+   "eventState": "shared-frozen",
+   "resolvedMode": "workspace-write",
+   "pty": {
+    "label": "reloaded",
+    "outcome": "done",
+    "exitCode": 0,
+    "output": "dsh-test@initiator-host:~$EVIDENCE_PATH_013 echo \"CRED_READ:$(cat '$EVIDENCE_PATH_010' 2>&1 | head -c 80 | tr '\\n' ' ')\"\r\n\rCRED_READ:cat: $EVIDENCE_PATH_010: Permission denied \r\ndsh-test@initiator-host:~$EVIDENCE_PATH_013 echo \"CRED_LIST:$(ls '$EVIDENCE_PATH_002' 2>&1 | head -c 80 | tr '\\n' ' ')\"\r\n\rCRED_LIST:ls: cannot open directory '$EVIDENCE_PATH_002': Permission denied \r\ndsh-test@initiator-host:~$EVIDENCE_PATH_013 echo \"SOCK_STAT:$(ls -la '$EVIDENCE_PATH_001' 2>&1 | head -c 80 | tr '\\n' ' ')\"\r\n\rSOCK_STAT:srw-rw---- 1 nobody nogroup 0 Nov 11 05:08 $EVIDENCE_PATH_001 \r\ndsh-test@initiator-host:~$EVIDENCE_PATH_013 echo \"CLIENTS:$(command -v node socat python3 2>$EVIDENCE_PATH_014 | tr '\\n' ',')\"\r\n\rCLIENTS:$EVIDENCE_PATH_300,$EVIDENCE_PATH_012,\r\ndsh-test@initiator-host:~$EVIDENCE_PATH_013 if command -v node >$EVIDENCE_PATH_014 2>&1; then\r\n\r>   node -e 'const s=require(\"net\").connect(\"$EVIDENCE_PATH_001\");let d=\"\";let done=false;const fin=v=>{if(!done){done=true;console.log(\"SOCK:\"+v);s.destroy()}};const t=setTimeout(()=>fin(\"timeout\"),2000);s.on(\"data\",c=>{d+=c;if(d.includes(\"\\n\")){clearTimeout(t);fin(\"data:\"+d.slice(0,80))}});s.on(\"error\",e=>{clearTimeout(t);fin(\"err:\"+(e.code||e.message))});s.on(\"close\",()=>{clearTimeout(t);fin(d===\"\"?\"closed-no-data\":\"eof:\"+d.slice(0,80))})'\r\n\r> elif command -v socat >$EVIDENCE_PATH_014 2>&1; then\r\n\r>   echo \"SOCK:$(echo '' | timeout 2 socat - UNIX-CONNECT:$EVIDENCE_PATH_301 2>&1 | head -c 80 | tr '\\n' ' ')\"\r\n\r> elif command -v python3 >$EVIDENCE_PATH_014 2>&1; then\r\n\r>   python3 -c 'import socket,sys;s=socket.socket(socket.AF_UNIX);s.settimeout(2);s.connect(\"$EVIDENCE_PATH_001\");sys.stdout.write(\"SOCK:data:\"+s.recv(200).decode(\"utf-8\",\"replace\")[:80])' 2>&1 | head -c 120\r\n\r> else\r\n\r>   echo \"SOCK:no-client-available\"\r\n\r> fi\r\n\rSOCK:closed-no-data\r\ndsh-test@initiator-host:~$EVIDENCE_PATH_013 echo PTY_DONE_MARKER; exit\r\n\rPTY_DONE_MARKER\r\nexit\r\n"
+   }
+  },
+  "tamperedWrite": "sandbox/mode payload rewritten to danger-full-access",
+  "tampered": {
+   "label": "tampered",
+   "backendEvents": 1,
+   "eventState": "shared-frozen",
+   "resolveRefused": "remote-profile-full-access: remote-profile-full-access: this profile never resolves danger-full-access"
+  }
+ },
+ "otherProfileLive": {
+  "profile": "stock-exp",
+  "entries": [
+   {
+    "label": "stock",
+    "defaultMode": "workspace-write",
+    "presetNames": [
+     "read-only",
+     "workspace-write",
+     "danger-full-access"
+    ],
+    "hasFullAccessPreset": true,
+    "forgedMode": {
+     "resolved": "danger-full-access"
+    },
+    "resolvedMode": "workspace-write",
+    "bash": {
+     "exitCode": 0,
+     "denied": false,
+     "enforcement": "full",
+     "stdout": "CRED_READ:cat: $EVIDENCE_PATH_010: Permission denied \nCRED_LIST:ls: cannot open directory '$EVIDENCE_PATH_002': Permission denied \nSOCK_STAT:srw-rw---- 1 nobody nogroup 0 Nov 11 05:08 $EVIDENCE_PATH_001 \nCLIENTS:$EVIDENCE_PATH_300,$EVIDENCE_PATH_012,\nSOCK:closed-no-data\n",
+     "stderr": ""
+    },
+    "pty": {
+     "label": "other-stock",
+     "outcome": "done",
+     "exitCode": 0,
+     "output": "dsh-test@initiator-host:~$EVIDENCE_PATH_013 echo \"CRED_READ:$(cat '$EVIDENCE_PATH_010' 2>&1 | head -c 80 | tr '\\n' ' ')\"\r\n\recho PTY_DONE_MARKER; exit\r\nCRED_READ:cat: $EVIDENCE_PATH_010: Permission denied \r\ndsh-test@initiator-host:~$EVIDENCE_PATH_013 echo \"CRED_LIST:$(ls '$EVIDENCE_PATH_002' 2>&1 | head -c 80 | tr '\\n' ' ')\"\r\n\rCRED_LIST:ls: cannot open directory '$EVIDENCE_PATH_002': Permission denied \r\ndsh-test@initiator-host:~$EVIDENCE_PATH_013 echo \"SOCK_STAT:$(ls -la '$EVIDENCE_PATH_001' 2>&1 | head -c 80 | tr '\\n' ' ')\"\r\n\rSOCK_STAT:srw-rw---- 1 nobody nogroup 0 Nov 11 05:08 $EVIDENCE_PATH_001 \r\ndsh-test@initiator-host:~$EVIDENCE_PATH_013 echo \"CLIENTS:$(command -v node socat python3 2>$EVIDENCE_PATH_014 | tr '\\n' ',')\"\r\n\rCLIENTS:$EVIDENCE_PATH_300,$EVIDENCE_PATH_012,\r\ndsh-test@initiator-host:~$EVIDENCE_PATH_013 if command -v node >$EVIDENCE_PATH_014 2>&1; then\r\n\r>   node -e 'const s=require(\"net\").connect(\"$EVIDENCE_PATH_001\");let d=\"\";let done=false;const fin=v=>{if(!done){done=true;console.log(\"SOCK:\"+v);s.destroy()}};const t=setTimeout(()=>fin(\"timeout\"),2000);s.on(\"data\",c=>{d+=c;if(d.includes(\"\\n\")){clearTimeout(t);fin(\"data:\"+d.slice(0,80))}});s.on(\"error\",e=>{clearTimeout(t);fin(\"err:\"+(e.code||e.message))});s.on(\"close\",()=>{clearTimeout(t);fin(d===\"\"?\"closed-no-data\":\"eof:\"+d.slice(0,80))})'\r\n\r> elif command -v socat >$EVIDENCE_PATH_014 2>&1; then\r\n\r>   echo \"SOCK:$(echo '' | timeout 2 socat - UNIX-CONNECT:$EVIDENCE_PATH_301 2>&1 | head -c 80 | tr '\\n' ' ')\"\r\n\r> elif command -v python3 >$EVIDENCE_PATH_014 2>&1; then\r\n\r>   python3 -c 'import socket,sys;s=socket.socket(socket.AF_UNIX);s.settimeout(2);s.connect(\"$EVIDENCE_PATH_001\");sys.stdout.write(\"SOCK:data:\"+s.recv(200).decode(\"utf-8\",\"replace\")[:80])' 2>&1 | head -c 120\r\n\r> else\r\n\r>   echo \"SOCK:no-client-available\"\r\n\r> fi\r\n\rSOCK:closed-no-data\r\ndsh-test@initiator-host:~$EVIDENCE_PATH_013 echo PTY_DONE_MARKER; exit\r\n\rPTY_DONE_MARKER\r\nexit\r\n"
+    }
+   },
+   {
+    "label": "restricted",
+    "defaultMode": "workspace-write",
+    "presetNames": [
+     "read-only",
+     "workspace-write"
+    ],
+    "hasFullAccessPreset": false,
+    "forgedMode": {
+     "refusedByGuard": true,
+     "error": "remote-profile-full-access: remote-profile-full-access: this profile never resolves danger-full-access"
+    },
+    "resolvedMode": "workspace-write",
+    "bash": {
+     "exitCode": 0,
+     "denied": false,
+     "enforcement": "full",
+     "stdout": "CRED_READ:cat: $EVIDENCE_PATH_010: Permission denied \nCRED_LIST:ls: cannot open directory '$EVIDENCE_PATH_002': Permission denied \nSOCK_STAT:srw-rw---- 1 nobody nogroup 0 Nov 11 05:08 $EVIDENCE_PATH_001 \nCLIENTS:$EVIDENCE_PATH_300,$EVIDENCE_PATH_012,\nSOCK:closed-no-data\n",
+     "stderr": ""
+    },
+    "pty": {
+     "label": "other-restricted",
+     "outcome": "done",
+     "exitCode": 0,
+     "output": "dsh-test@initiator-host:~$EVIDENCE_PATH_013 echo \"CRED_READ:$(cat '$EVIDENCE_PATH_010' 2>&1 | head -c 80 | tr '\\n' ' ')\"\r\n\recho PTY_DONE_MARKER; exit\r\nCRED_READ:cat: $EVIDENCE_PATH_010: Permission denied \r\ndsh-test@initiator-host:~$EVIDENCE_PATH_013 echo \"CRED_LIST:$(ls '$EVIDENCE_PATH_002' 2>&1 | head -c 80 | tr '\\n' ' ')\"\r\n\rCRED_LIST:ls: cannot open directory '$EVIDENCE_PATH_002': Permission denied \r\ndsh-test@initiator-host:~$EVIDENCE_PATH_013 echo \"SOCK_STAT:$(ls -la '$EVIDENCE_PATH_001' 2>&1 | head -c 80 | tr '\\n' ' ')\"\r\n\rSOCK_STAT:srw-rw---- 1 nobody nogroup 0 Nov 11 05:08 $EVIDENCE_PATH_001 \r\ndsh-test@initiator-host:~$EVIDENCE_PATH_013 echo \"CLIENTS:$(command -v node socat python3 2>$EVIDENCE_PATH_014 | tr '\\n' ',')\"\r\n\rCLIENTS:$EVIDENCE_PATH_300,$EVIDENCE_PATH_012,\r\ndsh-test@initiator-host:~$EVIDENCE_PATH_013 if command -v node >$EVIDENCE_PATH_014 2>&1; then\r\n\r>   node -e 'const s=require(\"net\").connect(\"$EVIDENCE_PATH_001\");let d=\"\";let done=false;const fin=v=>{if(!done){done=true;console.log(\"SOCK:\"+v);s.destroy()}};const t=setTimeout(()=>fin(\"timeout\"),2000);s.on(\"data\",c=>{d+=c;if(d.includes(\"\\n\")){clearTimeout(t);fin(\"data:\"+d.slice(0,80))}});s.on(\"error\",e=>{clearTimeout(t);fin(\"err:\"+(e.code||e.message))});s.on(\"close\",()=>{clearTimeout(t);fin(d===\"\"?\"closed-no-data\":\"eof:\"+d.slice(0,80))})'\r\n\r> elif command -v socat >$EVIDENCE_PATH_014 2>&1; then\r\n\r>   echo \"SOCK:$(echo '' | timeout 2 socat - UNIX-CONNECT:$EVIDENCE_PATH_301 2>&1 | head -c 80 | tr '\\n' ' ')\"\r\n\r> elif command -v python3 >$EVIDENCE_PATH_014 2>&1; then\r\n\r>   python3 -c 'import socket,sys;s=socket.socket(socket.AF_UNIX);s.settimeout(2);s.connect(\"$EVIDENCE_PATH_001\");sys.stdout.write(\"SOCK:data:\"+s.recv(200).decode(\"utf-8\",\"replace\")[:80])' 2>&1 | head -c 120\r\n\r> else\r\n\r>   echo \"SOCK:no-client-available\"\r\n\r> fi\r\n\rSOCK:closed-no-data\r\ndsh-test@initiator-host:~$EVIDENCE_PATH_013 echo PTY_DONE_MARKER; exit\r\n\rPTY_DONE_MARKER\r\nexit\r\n"
+    }
+   }
+  ]
+ }
+}
+[probe] evidence written to $EVIDENCE_PATH_027

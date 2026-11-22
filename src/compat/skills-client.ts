@@ -5,6 +5,7 @@ export interface SkillsForm {
   subscribe(listener: () => void): () => void
   mutate(ops: readonly { op: 'set'; path: string[]; value: boolean }[], revision?: number): Promise<boolean>
 }
+
 interface SettingsScope { bind(input: { namespace: string }): SkillsForm }
 interface ConfigForms { get(entryId: string): SkillsForm }
 

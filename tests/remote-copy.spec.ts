@@ -1,0 +1,819 @@
+/** runRemoteCopy stage ordering and refusal codes across all three directions — in-memory SFTP, no network. */
+import { createHash } from 'node:crypto'
+import { existsSync, linkSync, mkdirSync, readFileSync, renameSync, symlinkSync, writeFileSync } from 'node:fs'
+import { join } from 'node:path'
+import { afterEach, describe, expect, it, vi } from 'vitest'
+import { runRemoteCopy, type RemoteCopyDeps, type RemoteCopyRequest } from '../src/remote/transfer.ts'
+import { SftpStatusError, SftpConnectionLost, type SftpClient } from '../src/remote/sftp.ts'
+import type { SshEnvironmentManager } from '../src/remote/ssh-environment.ts'
+import { environmentDigest, type DeploymentManifest } from '../src/remote/manifest.ts'
+import type { MultiRootRegistry } from '../src/registry.ts'
+import type { LocalDestinationAuthority } from '../src/remote/local-sink.ts'
+import { createFixtureWorkspace, type FixtureWorkspace } from './support/temp-workspace.ts'
+
+interface MemFile { data: Buffer; mtime: number; permissions: number }
+
+class MemSftp {
+  readonly files = new Map<string, MemFile>()
+  readonly calls: string[] = []
+  loseOnHardlink = false
+  loseOnRead = false
+  failWrites = false
+  hardlinkCalls = 0
+  readCalls = 0
+  writes = 0
+  private tick = 1_700_000_000
+
+  directory(path: string): void {
+    let cursor = ''
+    for (const part of path.split('/').filter(part => part !== '')) {
+      cursor += `/${part}`
+      if (!this.files.has(cursor)) this.files.set(cursor, { data: Buffer.alloc(0), mtime: ++this.tick, permissions: 0o040755 })
+    }
+  }
+
+  seed(path: string, data: Buffer | string, permissions = 0o100644): void {
+    this.directory(path.slice(0, path.lastIndexOf('/')) || '/')
+    this.files.set(path, { data: Buffer.from(data), mtime: ++this.tick, permissions })
+  }
+
+  touch(path: string, data: Buffer | string): void {
+    const file = this.files.get(path)
+    if (file === undefined) throw new Error(`touch: no ${path}`)
+    this.files.set(path, { data: Buffer.from(data), mtime: ++this.tick, permissions: file.permissions })
+  }
+
+  async lstat(p: string) {
+    this.calls.push(`lstat ${p}`)
+    const file = this.files.get(p)
+    if (file === undefined) throw new SftpStatusError(2, 'No such file')
+    return { flags: 5, size: file.data.length, permissions: file.permissions, mtime: file.mtime }
+  }
+  async realpath(p: string) { return p }
+  async open(p: string, flags: number, _perm?: number) {
+    this.calls.push(`open ${p} ${flags}`)
+    if ((flags & 0x20) !== 0 && this.files.has(p)) throw new SftpStatusError(4, 'Failure')
+    if ((flags & 0x08) !== 0 && !this.files.has(p)) this.seed(p, Buffer.alloc(0))
+    if (!this.files.has(p)) throw new SftpStatusError(2, 'No such file')
+    return Buffer.from(p)
+  }
+  async write(h: Buffer, off: number, data: Buffer) {
+    if (this.failWrites) throw new SftpStatusError(4, 'Failure')
+    this.writes++
+    const p = h.toString()
+    const cur = this.files.get(p)!
+    const grown = Buffer.alloc(Math.max(cur.data.length, off + data.length))
+    cur.data.copy(grown); data.copy(grown, off)
+    this.files.set(p, { ...cur, data: grown, mtime: ++this.tick })
+  }
+  async read(h: Buffer, off: number, len: number) {
+    this.readCalls++
+    if (this.loseOnRead) throw new SftpConnectionLost('transport lost while reading')
+    const file = this.files.get(h.toString())
+    if (file === undefined) throw new SftpStatusError(2, 'No such file')
+    return file.data.subarray(off, off + len)
+  }
+  async fsync() { this.calls.push('fsync') }
+  async close() {}
+  async remove(p: string) { this.calls.push(`remove ${p}`); this.files.delete(p) }
+  async hardlink(oldP: string, newP: string) {
+    this.calls.push(`hardlink ${oldP} ${newP}`)
+    this.hardlinkCalls++
+    if (this.loseOnHardlink) throw new SftpConnectionLost('transport lost')
+    if (this.files.has(newP)) throw new SftpStatusError(4, 'Failure')
+    const file = this.files.get(oldP)
+    if (file === undefined) throw new SftpStatusError(2, 'No such file')
+    this.files.set(newP, { ...file })
+  }
+  asClient() { return this as unknown as SftpClient }
+}
+
+let fixture: FixtureWorkspace
+afterEach(() => fixture.dispose())
+const sha = (b: Buffer | string) => createHash('sha256').update(b).digest('hex')
+
+const DISPLAY: Record<string, string> = {
+  'vps-a/import': '/import',
+  'vps-a/export': '/export',
+  'vps-b/import': '/import-b',
+  'vps-b/export': '/export-b',
+}
+const displayPathOf = (environmentId: string, rootId: string) => DISPLAY[`${environmentId}/${rootId}`] ?? `/${rootId}`
+
+interface StackOptions {
+  uniqueOperationIds?: boolean
+  epoch?: string
+  deny?: string
+  transfer?: { maxBytes: number; timeoutMs: number } | undefined
+  mems?: Record<string, MemSftp>
+  statuses?: { aliasId: string; path: string; state: string; access?: string }[]
+  localDeny?: string
+  localAuthority?: (call: number) => LocalDestinationAuthority
+}
+
+function stack(opts: StackOptions = {}) {
+  const mems = opts.mems ?? { 'vps-a': new MemSftp(), 'vps-b': new MemSftp() }
+  for (const environmentId of Object.keys(mems)) {
+    for (const [key, dir] of Object.entries(DISPLAY)) {
+      if (key.startsWith(`${environmentId}/`)) mems[environmentId]!.directory(dir)
+    }
+  }
+  const manifest = {
+    environments: ['vps-a', 'vps-b'].map(environmentId => ({
+      environmentId, platform: 'linux', account: 'a', hostKey: `SHA256:${'A'.repeat(43)}`, namespace: environmentId,
+      transport: 'sftp', helper: null, connection: { host: environmentId }, credentialIsolation: 'unattested',
+      transfer: opts.transfer === undefined ? { maxBytes: 4 * 1024 * 1024, timeoutMs: 10_000 } : opts.transfer,
+    })),
+  } as unknown as DeploymentManifest
+  const generations: Record<string, string> = { 'vps-a': 'g1', 'vps-b': 'g1' }
+  const admittedEndpoint = (ref: { environmentId: string; rootId: string }) => ref.environmentId === 'local'
+    ? { environmentId: 'local', rootId: ref.rootId, displayPath: ref.rootId, verifiedTarget: null, bindingDigest: null, environmentDigest: null, configVersion: null }
+    : {
+        environmentId: ref.environmentId, rootId: ref.rootId, displayPath: displayPathOf(ref.environmentId, ref.rootId),
+        verifiedTarget: { kind: 'path', value: displayPathOf(ref.environmentId, ref.rootId) },
+        bindingDigest: 'd'.repeat(64), configVersion: 'c',
+        environmentDigest: environmentDigest(manifest.environments.find(entry => entry.environmentId === ref.environmentId)!),
+      }
+  let admitCount = 0
+  let authorityCount = 0
+  const registry = {
+    async withRemoteOperation(request: { endpoints: { environmentId: string; rootId: string }[] }, body: (o: unknown) => unknown) {
+      admitCount++
+      if (opts.deny !== undefined) { const e = new Error('denied'); (e as { code?: string }).code = opts.deny; throw e }
+      return await body({
+        identity: { authorityEpoch: opts.epoch ?? 'e1', effectiveMode: 'workspace-write', operationId: opts.uniqueOperationIds ? crypto.randomUUID() : 'op-1', sessionId: 's1' },
+        endpoints: request.endpoints.map(admittedEndpoint),
+      })
+    },
+    localTransferDestination(_primary: string, rootId: string, _mode: string, _toolName: string): LocalDestinationAuthority {
+      authorityCount++
+      if (opts.localDeny !== undefined) { const e = new Error('local denied'); (e as { code?: string }).code = opts.localDeny; throw e }
+      if (opts.localAuthority !== undefined) return opts.localAuthority(authorityCount)
+      if (rootId === 'primary') return { rootId, root: fixture.workspace, access: 'primary', deny: [] }
+      const status = (opts.statuses ?? []).find(entry => entry.aliasId === rootId)
+      if (status === undefined) { const e = new Error('no root'); (e as { code?: string }).code = 'local-root-unavailable'; throw e }
+      return { rootId, root: status.path, access: (status.access ?? 'inherit') as LocalDestinationAuthority['access'], deny: [] }
+    },
+    list: () => opts.statuses ?? [],
+    admitCount: () => admitCount,
+    authorityCount: () => authorityCount,
+  } as unknown as MultiRootRegistry & { admitCount(): number; authorityCount(): number }
+  const manager = {
+    deployment: manifest,
+    openSftp: async (id: string) => ({ client: mems[id]!.asClient(), generation: generations[id]! }),
+    sftpGenerationOf: (id: string) => generations[id] ?? 'stale',
+  } as unknown as SshEnvironmentManager
+  const deps: RemoteCopyDeps = {
+    manager,
+    sftpFor: environment => ({ client: mems[environment.environmentId]!.asClient(), generation: generations[environment.environmentId]! }),
+    generationFor: id => generations[id] ?? 'stale',
+  }
+  return {
+    registry, manager, deps, mems, mem: mems['vps-a']!, memB: mems['vps-b']!,
+    setGeneration: (id: string, g: string) => { generations[id] = g },
+  }
+}
+
+const session = () => ({ header: { cwd: fixture.workspace }, id: 's1' }) as never
+const request = (over: Partial<RemoteCopyRequest> = {}): RemoteCopyRequest => ({
+  session: session(),
+  from: { environmentId: 'local', rootId: 'primary', relativePath: 'source.txt' },
+  to: { environmentId: 'vps-a', rootId: 'import', relativePath: 'dest.txt' },
+  ...over,
+})
+const localToRemote = (over: Partial<RemoteCopyRequest> = {}) => request(over)
+const remoteToLocal = (over: Partial<RemoteCopyRequest> = {}) => request({
+  from: { environmentId: 'vps-a', rootId: 'import', relativePath: 'source.txt' },
+  to: { environmentId: 'local', rootId: 'primary', relativePath: 'downloaded.bin' },
+  ...over,
+})
+const remoteToRemote = (over: Partial<RemoteCopyRequest> = {}) => request({
+  from: { environmentId: 'vps-a', rootId: 'export', relativePath: 'artifact.bin' },
+  to: { environmentId: 'vps-b', rootId: 'import', relativePath: 'artifact.bin' },
+  ...over,
+})
+const run = (s: ReturnType<typeof stack>, req: RemoteCopyRequest, deps: RemoteCopyDeps = s.deps) =>
+  runRemoteCopy(s.registry, deps, req, 'remote_copy', new AbortController().signal)
+
+describe.skipIf(process.platform === 'win32')('runRemoteCopy local → remote(sftp)', () => {
+  it('commits a staged copy end to end', async () => {
+    fixture = createFixtureWorkspace('remote-copy')
+    writeFileSync(join(fixture.workspace, 'source.txt'), 'hello-remote')
+    const s = stack()
+    const result = await run(s, localToRemote())
+    expect(result).toMatchObject({ status: 'committed', bytes: 12, sha256: sha('hello-remote'), stage: 'cleanup', staging: 'removed' })
+    expect(s.mem.files.get('/import/dest.txt')!.data.toString()).toBe('hello-remote')
+    expect([...s.mem.files.keys()].filter(k => k.includes('.dsh-staging'))).toHaveLength(0)
+    expect(s.mem.calls).toContain('fsync')
+  })
+
+  it('refuses an existing target before staging', async () => {
+    fixture = createFixtureWorkspace('remote-copy')
+    writeFileSync(join(fixture.workspace, 'source.txt'), 'x')
+    const mem = new MemSftp()
+    mem.seed('/import/dest.txt', 'existing')
+    const s = stack({ mems: { 'vps-a': mem, 'vps-b': new MemSftp() } })
+    const result = await run(s, localToRemote())
+    expect(result).toMatchObject({ status: 'failed', code: 'target-exists', stage: 'preflight', staging: 'none' })
+    expect(s.mem.calls.filter(c => c.startsWith('open /import/.dsh-staging'))).toHaveLength(0)
+    expect(s.mem.files.get('/import/dest.txt')!.data.toString()).toBe('existing')
+  })
+
+  it('refuses symlink and multilinked sources at the bound open', async () => {
+    fixture = createFixtureWorkspace('remote-copy')
+    writeFileSync(join(fixture.workspace, 'real.txt'), 'x')
+    symlinkSync('real.txt', join(fixture.workspace, 'source.txt'))
+    const s = stack()
+    const sym = await run(s, localToRemote())
+    expect(sym.status).toBe('failed'); expect(sym.stage).toBe('source')
+    fixture.dispose(); fixture = createFixtureWorkspace('remote-copy')
+    writeFileSync(join(fixture.workspace, 'hard.txt'), 'x'); linkSync(join(fixture.workspace, 'hard.txt'), join(fixture.workspace, 'source.txt'))
+    const multi = await run(s, localToRemote())
+    expect(multi).toMatchObject({ status: 'failed', code: 'source-multilinked' })
+  })
+
+  it('reports source-changed when the file mutates during staging', async () => {
+    fixture = createFixtureWorkspace('remote-copy')
+    writeFileSync(join(fixture.workspace, 'source.txt'), 'before')
+    const s = stack()
+    const deps = { ...s.deps, onStage: async (stage: string) => { if (stage === 'staging') writeFileSync(join(fixture.workspace, 'source.txt'), 'after!!') } }
+    const result = await run(s, localToRemote(), deps as RemoteCopyDeps)
+    expect(result).toMatchObject({ status: 'failed', code: 'source-changed', stage: 'staging' })
+    expect([...s.mem.files.keys()].filter(k => k.includes('.dsh-staging'))).toHaveLength(0)
+  })
+
+  it('commits a source that exactly fills the byte budget', async () => {
+    fixture = createFixtureWorkspace('remote-copy-exact-fit')
+    const payload = Buffer.alloc(1024, 7)
+    writeFileSync(join(fixture.workspace, 'source.txt'), payload)
+    const s = stack({ transfer: { maxBytes: 1024, timeoutMs: 10_000 } })
+    const result = await run(s, localToRemote())
+    expect(result).toMatchObject({ status: 'committed', bytes: 1024, sha256: sha(payload), staging: 'removed' })
+    expect(s.mem.files.get('/import/dest.txt')!.data.equals(payload)).toBe(true)
+  })
+
+  it('refuses an upload that grows past the byte budget before any excess reaches staging', async () => {
+    fixture = createFixtureWorkspace('remote-copy-growth')
+    writeFileSync(join(fixture.workspace, 'source.txt'), Buffer.alloc(512, 'a'))
+    const s = stack({ transfer: { maxBytes: 1024, timeoutMs: 10_000 } })
+    const deps = { ...s.deps, onStage: async (stage: string) => { if (stage === 'preflight') writeFileSync(join(fixture.workspace, 'source.txt'), Buffer.alloc(4096, 'b')) } }
+    const result = await run(s, localToRemote(), deps as RemoteCopyDeps)
+    expect(result).toMatchObject({ status: 'failed', code: 'transfer-too-large', stage: 'staging', staging: 'removed' })
+    expect(s.mem.writes).toBe(0)
+    expect([...s.mem.files.keys()].filter(k => k.includes('.dsh-staging'))).toHaveLength(0)
+    expect(s.mem.files.has('/import/dest.txt')).toBe(false)
+  })
+
+  it('cancels when admission B returns a different epoch and removes staging', async () => {
+    fixture = createFixtureWorkspace('remote-copy')
+    writeFileSync(join(fixture.workspace, 'source.txt'), 'x')
+    const s = stack()
+    let calls = 0
+    s.registry.withRemoteOperation = async (req: { endpoints: { environmentId: string; rootId: string }[] }, b: (o: unknown) => unknown) => {
+      calls++
+      return await b({
+        identity: { authorityEpoch: calls >= 2 ? 'e2' : 'e1', effectiveMode: 'workspace-write', operationId: 'op-1', sessionId: 's1' },
+        endpoints: req.endpoints.map(ref => ref.environmentId === 'local'
+          ? { environmentId: 'local', rootId: ref.rootId, displayPath: ref.rootId, verifiedTarget: null, bindingDigest: null, environmentDigest: null, configVersion: null }
+          : { environmentId: ref.environmentId, rootId: ref.rootId, displayPath: displayPathOf(ref.environmentId, ref.rootId), verifiedTarget: { kind: 'path', value: displayPathOf(ref.environmentId, ref.rootId) }, bindingDigest: 'd'.repeat(64), configVersion: 'c' }),
+      })
+    }
+    const result = await run(s, localToRemote())
+    expect(result).toMatchObject({ status: 'cancelled', code: 'admission-changed' })
+    expect([...s.mem.files.keys()].filter(k => k.includes('.dsh-staging'))).toHaveLength(0)
+  })
+
+  it('reports unknown on loss after the hardlink is sent, never retrying', async () => {
+    fixture = createFixtureWorkspace('remote-copy')
+    writeFileSync(join(fixture.workspace, 'source.txt'), 'x')
+    const mem = new MemSftp(); mem.loseOnHardlink = true
+    const s = stack({ mems: { 'vps-a': mem, 'vps-b': new MemSftp() } })
+    const result = await run(s, localToRemote())
+    expect(result).toMatchObject({ status: 'unknown', code: 'connection-lost', staging: 'unknown' })
+    expect(result.reconcileId).toBeTruthy()
+    expect(s.mem.hardlinkCalls).toBe(1)
+  })
+
+  it('reports residual staging when the generation changed before cleanup', async () => {
+    fixture = createFixtureWorkspace('remote-copy')
+    writeFileSync(join(fixture.workspace, 'source.txt'), 'x')
+    const s = stack()
+    const mem = s.mem
+    const realHardlink = mem.hardlink.bind(mem)
+    mem.hardlink = async (a: string, b: string) => { await realHardlink(a, b); s.setGeneration('vps-a', 'g2') }
+    const result = await run(s, localToRemote())
+    expect(result).toMatchObject({ status: 'committed', staging: 'residual' })
+    expect(s.mem.calls.filter(c => c.startsWith('remove /import/.dsh-staging'))).toHaveLength(0)
+  })
+
+  it('refuses before opening any session when admission denies', async () => {
+    fixture = createFixtureWorkspace('remote-copy')
+    writeFileSync(join(fixture.workspace, 'source.txt'), 'x')
+    let opens = 0
+    const s = stack({ deny: 'mode-denies' })
+    s.manager.openSftp = async () => { opens++; return { client: s.mem.asClient(), generation: 'g1' } }
+    const result = await run(s, localToRemote())
+    expect(result).toMatchObject({ status: 'failed', code: 'mode-denies', stage: 'admission' })
+    expect(opens).toBe(0)
+  })
+})
+
+// remote -> local publishes through the POSIX-only local binary sink; the
+// Windows initiator is deferred (ADR-0030), and the local→remote and
+// remote→remote directions still run there.
+describe.skipIf(process.platform === 'win32')('runRemoteCopy remote(sftp) → local', () => {
+  it('commits into the primary root and leaves no staging', async () => {
+    fixture = createFixtureWorkspace('remote-download')
+    const s = stack()
+    s.mem.seed('/import/source.txt', 'from-the-vps')
+    const result = await run(s, remoteToLocal())
+    expect(result).toMatchObject({ status: 'committed', bytes: 12, sha256: sha('from-the-vps'), stage: 'cleanup', staging: 'removed' })
+    expect(readFileSync(join(fixture.workspace, 'downloaded.bin'), 'utf8')).toBe('from-the-vps')
+    expect(existsSync(join(fixture.workspace, '.dsh-staging-op-1'))).toBe(false)
+  })
+
+  it('refuses an existing local target before any staging', async () => {
+    fixture = createFixtureWorkspace('remote-download')
+    writeFileSync(join(fixture.workspace, 'downloaded.bin'), 'keep-me')
+    const s = stack()
+    s.mem.seed('/import/source.txt', 'new')
+    const result = await run(s, remoteToLocal())
+    expect(result).toMatchObject({ status: 'failed', code: 'target-exists', stage: 'preflight', staging: 'none' })
+    expect(readFileSync(join(fixture.workspace, 'downloaded.bin'), 'utf8')).toBe('keep-me')
+    expect(s.mem.calls.filter(c => c.includes('.dsh-staging'))).toHaveLength(0)
+  })
+
+  it('refuses a read-only local destination at admission, before the SFTP session opens', async () => {
+    fixture = createFixtureWorkspace('remote-download')
+    let opens = 0
+    const s = stack({ localDeny: 'local-destination-read-only' })
+    s.manager.openSftp = async () => { opens++; return { client: s.mem.asClient(), generation: 'g1' } }
+    const result = await run(s, remoteToLocal())
+    expect(result).toMatchObject({ status: 'failed', code: 'local-destination-read-only', stage: 'admission' })
+    expect(opens).toBe(0)
+  })
+
+  it('refuses a symlinked destination parent and a symlinked target', async () => {
+    fixture = createFixtureWorkspace('remote-download')
+    const s = stack()
+    s.mem.seed('/import/source.txt', 'x')
+    mkdirSync(join(fixture.workspace, 'real'))
+    symlinkSync(join(fixture.workspace, 'real'), join(fixture.workspace, 'link'))
+    const throughLink = await run(s, remoteToLocal({ to: { environmentId: 'local', rootId: 'primary', relativePath: 'link/f.bin' } }))
+    expect(throughLink).toMatchObject({ status: 'failed', code: 'destination-symlinked' })
+    symlinkSync(join(fixture.workspace, 'real'), join(fixture.workspace, 'target-link'))
+    const onLink = await run(s, remoteToLocal({ to: { environmentId: 'local', rootId: 'primary', relativePath: 'target-link' } }))
+    expect(onLink).toMatchObject({ status: 'failed', code: 'target-exists' })
+  })
+
+  it('refuses a destination inside a protected DSH boundary', async () => {
+    fixture = createFixtureWorkspace('remote-download')
+    const s = stack({ localAuthority: () => ({ rootId: 'primary', root: fixture.workspace, access: 'primary', deny: [fixture.workspace] }) })
+    s.mem.seed('/import/source.txt', 'x')
+    const result = await run(s, remoteToLocal())
+    expect(result).toMatchObject({ status: 'failed', code: 'protected-path', stage: 'preflight' })
+  })
+
+  it('reports source-changed when the remote file mutates during the stream', async () => {
+    fixture = createFixtureWorkspace('remote-download')
+    const s = stack()
+    s.mem.seed('/import/source.txt', 'before')
+    const deps = { ...s.deps, onStage: async (stage: string) => { if (stage === 'staging') s.mem.touch('/import/source.txt', 'after!!') } }
+    const result = await run(s, remoteToLocal(), deps as RemoteCopyDeps)
+    expect(result).toMatchObject({ status: 'failed', code: 'source-changed', stage: 'staging' })
+    expect(existsSync(join(fixture.workspace, '.dsh-staging-op-1'))).toBe(false)
+  })
+
+  it('reports verify-mismatch and removes staging when the staged bytes were replaced', async () => {
+    fixture = createFixtureWorkspace('remote-download')
+    const s = stack()
+    s.mem.seed('/import/source.txt', 'payload')
+    const deps = {
+      ...s.deps,
+      onStage: async (stage: string) => {
+        if (stage === 'staging') writeFileSync(join(fixture.workspace, '.dsh-staging-op-1'), 'tampered')
+      },
+    }
+    const result = await run(s, remoteToLocal(), deps as RemoteCopyDeps)
+    expect(result).toMatchObject({ status: 'failed', code: 'verify-mismatch', stage: 'verify', staging: 'removed' })
+    expect(existsSync(join(fixture.workspace, 'downloaded.bin'))).toBe(false)
+  })
+
+  it('refuses when the destination parent is replaced after staging', async () => {
+    fixture = createFixtureWorkspace('remote-download')
+    mkdirSync(join(fixture.workspace, 'sub'))
+    const s = stack()
+    s.mem.seed('/import/source.txt', 'payload')
+    const deps = {
+      ...s.deps,
+      onStage: async (stage: string) => {
+        if (stage === 'staging') { renameSync(join(fixture.workspace, 'sub'), join(fixture.workspace, 'sub-moved')); mkdirSync(join(fixture.workspace, 'sub')) }
+      },
+    }
+    const result = await run(s, remoteToLocal({ to: { environmentId: 'local', rootId: 'primary', relativePath: 'sub/out.bin' } }), deps as RemoteCopyDeps)
+    expect(result).toMatchObject({ status: 'failed', code: 'destination-changed', stage: 'publish', staging: 'residual' })
+    expect(existsSync(join(fixture.workspace, 'sub', 'out.bin'))).toBe(false)
+  })
+
+  it('cancels when the local authority changes between admission A and B', async () => {
+    fixture = createFixtureWorkspace('remote-download')
+    // The second registry check names a different root: the copy must not
+    // publish into an authority it did not stage under.
+    const s = stack({ localAuthority: call => ({ rootId: 'primary', root: call >= 2 ? fixture.outside : fixture.workspace, access: 'primary', deny: [] }) })
+    s.mem.seed('/import/source.txt', 'payload')
+    const result = await run(s, remoteToLocal())
+    expect(result).toMatchObject({ status: 'cancelled', code: 'admission-changed' })
+    expect(existsSync(join(fixture.workspace, 'downloaded.bin'))).toBe(false)
+    expect(existsSync(join(fixture.outside, 'downloaded.bin'))).toBe(false)
+  })
+
+  it('reports source-connection-lost and removes local staging when the source link dies mid-stream', async () => {
+    fixture = createFixtureWorkspace('remote-download')
+    const mem = new MemSftp()
+    mem.seed('/import/source.txt', 'payload')
+    mem.loseOnRead = true
+    const s = stack({ mems: { 'vps-a': mem, 'vps-b': new MemSftp() } })
+    const result = await run(s, remoteToLocal())
+    expect(result).toMatchObject({ status: 'failed', code: 'source-connection-lost', staging: 'removed' })
+    expect(existsSync(join(fixture.workspace, 'downloaded.bin'))).toBe(false)
+  })
+})
+
+describe('runRemoteCopy remote(sftp) → remote(sftp)', () => {
+  it('relays the source bytes into the destination staging and publishes', async () => {
+    fixture = createFixtureWorkspace('remote-relay')
+    const s = stack()
+    const payload = Buffer.from('relayed-artifact-'.repeat(20))
+    s.mem.seed('/export/artifact.bin', payload)
+    const result = await run(s, remoteToRemote())
+    expect(result).toMatchObject({ status: 'committed', bytes: payload.length, sha256: sha(payload), staging: 'removed' })
+    expect(s.memB.files.get('/import-b/artifact.bin')!.data.equals(payload)).toBe(true)
+    expect(s.mem.files.get('/export/artifact.bin')!.data.equals(payload)).toBe(true)
+    expect([...s.memB.files.keys()].filter(k => k.includes('.dsh-staging'))).toHaveLength(0)
+  })
+
+  it('carries a zero-byte and a multi-chunk file', async () => {
+    fixture = createFixtureWorkspace('remote-relay')
+    const s = stack()
+    s.mem.seed('/export/empty.bin', '')
+    const empty = await run(s, remoteToRemote({ from: { environmentId: 'vps-a', rootId: 'export', relativePath: 'empty.bin' }, to: { environmentId: 'vps-b', rootId: 'import', relativePath: 'empty.bin' } }))
+    expect(empty).toMatchObject({ status: 'committed', bytes: 0, sha256: sha('') })
+    const big = Buffer.alloc(300 * 1024, 7)
+    s.mem.seed('/export/big.bin', big)
+    const large = await run(s, remoteToRemote({ from: { environmentId: 'vps-a', rootId: 'export', relativePath: 'big.bin' }, to: { environmentId: 'vps-b', rootId: 'import', relativePath: 'big.bin' } }))
+    expect(large).toMatchObject({ status: 'committed', bytes: big.length })
+    expect(s.memB.files.get('/import-b/big.bin')!.data.equals(big)).toBe(true)
+  })
+
+  it('refuses an existing destination before staging', async () => {
+    fixture = createFixtureWorkspace('remote-relay')
+    const s = stack()
+    s.mem.seed('/export/artifact.bin', 'new')
+    s.memB.seed('/import-b/artifact.bin', 'existing')
+    const result = await run(s, remoteToRemote())
+    expect(result).toMatchObject({ status: 'failed', code: 'target-exists', stage: 'preflight', staging: 'none' })
+    expect(s.memB.files.get('/import-b/artifact.bin')!.data.toString()).toBe('existing')
+  })
+
+  it('refuses a non-regular remote source', async () => {
+    fixture = createFixtureWorkspace('remote-relay')
+    const s = stack()
+    s.mem.seed('/export/artifact.bin', 'x', 0o120777)
+    const result = await run(s, remoteToRemote())
+    expect(result).toMatchObject({ status: 'failed', code: 'source-not-regular', stage: 'source' })
+  })
+
+  it('reports source-changed and removes destination staging', async () => {
+    fixture = createFixtureWorkspace('remote-relay')
+    const s = stack()
+    s.mem.seed('/export/artifact.bin', 'before')
+    const deps = { ...s.deps, onStage: async (stage: string) => { if (stage === 'staging') s.mem.touch('/export/artifact.bin', 'after!!') } }
+    const result = await run(s, remoteToRemote(), deps as RemoteCopyDeps)
+    expect(result).toMatchObject({ status: 'failed', code: 'source-changed' })
+    expect([...s.memB.files.keys()].filter(k => k.includes('.dsh-staging'))).toHaveLength(0)
+  })
+
+  it('refuses a relay that grows past the byte budget before any excess reaches staging', async () => {
+    fixture = createFixtureWorkspace('remote-relay-growth')
+    const s = stack({ transfer: { maxBytes: 1024, timeoutMs: 10_000 } })
+    s.mem.seed('/export/artifact.bin', Buffer.alloc(512, 'a'))
+    const deps = { ...s.deps, onStage: async (stage: string) => { if (stage === 'preflight') s.mem.touch('/export/artifact.bin', Buffer.alloc(4096, 'b')) } }
+    const result = await run(s, remoteToRemote(), deps as RemoteCopyDeps)
+    expect(result).toMatchObject({ status: 'failed', code: 'transfer-too-large', stage: 'staging', staging: 'removed' })
+    expect(s.memB.writes).toBe(0)
+    expect([...s.memB.files.keys()].filter(k => k.includes('.dsh-staging'))).toHaveLength(0)
+    expect(s.memB.files.has('/import-b/artifact.bin')).toBe(false)
+  })
+
+  it('reports source-connection-lost and cleans the destination staging', async () => {
+    fixture = createFixtureWorkspace('remote-relay')
+    const s = stack()
+    s.mem.seed('/export/artifact.bin', 'payload')
+    s.mem.loseOnRead = true
+    const result = await run(s, remoteToRemote())
+    expect(result).toMatchObject({ status: 'failed', code: 'source-connection-lost', staging: 'removed' })
+    expect([...s.memB.files.keys()].filter(k => k.includes('.dsh-staging'))).toHaveLength(0)
+  })
+
+  it('reports a clean destination write failure and the lost destination separately', async () => {
+    fixture = createFixtureWorkspace('remote-relay')
+    const s = stack()
+    s.mem.seed('/export/artifact.bin', 'payload')
+    s.memB.failWrites = true
+    // A status error is a clean failure with staging cleaned up.
+    const failed = await run(s, remoteToRemote())
+    expect(failed).toMatchObject({ status: 'failed', staging: 'removed' })
+    const lost = stack()
+    lost.mem.seed('/export/artifact.bin', 'payload')
+    lost.memB.write = async () => { throw new SftpConnectionLost('destination lost') }
+    const unknown = await run(lost, remoteToRemote())
+    expect(unknown).toMatchObject({ status: 'unknown', code: 'destination-connection-lost', staging: 'unknown' })
+  })
+
+  it('reports unknown when the hardlink reply is lost', async () => {
+    fixture = createFixtureWorkspace('remote-relay')
+    const s = stack()
+    s.mem.seed('/export/artifact.bin', 'payload')
+    s.memB.loseOnHardlink = true
+    const result = await run(s, remoteToRemote())
+    expect(result).toMatchObject({ status: 'unknown', code: 'connection-lost', staging: 'unknown' })
+    expect(s.memB.hardlinkCalls).toBe(1)
+  })
+
+  it('cancels when the destination generation changes between staging and publish', async () => {
+    fixture = createFixtureWorkspace('remote-relay')
+    const s = stack()
+    s.mem.seed('/export/artifact.bin', 'payload')
+    const realFsync = s.memB.fsync.bind(s.memB)
+    s.memB.fsync = async () => { await realFsync(); s.setGeneration('vps-b', 'g2') }
+    const result = await run(s, remoteToRemote())
+    expect(result).toMatchObject({ status: 'cancelled', code: 'admission-changed', staging: 'residual' })
+    expect(s.memB.files.has('/import-b/artifact.bin')).toBe(false)
+  })
+
+  it('refuses the transfer staging namespace as a destination name', async () => {
+    fixture = createFixtureWorkspace('remote-relay')
+    const s = stack()
+    s.mem.seed('/export/artifact.bin', 'payload')
+    const result = await run(s, remoteToRemote({ to: { environmentId: 'vps-b', rootId: 'import', relativePath: '.dsh-staging-op-1' } }))
+    expect(result).toMatchObject({ status: 'failed', code: 'reserved-name' })
+    expect(s.memB.hardlinkCalls).toBe(0)
+  })
+
+  it('refuses local → local as direction-unsupported before any admission', async () => {
+    fixture = createFixtureWorkspace('remote-relay')
+    const s = stack()
+    const result = await run(s, request({ from: { environmentId: 'local', rootId: 'primary', relativePath: 'a' }, to: { environmentId: 'local', rootId: 'primary', relativePath: 'b' } }))
+    expect(result).toMatchObject({ status: 'failed', code: 'direction-unsupported' })
+    expect(s.registry.admitCount()).toBe(0)
+  })
+})
+
+describe.skipIf(process.platform === 'win32')('remote destination path safety', () => {
+  const local = () => {
+    fixture = createFixtureWorkspace('remote-safety')
+    writeFileSync(join(fixture.workspace, 'source.txt'), 'payload')
+    return stack()
+  }
+  const noOutsideWrites = (mem: MemSftp) => {
+    const creates = mem.calls.filter(call => {
+      const match = /^open \S+ (\d+)$/.exec(call)
+      return match !== null && (Number(match[1]) & (8 | 32)) !== 0
+    })
+    expect(creates).toHaveLength(0)
+    expect(mem.hardlinkCalls).toBe(0)
+  }
+
+  it('refuses a symlinked parent component even when realpath agrees', async () => {
+    const s = local()
+    s.mem.seed('/import/linkdir', Buffer.alloc(0), 0o120777)
+    const result = await run(s, localToRemote({ to: { environmentId: 'vps-a', rootId: 'import', relativePath: 'linkdir/out.bin' } }))
+    expect(result).toMatchObject({ status: 'failed', code: 'destination-symlinked', stage: 'preflight' })
+    noOutsideWrites(s.mem)
+  })
+
+  it('refuses a symlinked ancestor and a redirected root', async () => {
+    const s = local()
+    s.mem.seed('/import/sub/link', Buffer.alloc(0), 0o120777)
+    const ancestor = await run(s, localToRemote({ to: { environmentId: 'vps-a', rootId: 'import', relativePath: 'sub/link/out.bin' } }))
+    expect(ancestor).toMatchObject({ status: 'failed', code: 'destination-symlinked' })
+    noOutsideWrites(s.mem)
+    const redirected = stack()
+    redirected.mem.realpath = async (p: string) => p === '/import' ? '/elsewhere' : p
+    const root = await run(redirected, localToRemote())
+    expect(root).toMatchObject({ status: 'failed', code: 'root-redirected' })
+    noOutsideWrites(redirected.mem)
+  })
+
+  it('refuses when the parent changes between staging, verify and publish', async () => {
+    const s = local()
+    let calls = 0
+    const deps = {
+      ...s.deps,
+      onStage: async (stage: string) => {
+        if (stage === 'staging' && calls++ === 0) {
+          s.mem.files.set('/import', { data: Buffer.alloc(0), mtime: 1, permissions: 0o120777 })
+        }
+      },
+    }
+    const result = await run(s, localToRemote(), deps as RemoteCopyDeps)
+    expect(result).toMatchObject({ status: 'failed', code: 'destination-symlinked' })
+    expect(s.mem.hardlinkCalls).toBe(0)
+    const later = stack()
+    const publishDeps = {
+      ...later.deps,
+      onStage: async (stage: string) => {
+        if (stage === 'verify') later.mem.files.set('/import', { data: Buffer.alloc(0), mtime: 1, permissions: 0o120777 })
+      },
+    }
+    const published = await run(later, localToRemote(), publishDeps as RemoteCopyDeps)
+    expect(published).toMatchObject({ status: 'failed', code: 'destination-symlinked', stage: 'publish' })
+    expect(later.mem.hardlinkCalls).toBe(0)
+    expect(later.mem.files.has('/import/dest.txt')).toBe(false)
+  })
+
+  it('refuses a staging object that is a symlink, a directory, or the wrong size', async () => {
+    for (const permissions of [0o120777, 0o040755] as const) {
+      const s = local()
+      const deps = {
+        ...s.deps,
+        onStage: async (stage: string) => {
+          if (stage === 'staging') s.mem.files.set('/import/.dsh-staging-op-1', { data: Buffer.alloc(0), mtime: 1, permissions })
+        },
+      }
+      const result = await run(s, localToRemote(), deps as RemoteCopyDeps)
+      expect(result).toMatchObject({ status: 'failed', code: 'staging-changed' })
+      expect(s.mem.hardlinkCalls).toBe(0)
+    }
+    const s = local()
+    const deps = {
+      ...s.deps,
+      onStage: async (stage: string) => {
+        if (stage === 'staging') s.mem.files.set('/import/.dsh-staging-op-1', { data: Buffer.from('payloadEXTRA'), mtime: 1, permissions: 0o100644 })
+      },
+    }
+    const result = await run(s, localToRemote(), deps as RemoteCopyDeps)
+    expect(result).toMatchObject({ status: 'failed', code: 'staging-changed' })
+    expect(s.mem.hardlinkCalls).toBe(0)
+    expect(s.mem.files.has('/import/dest.txt')).toBe(false)
+  })
+
+  it('commits a zero-byte file through the whole safety walk', async () => {
+    const s = local()
+    writeFileSync(join(fixture.workspace, 'source.txt'), '')
+    const result = await run(s, localToRemote())
+    expect(result).toMatchObject({ status: 'committed', bytes: 0, sha256: sha(''), staging: 'removed' })
+    expect(s.mem.files.get('/import/dest.txt')!.data.length).toBe(0)
+  })
+
+  it('reports committed with residual staging when the post-ack parent check loses the link', async () => {
+    const s = local()
+    const realHardlink = s.mem.hardlink.bind(s.mem)
+    s.mem.hardlink = async (oldP: string, newP: string) => {
+      await realHardlink(oldP, newP)
+      s.mem.realpath = async (_p: string) => { throw new SftpConnectionLost('link died after hardlink') }
+    }
+    const result = await run(s, localToRemote())
+    expect(result).toMatchObject({ status: 'committed', staging: 'residual' })
+    expect(s.mem.hardlinkCalls).toBe(1)
+    expect(s.mem.files.has('/import/dest.txt')).toBe(true)
+  })
+})
+
+
+describe('total transfer I/O deadline and cancellation', () => {
+  it.skipIf(process.platform === 'win32').each(['realpath', 'write', 'read', 'fsync', 'hardlink', 'remove', 'close'] as const)('bounds a stalled %s without publishing again', async method => {
+    fixture = createFixtureWorkspace('copy-deadline')
+    writeFileSync(join(fixture.workspace, 'source.txt'), 'bounded')
+    // Long enough for a loaded runner to reach the instrumented call; the
+    // transfer deadline — not the 30 s test timeout — must bound the stall.
+    const s = stack({ transfer: { maxBytes: 1024, timeoutMs: 1_000 } })
+    let entered = false
+    vi.spyOn(s.mem, method).mockImplementation(() => { entered = true; return new Promise<never>(() => {}) })
+    const result = await run(s, localToRemote())
+    expect(entered, `the transfer ended as ${result.code ?? result.status} before ${method} was invoked`).toBe(true)
+    if (method === 'hardlink') expect(result).toMatchObject({ status: 'unknown', stage: 'publish', reconcileId: 'op-1' })
+    else if (method === 'remove') expect(result).toMatchObject({ status: 'committed', staging: 'residual' })
+    else expect(result.status).not.toBe('committed')
+    expect(s.mem.hardlinkCalls).toBeLessThanOrEqual(1)
+  })
+
+  it.for(['upload', 'download', 'relay'] as const)('cancels a stalled %s without waiting for the response', async (direction, context) => {
+    fixture = createFixtureWorkspace('copy-cancel')
+    if (direction !== 'relay' && process.platform === 'win32') {
+      context.skip('Local transfer handles are POSIX-only (ADR-0030)')
+    }
+    writeFileSync(join(fixture.workspace, 'source.txt'), 'bounded')
+    const s = stack()
+    s.mem.seed('/export/artifact.bin', 'bounded')
+    s.mem.seed('/import/source.txt', 'bounded')
+    const entered = Promise.withResolvers<void>()
+    vi.spyOn(s.mem, direction === 'upload' ? 'write' : 'read').mockImplementation(() => { entered.resolve(); return new Promise<never>(() => {}) })
+    const controller = new AbortController()
+    const req = direction === 'upload' ? localToRemote() : direction === 'download' ? remoteToLocal() : remoteToRemote()
+    const pending = runRemoteCopy(s.registry, s.deps, req, 'remote_copy', controller.signal)
+    await Promise.race([
+      entered.promise,
+      pending.then(result => { throw new Error(`Transfer ended before the stalled SFTP call: ${JSON.stringify(result)}`) }),
+    ])
+    controller.abort()
+    expect(await pending).toMatchObject({ code: 'cancelled' })
+    expect(s.mem.hardlinkCalls + s.memB.hardlinkCalls).toBe(0)
+  })
+
+  it.runIf(process.platform === 'win32')('refuses a download before reading from SFTP on Windows', async () => {
+    fixture = createFixtureWorkspace('copy-unsupported-sink')
+    const s = stack()
+    s.mem.seed('/import/source.txt', 'bounded')
+    expect(await run(s, remoteToLocal())).toMatchObject({
+      status: 'failed', code: 'local-platform-unsupported', stage: 'preflight', staging: 'none',
+    })
+    expect(s.mem.readCalls).toBe(0)
+  })
+
+  it.skipIf(process.platform === 'win32')('abandons a timed-out opening without closing a shared session returned later', async () => {
+    fixture = createFixtureWorkspace('copy-open-timeout')
+    writeFileSync(join(fixture.workspace, 'source.txt'), 'bounded')
+    const s = stack({ transfer: { maxBytes: 1024, timeoutMs: 30 } })
+    const opened = Promise.withResolvers<{ client: SftpClient; generation: string }>()
+    const dispose = vi.fn()
+    let waiter: AbortSignal | undefined
+    s.manager.openSftp = async (_id, signal) => { waiter = signal; return await opened.promise as never }
+    const pending = run(s, localToRemote(), { manager: s.manager })
+    expect(await pending).toMatchObject({ code: 'transfer-timeout', stage: 'preflight' })
+    expect(waiter?.aborted).toBe(true)
+    opened.resolve({ client: { dispose } as unknown as SftpClient, generation: 'late' })
+    await Promise.resolve()
+    expect(dispose).not.toHaveBeenCalled()
+  })
+
+  it.skipIf(process.platform === 'win32')('cancels one upload with a pending write while another upload shares its SFTP channel', async () => {
+    fixture = createFixtureWorkspace('copy-shared-cancel')
+    writeFileSync(join(fixture.workspace, 'source.txt'), 'shared bytes')
+    const s = stack({ uniqueOperationIds: true })
+    const dispose = vi.fn()
+    Object.assign(s.mem, { dispose })
+    const entered = Promise.withResolvers<void>()
+    const writing = Promise.withResolvers<void>()
+    vi.spyOn(s.mem, 'write').mockImplementationOnce(async () => {
+      entered.resolve()
+      await writing.promise
+    })
+    const controller = new AbortController()
+    const first = runRemoteCopy(s.registry, { manager: s.manager }, localToRemote(), 'remote_copy', controller.signal)
+    await entered.promise
+    const second = run(s, localToRemote({ to: { ...localToRemote().to, relativePath: 'peer.txt' } }), { manager: s.manager })
+    controller.abort()
+    await expect(first).resolves.toMatchObject({ code: 'cancelled' })
+    await expect(second).resolves.toMatchObject({ status: 'committed' })
+    writing.resolve()
+    expect(dispose).not.toHaveBeenCalled()
+    expect(s.mem.files.get('/import/peer.txt')?.data.toString()).toBe('shared bytes')
+    expect(s.mem.files.has('/import/dest.txt')).toBe(false)
+  })
+
+  it.skipIf(process.platform === 'win32')('a timed-out write abandons only the waiter and breaks the shared session after a bounded grace', async () => {
+    fixture = createFixtureWorkspace('copy-shared-timeout')
+    writeFileSync(join(fixture.workspace, 'source.txt'), 'shared bytes')
+    const s = stack({ uniqueOperationIds: true, transfer: { maxBytes: 1024, timeoutMs: 50 } })
+    const dispose = vi.fn()
+    Object.assign(s.mem, { dispose })
+    const entered = Promise.withResolvers<void>()
+    const writing = Promise.withResolvers<void>()
+    vi.spyOn(s.mem, 'write').mockImplementationOnce(async () => {
+      entered.resolve()
+      await writing.promise
+    })
+    const first = run(s, localToRemote(), { manager: s.manager })
+    await entered.promise
+    const second = run(s, localToRemote({ to: { ...localToRemote().to, relativePath: 'peer.txt' } }), { manager: s.manager })
+    await expect(first).resolves.toMatchObject({ code: 'transfer-timeout' })
+    // The timed-out waiter is abandoned; the sibling transfer keeps the session.
+    await expect(second).resolves.toMatchObject({ status: 'committed' })
+    expect(dispose).not.toHaveBeenCalled()
+    expect(s.mem.files.get('/import/peer.txt')?.data.toString()).toBe('shared bytes')
+    // The wire request never answers: after the grace the generation breaks.
+    await new Promise(resolve => setTimeout(resolve, 1_500))
+    expect(dispose).toHaveBeenCalled()
+  })
+
+  it.skipIf(process.platform === 'win32')('a timed-out request that answers inside the grace keeps the shared session', async () => {
+    fixture = createFixtureWorkspace('copy-shared-timeout-late')
+    writeFileSync(join(fixture.workspace, 'source.txt'), 'shared bytes')
+    const s = stack({ uniqueOperationIds: true, transfer: { maxBytes: 1024, timeoutMs: 50 } })
+    const dispose = vi.fn()
+    Object.assign(s.mem, { dispose })
+    const entered = Promise.withResolvers<void>()
+    const writing = Promise.withResolvers<void>()
+    vi.spyOn(s.mem, 'write').mockImplementationOnce(async () => {
+      entered.resolve()
+      await writing.promise
+    })
+    const first = run(s, localToRemote(), { manager: s.manager })
+    await entered.promise
+    await expect(first).resolves.toMatchObject({ code: 'transfer-timeout' })
+    writing.resolve()
+    await new Promise(resolve => setTimeout(resolve, 1_500))
+    expect(dispose).not.toHaveBeenCalled()
+  })
+})

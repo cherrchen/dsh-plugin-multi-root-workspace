@@ -102,7 +102,10 @@ function icon(pixelName: string, regularName: string): PanelIcon {
 
 export const IconChevronDown = icon('IconChevronDownOutline14', 'IconChevronDownOutlineRegular')
 export const IconChevronUp = icon('IconChevronUpOutline14', 'IconChevronUpOutlineRegular')
+// Optional: absent chevron artwork degrades to a text glyph at the call site.
+export const IconChevronRight = maybeIcon(['IconChevronRightOutline14', 'IconChevronRightOutlineRegular'])
 export const IconCopy = icon('IconCopyOutline16', 'IconCopyOutlineRegular')
+export const IconCheck = maybeIcon(['IconCheckOutlineRegular'])
 export const IconEdit = icon('IconEditOutline16', 'IconEditOutlineRegular')
 export const IconEllipsis = icon('IconEllipsisOutline16', 'IconEllipsisOutlineRegular')
 export const IconFolderClose = icon('IconFolderClose16', 'IconFolderCloseRegular')
@@ -115,6 +118,10 @@ export const IconPlus = icon('IconPlusOutline16', 'IconPlusOutlineRegular')
 export const IconRefresh = icon('IconRefreshOutline16', 'IconRefreshOutlineRegular')
 export const IconSettings = icon('IconSettingsOutline16', 'IconSettingsOutlineRegular')
 export const IconTrash = icon('IconTrashOutline16', 'IconTrashOutlineRegular')
+export const IconPlay = selectIconOr(installed, ['IconPlayOutline16', 'IconPlayOutlineRegular'], IconRefresh)
+export const IconDownload = selectIconOr(installed, ['IconDownloadOutline16', 'IconDownloadOutlineRegular'], IconPlus)
+export const IconLink = selectIconOr(installed, ['IconLinkOutline16', 'IconLinkOutlineRegular'], IconFolderOpen)
+export const IconShield = selectIconOr(installed, ['IconShieldOutline16', 'IconShieldOutlineRegular'], IconSettings)
 // The notice's close badge. The Regular close artwork is the family the host's
 // own surfaces use from 0.1.7-alpha.1 on; a release that exports none leaves
 // the badge to its local stroke fallback instead of failing the client graph.
@@ -125,3 +132,4 @@ export const IconClose = maybeIcon(['IconCloseOutlineRegular'])
 export const IconAccessReadWrite = maybeIcon(['PermissionIconWorkspaceWriteRegular', 'IconWorkspaceWriteRegular'])
 export const IconAccessReadOnly = maybeIcon(['PermissionIconReadOnlyRegular', 'IconReadOnlyRegular'])
 export const IconAccessInherit = maybeIcon(['IconWorkspaceTreeOutline16', 'IconWorkspaceTreeOutlineRegular'])
+export const WarningOutlineIcon = maybeIcon(['IconWarningOutline16', 'IconWarningOutlineRegular'])
