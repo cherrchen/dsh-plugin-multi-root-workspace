@@ -61,7 +61,7 @@ Una vez instalado, añada una raíz adicional en la sesión:
 | `0.2.0` | `0.2.0-rc.1`, `0.2.0-rc.2` |
 | `0.2.1` | `0.2.1-alpha.1`, `0.2.1-alpha.2`, `0.2.1-alpha.3`, `0.2.1-alpha.4`, `0.2.1-alpha.5`, `0.2.1-rc.1`, `0.2.1-rc.2`, `0.2.1-rc.3`, `0.2.1-rc.4`, `0.2.1-rc.5` |
 | `0.2.2` | `0.2.2-alpha.2`, `0.2.2-alpha.3`, `0.2.2-rc.1`, `0.2.2-rc.2`, `0.2.2-rc.3`, `0.2.2-rc.4`, `0.2.2-rc.5` |
-| `0.2.3` | `0.2.3-alpha.1`, `0.2.3-alpha.2` |
+| `0.2.3` | `0.2.3-alpha.2` |
 
 Si la versión de DSH no figura en la tabla, o si los paquetes `@deepseek-ai/dsh-*` no coinciden entre sí en la versión, el plugin no se inicia y su comportamiento equivale al de no tenerlo instalado.
 

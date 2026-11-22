@@ -67,7 +67,7 @@ describe('live Host Skills settings', () => {
         { id: 'multi-root-registry', name: 'cordis:dependencies' }, { id: 'multi-root-skills', name: 'cordis:skills' },
       ] }]))
       writeFileSync(join(directory, 'cordis.yml'), '[]\n')
-      const profile = { name: 'skills', dir: directory, home: fixture.base, startedBundles: ['skills-fixture'], patchPath: join(directory, 'cordis.patch.yml'), installAnchor: join(fixture.base, 'package.json'), cwd: fixture.base, overlayPaths: [], telemetryDisabledEnv: undefined }
+      const profile = { name: 'skills', dir: directory, home: fixture.base, startedBundles: ['skills-fixture'], patchPath: join(directory, 'cordis.patch.yml'), installAnchor: join(fixture.base, 'package.json'), cwd: fixture.base, overlays: [], overlayPaths: [], telemetryDisabledEnv: undefined }
       instance = await boot('skills', join(directory, 'cordis.yml'), readProfilePatches('skills', profile as never), ctx => {
         ctx.provide('profileContext', profile as never)
         ctx.provide('appReady', { onReady: (callback: () => void) => { callback(); return () => {} } } as never)

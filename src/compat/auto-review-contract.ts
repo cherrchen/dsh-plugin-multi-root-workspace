@@ -30,19 +30,20 @@ export const AUTO_REVIEW_LEGACY_RELEASES = ['0.2.1-rc.2', '0.2.1-rc.3', '0.2.1-r
  * (`alpha.2` predates the request-purpose map) is selected by
  * {@link autoReviewRequestIdentity}.
  *
- * The `0.2.3` alphas belong to this generation although their official source
- * moves two lines: the `Context`/`FiberState` import order and the root
+ * The `0.2.3-alpha.2` release belongs to this generation although its official
+ * source moves two lines: the `Context`/`FiberState` import order and the root
  * context spelling (`ctx.root` to `ctx[Context.root]`, cordis 4.2). Both
  * lines are replaced by the reviewed fork patch, and `current/locales.ts` is
  * byte-identical, so this is a host API rename rather than a reviewer
  * input-model change: the fork resolves the root structurally
- * (`src/compat/cordis-root.ts`) and runs on cordis 4.1 (a real
- * `0.2.3-alpha.1` host) and 4.2 (`0.2.3-alpha.2`) alike. Do not swap
- * `current/upstream.ts` to the alpha bytes: seven of the nine releases still
- * serve the committed copy verbatim, and the audit delta is exactly the two
- * patch-replaced lines.
+ * (`src/compat/cordis-root.ts`) and the baseline runs on cordis 4.1 (the
+ * `0.2.2` line) and 4.2 (`0.2.3-alpha.2`) alike. `0.2.3-alpha.1` has the same
+ * source but its published release cannot launch (vendor pins lag the source),
+ * so it is not in this set. Do not swap `current/upstream.ts` to the alpha
+ * bytes: seven of the eight releases still serve the committed copy verbatim,
+ * and the audit delta is exactly the two patch-replaced lines.
  */
-export const AUTO_REVIEW_CURRENT_RELEASES = ['0.2.2-alpha.2', '0.2.2-alpha.3', '0.2.2-rc.1', '0.2.2-rc.2', '0.2.2-rc.3', '0.2.2-rc.4', '0.2.2-rc.5', '0.2.3-alpha.1', '0.2.3-alpha.2'] as const
+export const AUTO_REVIEW_CURRENT_RELEASES = ['0.2.2-alpha.2', '0.2.2-alpha.3', '0.2.2-rc.1', '0.2.2-rc.2', '0.2.2-rc.3', '0.2.2-rc.4', '0.2.2-rc.5', '0.2.3-alpha.2'] as const
 
 /**
  * One frozen upstream reviewer source generation. Each baseline keeps one

@@ -112,7 +112,7 @@ describe('OPS compatibility settings — real Loader/Settings', () => {
       ] }]))
       writeFileSync(join(directory, 'cordis.yml'), '[]\n')
       const ConfigEditor = (await import(pathToFileURL(configEditorPath!).href)).default
-      const profile = { name: 'ops', dir: directory, home: fixture.base, startedBundles: ['ops-fixture'], patchPath: join(directory, 'cordis.patch.yml'), installAnchor: join(fixture.base, 'package.json'), cwd: fixture.base, overlayPaths: [], telemetryDisabledEnv: undefined }
+      const profile = { name: 'ops', dir: directory, home: fixture.base, startedBundles: ['ops-fixture'], patchPath: join(directory, 'cordis.patch.yml'), installAnchor: join(fixture.base, 'package.json'), cwd: fixture.base, overlays: [], overlayPaths: [], telemetryDisabledEnv: undefined }
       const bootProfile = async () => await boot('ops', join(directory, 'cordis.yml'), readProfilePatches('ops', profile as never), ctx => {
         ctx.provide('profileContext', profile as never)
         ctx.provide('appReady', { onReady: (callback: () => void) => { callback(); return () => {} } } as never)

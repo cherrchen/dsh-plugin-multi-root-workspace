@@ -6,13 +6,13 @@
 | --- | --- | --- | --- | --- |
 | `0.2.1`（legacy） | `0.2.1-rc.2` – `0.2.1-rc.5` | `dsh-v0.2.1-rc.2` | `687f282e8625c6b8d11ff58211a90524be2e4317` | `d4975b54f5` |
 | `0.2.2`（current） | `0.2.2-alpha.2` – `0.2.2-rc.5` | `dsh-v0.2.2-alpha.3` | `05b1cae8db6e674c5685101494d4eec24652424a` | `29df7771f0` |
-| `0.2.2`（current，`0.2.3` 两发布） | `0.2.3-alpha.1` – `0.2.3-alpha.2` | 同上（两发布 `src` 树逐字节相同） | 同左 | `3513c23f66`（sha256 `179e8f50…`；仅 import 顺序与根上下文两行不同，均在 patch 替换范围内） |
+| `0.2.2`（current，含 `0.2.3-alpha.2`） | `0.2.2-alpha.2` – `0.2.2-rc.5`、`0.2.3-alpha.2` | 同上（alpha.2 与 alpha.1 源码相同） | 同左 | `3513c23f66`（sha256 `179e8f50…`；仅 import 顺序与根上下文两行不同，均在 patch 替换范围内） |
 
 两代 reviewer 的输入模型不同（`0.2.2-alpha.2` 起为固定 system + 每条保留项一条 user message、逐项 tool-schema、跨审查 schema 复用），因此不能共用一份实现。开发 pin 属于哪个基线，就只类型检查对应实现；运行中的宿主只加载自己的那份 bundle（入口按已安装发布动态加载，见 `entry.ts`）。`0.2.2-alpha.2` 的 `GenerateOptions.purpose` 仍是闭集，因此该发布不发送 `sessionId`/`purpose`，由 `autoReviewRequestIdentity` 决定。
 
 允许差异（两代共同）：兼容层身份及必需服务；调用只读宿主 context builder；环境数据及当前 constraint 数据；native 副本的 metadata/digest 校验与去重；发送前、模型等待后、后续 gate 后和 dispatch 前的失败关闭/陈旧校验。dispatch 复核使用 registry token，涵盖人工批准等待，并随 owner 生命周期取消和 drain。
 
-基线 `0.2.2` 额外的允许差异：把当前附加根约束作为 constraint 项插在环境消息之后、保留项之前（镜像 0.2.1 代的 `PROJECT_INSTRUCTIONS` 位置，保持上游“环境固定、历史只追加、待审调用最后”的前缀缓存前提）；`FiberState.ACTIVE` 改写为带注释的字面量 `2`，因为 cordis 发布包的 `FiberState` 是 const enum，没有运行时导出；根上下文经 `../compat/cordis-root.ts` 结构化探测——真实 `0.2.3-alpha.1` 宿主安装 cordis 4.1（只有 `ctx.root`），`alpha.2` 安装 4.2.0-alpha.1（只有 `Context.root` 符号），单一拼写必然在另一侧失效。冻结的 `current/upstream.ts` 仍是 `0.2.2-alpha.3` 字节：`0.2.3` 两发布的官方源码只在上表两行内漂移，而这两行都在 `fork.patch` 的替换范围内，因此不另立代际、也不把冻结副本换成 alpha 字节（9 个发布里 7 个仍逐字节命中）。
+基线 `0.2.2` 额外的允许差异：把当前附加根约束作为 constraint 项插在环境消息之后、保留项之前（镜像 0.2.1 代的 `PROJECT_INSTRUCTIONS` 位置，保持上游“环境固定、历史只追加、待审调用最后”的前缀缓存前提）；`FiberState.ACTIVE` 改写为带注释的字面量 `2`，因为 cordis 发布包的 `FiberState` 是 const enum，没有运行时导出；根上下文经 `../compat/cordis-root.ts` 结构化探测——current 基线横跨 `0.2.2` 行（cordis 4.1，只有 `ctx.root`）与 `0.2.3-alpha.2`（cordis 4.2，只有 `Context.root` 符号），单一拼写必然在另一侧失效。冻结的 `current/upstream.ts` 仍是 `0.2.2-alpha.3` 字节：`0.2.3` 的官方源码（alpha.2 与 alpha.1 相同）只在上表两行内漂移，而这两行都在 `fork.patch` 的替换范围内，因此不另立代际、也不把冻结副本换成 alpha 字节（8 个发布里 7 个仍逐字节命中）。
 
 风险 policy、human/user、direct-parent、checkpoint、fact 角色判定、native/PTC 身份、严格输出协议、ask/never、下游 gate 与卸载语义保持官方语义。新增当前项目文本没有授权身份。没有全局 LLM hook、提示词文本匹配或第二 reviewer。
 

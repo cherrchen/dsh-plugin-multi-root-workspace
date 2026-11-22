@@ -53,9 +53,9 @@ const BASELINES = {
     // spells the ACTIVE state as an annotated literal.
     // The published cordis has no runtime `FiberState` value, so the fork
     // spells the ACTIVE state as an annotated literal; it also resolves the root
-    // through the dual-generation probe (src/compat/cordis-root.ts), because a
-    // real 0.2.3-alpha.1 host runs cordis 4.1 (`ctx.root`) and alpha.2 runs 4.2
-    // (the `Context.root` symbol).
+    // through the dual-generation probe (src/compat/cordis-root.ts), because the current baseline spans 0.2.2 (cordis 4.1, `ctx.root` only) and the
+    // supported 0.2.3-alpha.2 (cordis 4.2, the `Context.root` symbol only); the
+    // 0.2.3-alpha.1 release cannot launch and is not in the contract.
     normalizeTail: source => source.replace(
       'rootContext(ctx).fiber.state === 2 /* FiberState.ACTIVE (const enum; the published cordis has no runtime value) */',
       'ctx.root.fiber.state === FiberState.ACTIVE'),

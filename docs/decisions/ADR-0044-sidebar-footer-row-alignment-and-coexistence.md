@@ -2,7 +2,7 @@
 
 ## Status
 
-Accepted（2026-11-16 决策定案；同日外部技术评审后修正 rail 圆角史（F1）；同日实施期 GUI 复核后追加按钮高度规则（A，见 §修订二），实施与验收见计划）
+Accepted（2026-11-16 决策定案；同日外部技术评审后修正 rail 圆角史（F1）；同日实施期 GUI 复核后追加按钮高度规则（A，见 `修订二），实施与验收见计划）
 
 ## Date
 
@@ -33,10 +33,10 @@ Workspace Folders Dialog（`src/client/WorkspaceFoldersAction.tsx:286-345`）。
    24 个精确版本因此分成两代：**19 个旧几何**（`0.1.5-rc.2` … `0.2.1-rc.5`）与 **5 个新几何**
    （`0.2.2-alpha.2`、`0.2.2-alpha.3`、`0.2.2-rc.1`、`0.2.2-rc.2`、`0.2.2-rc.3`）。在开发
    pin `0.2.2-rc.3` 上，本入口相对同一列的账号/设置行整体左移：图标左缘 6px、文字左缘 4px
-   （见 §Investigation）。用户 2026-11-16 截图里"齿轮 + 工作区目录"与下方"⋯ 更多"（未登录时的
+   （见 `Investigation）。用户 2026-11-16 截图里"齿轮 + 工作区目录"与下方"⋯ 更多"（未登录时的
    账号 launcher，是 `settings.launcher` 的 occupant；新几何下它与设置触发行共用同一 token
    配方，旧几何下它自己的 padding 不同）没有对齐，就是这么来的。对齐参照统一取设置触发行
-   `.triggerRow / .trigger`（见 §Investigation）。
+   `.triggerRow / .trigger`（见 `Investigation）。
 
    行几何之外还有一条**更早且独立**的分界：宿主 rail 触发器的圆角在 `dsh-v0.1.6-alpha.2`（commit
    `c6b81a75fd`，设计打磨批次）已从 `border-radius: 50%` + `corner-shape: round` 改为 12px 圆角方
@@ -44,7 +44,7 @@ Workspace Folders Dialog（`src/client/WorkspaceFoldersAction.tsx:286-345`）。
    （`0.1.5-rc.2`、`0.1.6-alpha.1`）是圆形，其余 22 个都是 12px。本插件的 `.mrfw-triggerRail` 仍写
    `50%`，只与那 2 个版本一致。`.triggerRow` 的 `position: relative` 也在同一边界出现（
    `0.1.6-alpha.2` 起；最老 2 个版本没有）；`@media (hover: hover)` 包装则迟至 `0.2.2-alpha.2`
-   才出现（见 §Investigation）。
+   才出现（见 `Investigation）。
 2. **图标语义不一致。** footer 行仍用 `IconSettings`（齿轮，
    `WorkspaceFoldersAction.tsx:338`），而本插件其余入口——新会话 Hero 入口
    （`HeroWorkspaceEntry.tsx:100`；[ADR-0037](./ADR-0037-conversation-hero-workspace-folders-entry.md)
@@ -125,18 +125,18 @@ rail 圆角不属于两代行几何，它有一条更早的分界（commit `c6b8
 最老版本的偏差。
 
 `@media (hover: hover)` 只存在于 `0.2.2-alpha.2` 起的 5 个版本；旧 19 个版本的 `.trigger:hover`
-没有 media 包装。本配方保持不包装（见 §D2 的取舍说明）。
+没有 media 包装。本配方保持不包装（见 `D2 的取舍说明）。
 
 ### 设置行可见 occupant 的按钮高度分界 `0.2.0-rc.1`（A 修订依据）
 
-行几何之外还有一条**按钮高度**的分界，与 §D2 初稿的 42px 固定高度冲突：侧栏设置行（`.settingsArea`）的可见 occupant 在 `dsh-v0.2.0-rc.1` 前后是两个不同组件。
+行几何之外还有一条**按钮高度**的分界，与 `D2 初稿的 42px 固定高度冲突：侧栏设置行（`.settingsArea`）的可见 occupant 在 `dsh-v0.2.0-rc.1` 前后是两个不同组件。
 
 | 版本 | 设置行 occupant | 可见触发器高度 |
 | --- | --- | --- |
 | `0.1.5-rc.2` … `0.1.7-rc.2`（7 个版本） | `ui-settings-general` 的设置触发行（`.triggerRow` / `.trigger`） | 42px |
 | `0.2.0-rc.1` … `0.2.2-rc.3`（17 个版本） | `ui-settings-account` 的账号 launcher：未登录 `[data-signed-out='true']` 32px、已登录 44px、`[data-collapsed='true']`（rail）36px | 32 / 44px |
 
-本插件固定 42px 时，hover 药丸在 7 个最老版本上与下方一致，在 17 个账号 launcher 版本上不一致：未登录矮 10px（42 vs 32），已登录只差 2px（42 vs 44）。2026-11-16 在隔离 web 组合（`0.2.2-rc.3`、未登录）实测：本行按钮盒 264×42（x 8..272）、下方 More 按钮盒 264×32（x 8..272），hover 背景、圆角、x 范围相同，**只有高度差 10px**。用户据此要求在 A 修订中让按钮高度跟随可见行（见 §修订二）。
+本插件固定 42px 时，hover 药丸在 7 个最老版本上与下方一致，在 17 个账号 launcher 版本上不一致：未登录矮 10px（42 vs 32），已登录只差 2px（42 vs 44）。2026-11-16 在隔离 web 组合（`0.2.2-rc.3`、未登录）实测：本行按钮盒 264×42（x 8..272）、下方 More 按钮盒 264×32（x 8..272），hover 背景、圆角、x 范围相同，**只有高度差 10px**。用户据此要求在 A 修订中让按钮高度跟随可见行（见 `修订二）。
 
 ### 几何实测（288px 宽侧栏，相对侧栏左缘的 CSS px）
 
@@ -263,7 +263,7 @@ README 的描述都已指向 workspace tree；同列设置行本身用齿轮，�
   border-radius: var(--dsw-radius-md, 12px);
 }
 
-/* 设置行的可见 occupant 分界（§修订二）：0.1.7-rc.2 及以前是 42px 的设置触发行，
+/* 设置行的可见 occupant 分界（`修订二）：0.1.7-rc.2 及以前是 42px 的设置触发行，
    0.2.0-rc.1 起是账号 launcher（未登录 32px / 已登录 44px / rail 36px）。按钮高度
    跟随它，让 footer 两行的 hover 药丸同尺寸；没有该标记的宿主保持上面的 42px，
    rail 保持自己的 36px。 */
@@ -286,19 +286,19 @@ README 的描述都已指向 workspace tree；同列设置行本身用齿轮，�
   与新宿主逐值相同。
 - 右 padding 的 `max(0px, 2px - inset)` 只服务旧宿主：旧配方左右不对称（左 8 / 右 10），补上
   2px 才能让长 label 的省略阈值与 hover 底色右缘也逐像素一致；新宿主该补偿为 0。
-- rail 圆角走自己的分界（见 §Investigation）：`0.1.6-alpha.2` 起 22 个版本宿主为 12px，只有最老 2 个
+- rail 圆角走自己的分界（见 `Investigation）：`0.1.6-alpha.2` 起 22 个版本宿主为 12px，只有最老 2 个
   版本是 50%；`var(--dsw-radius-md, 12px)` 与这 22 个版本逐像素一致，最老 2 个版本接受 12px 的已知
   偏差（旧公式 `max(12px, 50% - 2 * inset)` 会在这 22 个版本上错成 18px，否决）。
 - rail 其余（36×36、margin、padding、gap）两代相同；`.mrfw-triggerRow` 补 `position: relative` 与
   `0.1.6-alpha.2` 起的宿主一致（最老 2 个版本没有该声明；本行无定位后代，不影响布局）。
-- 高度规则（§修订二）只改高度（32 / 44），左内边距、gap、圆角与 hover token 不变，因此 icon/label
+- 高度规则（`修订二）只改高度（32 / 44），左内边距、gap、圆角与 hover token 不变，因此 icon/label
   左缘仍为 20 / 42；`:not(.mrfw-triggerRail)` 让 rail 保持 36px；宿主重命名 `data-signed-out` 时
   规则不匹配，静默回退 42px（即今天的尺寸）。
 - `@media (hover: hover)` 包装只在 5 个新几何版本存在；本配方保持不包装：与 19 个旧版本一致，
   触屏上与 5 个新版本存在"有无 hover 反馈"的差异（桌面指针设备无差异）。刻意取舍：不改变旧版本
-  行为，且差异只在无 hover 能力的设备上可见。hover 填充用 `background-color` 长写（§修订三），
+  行为，且差异只在无 hover 能力的设备上可见。hover 填充用 `background-color` 长写（`修订三），
   保留基础规则的 `background-clip: padding-box`，绘制宽度与宿主行一致。
-- 按钮高度跟随设置行可见 occupant（见 §Investigation 的高度分界与 §修订二）：账号 launcher 宿主未登录 32px、已登录 44px；`0.1.7-rc.2` 及以前命中上面的 42px 回退；rail 保持 36px。14/22 字号、hover token、transition 不变；宽/rail 两种形态的 icon 尺寸仍为 16 / 18。
+- 按钮高度跟随设置行可见 occupant（见 `Investigation 的高度分界与 `修订二）：账号 launcher 宿主未登录 32px、已登录 44px；`0.1.7-rc.2` 及以前命中上面的 42px 回退；rail 保持 36px。14/22 字号、hover token、transition 不变；宽/rail 两种形态的 icon 尺寸仍为 16 / 18。
 - 不引入 JS 代际探测、不比较版本字符串：CSS fallback 本身就是结构探测（ADR-0009 的原则在这里
   不需要额外机制）。
 
@@ -370,7 +370,7 @@ README 的描述都已指向 workspace tree；同列设置行本身用齿轮，�
 | 用 JS 在运行期探测宿主代际（读 token / 量 DOM）再切换样式 | 两代配方可以用 CSS fallback 精确表达；额外探测会把纯样式问题变成运行时测量与生命周期问题，且需要测试桩支持 |
 | 保留 4px 外扩、只调 padding | 新宿主同时改了列内边距（12→8）、行内边距与 paint-inset，只改 padding 不能在两代同时命中 |
 | rail 圆角保留 50%（或 `max(12px, 50% - 2 * inset)`） | 50% 只与最老 2 个版本一致；max 公式只在 5 个新几何 + 最老 2 个版本上与宿主一致，其余 17 个旧几何版本不符（7/24）。采纳 `var(--dsw-radius-md, 12px)`：22/24 对齐，最老 2 个版本的圆角偏差已记录 |
-| 对齐到账号 launcher（32px 高、14px 图标、gap 8）而不是设置触发行 | 账号行会随登录状态变化（登录后是 44px、24px 头像），不是稳定参照；设置触发行是 42px/16px 的固定配方。新几何下两行的文字左缘本来就一致（20+14+8 = 20+16+6），旧几何下账号 launcher 的 padding 不同（见 §Investigation），所以参照只能是设置触发行 |
+| 对齐到账号 launcher（32px 高、14px 图标、gap 8）而不是设置触发行 | 账号行会随登录状态变化（登录后是 44px、24px 头像），不是稳定参照；设置触发行是 42px/16px 的固定配方。新几何下两行的文字左缘本来就一致（20+14+8 = 20+16+6），旧几何下账号 launcher 的 padding 不同（见 `Investigation），所以参照只能是设置触发行 |
 | 让位变体 A：任何他人在册就让位 | 官方 cordis-panel 永久注册 → 本入口在所有标准安装消失 |
 | 让位变体 B：按 id 白名单排除 cordis-panel 后让位 | 白名单脆弱、不可推广；他人"注册但未渲染"时仍会误让位 |
 | 让位变体 C：DOM 可见性观测，他人渲染时渲染 null | 需要宿主 DOM 观测与恢复信号；双向让位互隐/抖动；`return null` 仍占 cell，不可组合；用户在 2026-11-16 选择共存 |
@@ -415,17 +415,17 @@ README 的描述都已指向 workspace tree；同列设置行本身用齿轮，�
 
 ## 修订二（2026-11-16，实施期 GUI 复核 A：按钮高度跟随设置行 occupant）
 
-隔离 web 组合目检发现 footer 两行的 hover 药丸高度不一致（用户 2026-11-16 报告；§Investigation 的高度分界是根因）：按钮固定 42px，而 17 个 `0.2.0-rc.1` 起的版本下方可见行是账号 launcher（未登录 32 / 已登录 44）。产品决定（用户明确选择 A）：**按钮高度跟随设置行 occupant**，使两行 hover 药丸同尺寸；其余几何（20/42 icon/label 墨线、gap、圆角、hover token）不变。
+隔离 web 组合目检发现 footer 两行的 hover 药丸高度不一致（用户 2026-11-16 报告；`Investigation 的高度分界是根因）：按钮固定 42px，而 17 个 `0.2.0-rc.1` 起的版本下方可见行是账号 launcher（未登录 32 / 已登录 44）。产品决定（用户明确选择 A）：**按钮高度跟随设置行 occupant**，使两行 hover 药丸同尺寸；其余几何（20/42 icon/label 墨线、gap、圆角、hover token）不变。
 
 - D2 的"42px 高不变"改为：账号 launcher 宿主 32 / 44，`0.1.7-rc.2` 及以前的 42px 设置触发行命中 42px 回退，rail 保持 36px。实现只用 CSS 结构探测（`[data-slot='sidebar']:has(button[data-signed-out=…])`），不读槽账本、不引入 JS 代际探测；属性缺失时静默回退 42px。
-- 否决的备选：固定 32px（与已登录 44px 及旧代 42px 都不符）；固定 44px（未登录差 12px）；只在按钮内画一条 32/44 高的伪元素 hover 背景（视觉与可点区域不一致，且同样需要状态探测）；读取槽账本/账号状态（回答不了"渲染了多高"，ADR-0044 §D4 已否决）。
-- 文档面：README / guide / requirements / architecture 说明 hover 高度跟随设置行；compat note §21 增加"设置行高度随登录态变化、缺少标记回退 42px"的 quiet trap；计划追加 P6 与证据。
+- 否决的备选：固定 32px（与已登录 44px 及旧代 42px 都不符）；固定 44px（未登录差 12px）；只在按钮内画一条 32/44 高的伪元素 hover 背景（视觉与可点区域不一致，且同样需要状态探测）；读取槽账本/账号状态（回答不了"渲染了多高"，ADR-0044 `D4 已否决）。
+- 文档面：README / guide / requirements / architecture 说明 hover 高度跟随设置行；compat note `21 增加"设置行高度随登录态变化、缺少标记回退 42px"的 quiet trap；计划追加 P6 与证据。
 
 ## 修订三（2026-11-16，hover 药丸宽度：填充必须用 `background-color` 长写）
 
 A 修订后 GUI 复核继续报告两行 hover **宽度**不一致。真实 DOM 复验（隔离 web 组合，`0.2.2-rc.3`，未登录）：两个按钮盒都是 264px（x 8..272），但**实际绘制的填充宽度**不同——本行 264px（8..272）、下方 More 258px（11..269），差 6px（两侧各 3px）。根因：
 
-- §D2 的按钮基础规则有 `border-inline: 3px solid transparent` + `background-clip: padding-box`，填充应止于 padding box（258px）；
+- `D2 的按钮基础规则有 `border-inline: 3px solid transparent` + `background-clip: padding-box`，填充应止于 padding box（258px）；
 - 初稿的 `.mrfw-trigger:hover` 用 `background:` **简写**，会把 `background-clip` 重置为初始值 `border-box`，于是 hover 填充盖住两侧透明 border，多画 6px；
 - 宿主自己的 hover 是 `background-color:` **长写**（`.trigger:hover { background-color: … }`），保留基础规则的 `padding-box`，所以两边宽度不同。
 
@@ -467,6 +467,6 @@ A 修订后 GUI 复核继续报告两行 hover **宽度**不一致。真实 DOM 
 
 受支持集合随 DSH `0.2.2-rc.5` 精确支持扩到 **26 个版本**：旧几何仍为 19 个（`0.1.5-rc.2` … `0.2.1-rc.5`），新几何从 6 个变为 **7 个**（`0.2.2-alpha.2` … `0.2.2-rc.5`）；rail 圆角对齐从 23 个版本变为 **24 个**，最老 2 个版本（`0.1.5-rc.2`、`0.1.6-alpha.1`）仍是已记录的偏差，其余旧几何版本数不变（17 个）。`0.2.2-rc.5` 未改任何上游侧栏 / 客户端源码，本文的两份配方、按钮高度规则与同槽共存结论均不变；正文中的 24/22/5/7-24 计数是 2026-11-16 决策与实施时的集合，保留为历史证据；修订三的 25/6/23 计数是 rc.4 时的集合，同样保留。
 
-## 修订五（2026-11-22，DSH 0.2.3-alpha.1 / alpha.2）
+## 修订五（2026-11-22，DSH 0.2.3-alpha.2）
 
-受支持集合随 DSH `0.2.3-alpha.1` / `alpha.2` 精确支持扩到 **28 个版本**：旧几何仍为 19 个（`0.1.5-rc.2` … `0.2.1-rc.5`），新几何从 7 个变为 **9 个**（`0.2.2-alpha.2` … `0.2.3-alpha.2`）；rail 圆角对齐从 24 个版本变为 **26 个**，最老 2 个版本（`0.1.5-rc.2`、`0.1.6-alpha.1`）仍是已记录的偏差，其余旧几何版本数不变（17 个）。`0.2.3` 的客户端差异改了 Files header 的包装层（`div.externalActions`）与层级缩进（`calc(16px + 6px)`），因此本文的两份配方新增一条 unwrap 规则（带 `:not(:has(> [data-files-path]))` 守卫以兼容旧直接子节点布局）；按钮高度、rail 圆角与同槽共存结论不变；正文与先前修订的计数保留为历史证据。
+受支持集合随 DSH `0.2.3-alpha.2` 精确支持扩到 **27 个版本**：旧几何仍为 19 个（`0.1.5-rc.2` … `0.2.1-rc.5`），新几何从 7 个变为 **8 个**（`0.2.2-alpha.2` … `0.2.3-alpha.2`）；rail 圆角对齐从 24 个版本变为 **25 个**，最老 2 个版本（`0.1.5-rc.2`、`0.1.6-alpha.1`）仍是已记录的偏差，其余旧几何版本数不变（17 个）。`0.2.3` 的客户端差异改了 Files header 的包装层（`div.externalActions`）与层级缩进（`calc(16px + 6px)`），因此本文的两份配方新增一条 unwrap 规则（带 `:not(:has(> [data-files-path]))` 守卫以兼容旧直接子节点布局）；按钮高度、rail 圆角与同槽共存结论不变；正文与先前修订的计数保留为历史证据。`0.2.3-alpha.1` 只有源码 tag，发布包不可启动，不进入支持集合。

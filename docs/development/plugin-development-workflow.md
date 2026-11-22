@@ -224,7 +224,7 @@ dsh --profile web --dump-config     # 应看到两行 disabled + 十行 insert
 
 [CI workflow](../../.github/workflows/ci.yml) 响应 main push、PR 和手动触发，权限为 `contents: read`。在 GitHub Actions 的 CI 页面可选择分支后点 **Run workflow**，也可用 `gh workflow run ci.yml --ref <branch>` 验证分支。
 
-- `releases` 通过 [list-dsh-releases.mjs](../../scripts/list-dsh-releases.mjs) 读取精确契约，按 Node 版本分桶，再把每个桶切成最多四个版本一组。当前 28 个版本在每个启用镜像形成八组（Node 22 五组、Node 24.9 两组、Node 24.22.3 一组）。该 job 也在 frozen 开发树校验契约，并各跑一次 lint、docs:check 和 Chromium 面板布局回归。
+- `releases` 通过 [list-dsh-releases.mjs](../../scripts/list-dsh-releases.mjs) 读取精确契约，按 Node 版本分桶，再把每个桶切成最多四个版本一组。当前 27 个版本在每个启用镜像形成八组（Node 22 五组、Node 24.9 两组、Node 24.22.3 一组）。该 job 也在 frozen 开发树校验契约，并各跑一次 lint、docs:check 和 Chromium 面板布局回归。
 - 每组从同一个 Git commit 解包。源码目录与原 checkout 同级，父目录链禁止有 `node_modules`。每个版本独享 manifest、lockfile、依赖树、`lib/`、探针文件、DSH scratch 与日志。依赖下载共享 pnpm 的内容寻址缓存。源码及其中的内核拒绝夹具位于 `/tmp` 和本机 temp grant 之外；DSH scratch 在平台临时区中分配，保留各方言对原生临时目录的语义。开发 pin 走 frozen lockfile，其余复用 `upgrade-dsh.mjs`，仅在该副本内关闭 release-age 等待。
 - `ubuntu-latest` 对每版跑 `compat:check`、双端 typecheck、build、完整 Vitest 和冒烟，保留原生 Landlock；开发 pin 版另跑 `licenses:check`（发布 tarball 只由它构建）。每组并行最多两版，各用最多两个 Vitest worker。其他镜像按版本串行，各用最多四个 worker；每版做精确契约检查、构建和原生套件。Auto Review 联合合同的每个发布都是独立车道：该版本按自身基线做实现类型检查、完整单测与差分门禁（Ubuntu 完整镜像），并在每个启用镜像上执行联合冒烟；其他版本照常显式跳过并退出 0。
 - [Ubuntu 独占套件清单](../../scripts/ci/ubuntu-only.json) 记录从其他镜像迁移的 Vitest 文件。客户端、RPC 和合同、locale 与快照、纯方言 argv、指令与 OPS 活动归属、恢复调度器、打包元数据及工作流等检查集中在 Ubuntu。含平台断言的混合文件整组保留，包括 Registry/IPC/lease 和跨进程接管、实际内核执行、Windows ACL / PowerShell / ConPTY、LSP、worktree Git 和路径边界。所有镜像继续运行真实安装的 `smoke:compose`、`smoke:behavior`、`smoke:journey`、`pack:check` 与 `smoke:packed`。

@@ -34,7 +34,7 @@ import { fileURLToPath } from 'node:url'
  * the upgrade smoke passed on that exact version — a green CI run on an
  * unlisted release is evidence, not authorization (ADR-0009).
  */
-export const SUPPORTED_DSH_RELEASES = ['0.1.5-rc.2', '0.1.6-alpha.1', '0.1.6-alpha.2', '0.1.7-alpha.1', '0.1.7-alpha.2', '0.1.7-rc.1', '0.1.7-rc.2', '0.2.0-rc.1', '0.2.0-rc.2', '0.2.1-alpha.1', '0.2.1-alpha.2', '0.2.1-alpha.3', '0.2.1-alpha.4', '0.2.1-alpha.5', '0.2.1-rc.1', '0.2.1-rc.2', '0.2.1-rc.3', '0.2.1-rc.4', '0.2.1-rc.5', '0.2.2-alpha.2', '0.2.2-alpha.3', '0.2.2-rc.1', '0.2.2-rc.2', '0.2.2-rc.3', '0.2.2-rc.4', '0.2.2-rc.5', '0.2.3-alpha.1', '0.2.3-alpha.2'] as const
+export const SUPPORTED_DSH_RELEASES = ['0.1.5-rc.2', '0.1.6-alpha.1', '0.1.6-alpha.2', '0.1.7-alpha.1', '0.1.7-alpha.2', '0.1.7-rc.1', '0.1.7-rc.2', '0.2.0-rc.1', '0.2.0-rc.2', '0.2.1-alpha.1', '0.2.1-alpha.2', '0.2.1-alpha.3', '0.2.1-alpha.4', '0.2.1-alpha.5', '0.2.1-rc.1', '0.2.1-rc.2', '0.2.1-rc.3', '0.2.1-rc.4', '0.2.1-rc.5', '0.2.2-alpha.2', '0.2.2-alpha.3', '0.2.2-rc.1', '0.2.2-rc.2', '0.2.2-rc.3', '0.2.2-rc.4', '0.2.2-rc.5', '0.2.3-alpha.2'] as const
 
 /** One release this plugin claims to support. */
 export type SupportedDshRelease = typeof SUPPORTED_DSH_RELEASES[number]
@@ -168,14 +168,15 @@ const RUNNER_ANCHOR_PACKAGE = '@deepseek-ai/dsh-sandbox-local'
  * shared `rc.3` implementation is what runs; see the roadmap ledger for the
  * tarball-diff evidence.
  *
- * `0.2.3-alpha.1` and `0.2.3-alpha.2` extend it for the same reason: all four
- * packages are published at both tags with `src` trees byte-identical to
- * `0.2.2-rc.5`, so the implementation the floor already runs is unchanged even
- * though the host moves to cordis 4.2. The suffix rule in `check-dsh-compat`
- * requires this extension whenever the ordinary allowlist grows above the
- * floor.
+ * `0.2.3-alpha.2` extends it for the same reason: all four packages are
+ * published there with `src` trees byte-identical to `0.2.2-rc.5`, so the
+ * implementation the floor already runs is unchanged even though the host moves
+ * to cordis 4.2. (`0.2.3-alpha.1` is not in the ordinary allowlist: its
+ * published release pins the 4.1 vendor line while its sources need 4.2, so it
+ * cannot launch.) The suffix rule in `check-dsh-compat` requires this extension
+ * whenever the ordinary allowlist grows above the floor.
  */
-export const SUPPORTED_SSH_RELEASES = ['0.2.2-rc.1', '0.2.2-rc.2', '0.2.2-rc.3', '0.2.2-rc.4', '0.2.2-rc.5', '0.2.3-alpha.1', '0.2.3-alpha.2'] as const
+export const SUPPORTED_SSH_RELEASES = ['0.2.2-rc.1', '0.2.2-rc.2', '0.2.2-rc.3', '0.2.2-rc.4', '0.2.2-rc.5', '0.2.3-alpha.2'] as const
 
 /**
  * The optional SSH peers the multi-environment experiment loads. NOT part of

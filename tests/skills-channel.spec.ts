@@ -17,19 +17,25 @@ it('serves cold Session metadata, preview and revocation over the real Connectio
   // The WebServer authorizes the request and hands the route the admitted
   // Peer; this fixture server stands in for that step with the owner Peer.
   // Without a Peer the route returns before the bridge and never answers.
-  let peer!: PeerScope
+  let peer: PeerScope | undefined
   const server = createServer((req, res) => {
     const route = routes.find(route => req.url?.startsWith(route.path))
-    if (route) void route.handler(req, res, peer).catch(error => { res.writeHead(500); res.end(String(error)) })
+    if (route) void route.handler(req, res, peer as PeerScope).catch(error => { res.writeHead(500); res.end(String(error)) })
     else { res.writeHead(404); res.end() }
   })
   try {
     const ctx = stack.ctx
     ctx.provide('webServer', { host: '127.0.0.1', protocol: 'http:', port: 0, register: (route: typeof routes[number]) => { routes.push(route); return () => { routes.splice(routes.indexOf(route), 1) } } } as never)
-    // Credential verification is a nested service from 0.2.3-alpha.1; the
-    // transport service reads it at construction and routes carry auth: required.
-    new ConnectionAuthentication(ctx)
-    peer = new HostConnectionService(ctx, []).createPeer({ principal: { kind: 'owner' } })
+    // Credential verification is a nested service from 0.2.3-alpha.1: the
+    // transport reads it at construction and routes require an admitted Peer.
+    // Older releases authenticate through constructor options and answer
+    // without a Peer, so the fixture selects the shape it installed.
+    if (typeof ConnectionAuthentication === 'function') {
+      new ConnectionAuthentication(ctx)
+      peer = new HostConnectionService(ctx, []).createPeer({ principal: { kind: 'owner' } })
+    } else {
+      Reflect.construct(HostConnectionService, [ctx, [], { isAuthenticated: () => true }])
+    }
     ctx.provide('commands', { register: () => () => {} } as never)
     ctx.provide('sandboxPolicy', { resolve: () => ({ mode: 'workspace-write', workspaceRoot: fixture.workspace }) } as never)
     await ctx.plugin(Command)

@@ -61,7 +61,7 @@ Nach der Installation fügen Sie in einer Sitzung eine zusätzliche Wurzel hinzu
 | `0.2.0` | `0.2.0-rc.1`, `0.2.0-rc.2` |
 | `0.2.1` | `0.2.1-alpha.1`, `0.2.1-alpha.2`, `0.2.1-alpha.3`, `0.2.1-alpha.4`, `0.2.1-alpha.5`, `0.2.1-rc.1`, `0.2.1-rc.2`, `0.2.1-rc.3`, `0.2.1-rc.4`, `0.2.1-rc.5` |
 | `0.2.2` | `0.2.2-alpha.2`, `0.2.2-alpha.3`, `0.2.2-rc.1`, `0.2.2-rc.2`, `0.2.2-rc.3`, `0.2.2-rc.4`, `0.2.2-rc.5` |
-| `0.2.3` | `0.2.3-alpha.1`, `0.2.3-alpha.2` |
+| `0.2.3` | `0.2.3-alpha.2` |
 
 Steht die DSH-Version nicht in der Tabelle oder stimmen die Versionen der `@deepseek-ai/dsh-*`-Pakete nicht überein, startet das Plugin nicht und verhält sich wie nicht installiert.
 

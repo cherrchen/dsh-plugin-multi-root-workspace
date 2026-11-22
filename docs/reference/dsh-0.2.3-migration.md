@@ -5,7 +5,7 @@
 | tag | commit | 发布提交 | npm dist-tag |
 |---|---|---|---|
 | `dsh-v0.2.2-rc.5` | `9c2670d3bce5275e0d1610272958121af87787bb` | `9bf478edde5b14e6a15d3802a8834bdca83f2d97` | `next` / `latest` |
-| `dsh-v0.2.3-alpha.1` | `d98f5d68519215da48f3002da2cb9c9d2068d81d` | `aae91d692e2802f63a4a92fd073fe21259795e59` | — |
+| `dsh-v0.2.3-alpha.1` | `d98f5d68519215da48f3002da2cb9c9d2068d81d` | `aae91d692e2802f63a4a92fd073fe21259795e59` | —（发布不可启动，仅源码对照） |
 | `dsh-v0.2.3-alpha.2` | `4b399c39a6d1479cd84ca591b4d7c88e24d38a96` | `267805d20d` | `alpha` |
 
 ## 发布边界
@@ -16,7 +16,17 @@
 - `packages/boot/hmr/src/package-manifest.ts`；
 - `packages/ptc-runtime/ptc-runtime-node/src/imports/vm-modules.ts`。
 
-这 3 处都不在插件消费的具体接缝上，因此**服务端接缝的所有差异都是 `rc.5 → alpha.1` 的差异，`alpha.2` 与 `alpha.1` 共用一份适配**。`alpha.2` 独有的变化是根 `engines`：从 `>=24.9.0` 改为 `^24.22.3 || >=26.13.1`（上游升级指南 `docs/upgrade-guide/v0.2.3-alpha.1/node-24-22-3/guide.md` 说明这是首个内置 November 2026 undici 安全修复的 Node 24/26 版本线）。
+这 3 处都不在插件消费的具体接缝上，因此**服务端接缝的所有差异都是 `rc.5 → alpha.1` 的差异，`alpha.2` 与 `alpha.1` 共用一份适配**。注意 `alpha.1` 发布的 vendor pin 未同步，发布包无法启动，只有 `alpha.2` 进入支持合同（见下节）。`alpha.2` 独有的变化是根 `engines`：从 `>=24.9.0` 改为 `^24.22.3 || >=26.13.1`（上游升级指南 `docs/upgrade-guide/v0.2.3-alpha.1/node-24-22-3/guide.md` 说明这是首个内置 November 2026 undici 安全修复的 Node 24/26 版本线）。
+
+## 为什么只纳入 `alpha.2`
+
+`0.2.3-alpha.1` 的源码已经迁移到 cordis 4.2 的 `Context.root` 与 loader 1.2 的 `EntryValidationError`，但发布提交没有同步 vendor pin：npm 发布的 `@deepseek-ai/dsh@0.2.3-alpha.1` 仍声明 cordis `~4.1.0` / loader `~1.1.0`。在空目录安装该精确版本后直接运行 `dsh --version` 即崩溃：
+
+```
+SyntaxError: The requested module '@deepseek-ai/cordis-plugin-loader' does not provide an export named 'EntryValidationError'
+```
+
+CI 的 alpha.1 lane 另有 typert `ctx[Context.root].reflect` 未定义等 125 个失败；`alpha.2` 补上 vendor `4.2.0-alpha.1` / loader `1.2.0-alpha.1` 后 `dsh --version` 正常输出 `0.2.3-alpha.2`。因此 alpha.1 只作为源码对照（用来解释接缝来源），不进入 `SUPPORTED_DSH_RELEASES`、peer range、Auto Review 联合集合、SSH 地板或 CI 车道。
 
 ## 接口差异逐项分类
 
@@ -27,7 +37,7 @@
 | `dsh-sandbox-policy` `src/index.ts` | `resolve({session}).workspaceRoot` 从 `session.header.cwd` 改为 `ctx.get('workingDirectory')?.get(session) ?? session.header.cwd`（有效工作目录）；文档注释同步改写。**这是本轮唯一安全相关差异。** | **运行时适配（安全）**：插件 ADR-0012 的不变量是「身份 = Session 原始项目；有效 cwd 只作相对路径/展示」。上游打破了 `workspaceRoot === header.cwd` 的旧等式，于是所有 Registry/scope 身份改用显式原始目录（`src/compat/session-directory.ts` 的 `originDirectory` / `policyOriginRoot`），而 `policy.workspaceRoot` 继续作为上游执行边界（`src/sandbox.ts` / `src/dialects.ts` 不变）。否则 Host 移动 Session 目录后按有效拼写查 scope 表会得到空集：登记为 `read-only` 的附加根在 `workspace-write` 下可能被当作可写、`toolAccess` 上限被绕过，指令还会发出虚假撤销。回归测试覆盖「移动到只读附加根内后写仍被拒」。 |
 | `dsh-working-directory` `src/*` | 事件从 `working-directory/change` 改为 `workspace-root/change`，stateVersion 升到 3；旧事件名称废弃并被忽略。 | **运行时适配**：`src/compat/instruction-activity.ts` 的 resume 重放同时接受两种事件名（优先新名），否则恢复后会按过期 cwd 解析相对目标。 |
 | `@deepseek-ai/cordis` 4.2.0-alpha.1 | 删除 `ctx.root` 属性，根上下文改由发布的 `Context.root` 符号（`Symbol.for('cordis.root')`）承载；`FiberState` 仍是 const enum（无运行时导出）。 | **运行时适配（可选 Auto Review）**：`src/compat/cordis-root.ts` 结构化探测两种 API（先符号、后 `root` 属性、都不存在则失败关闭）；`current/fork.ts` 的卸载分支改用该探测。真实宿主的 cordis 版本是：`alpha.1` 声明 `~4.1.0` 因而安装 **4.1.0（只有 `ctx.root`）**，`alpha.2` 安装 **4.2.0-alpha.1（只有符号）**——单一拼写必然在另一侧失效，故两种都探。`peerDependencies.cordis` 追加 `4.2.0-alpha.1`。 |
-| `packages/experimental/auto-review/src/index.ts` | 与 `rc.5` 相比只有两行：import 顺序，以及 `ctx.root.fiber.state` → `ctx[Context.root].fiber.state`；`locales.ts` 逐字节不变。`alpha.1` 与 `alpha.2` 的 reviewer `src` 树逐字节相同（tree `9178184679…`，`index.ts` blob `3513c23f66`，sha256 `179e8f50…`）。 | **运行时适配（联合合同）**：两行都在 `current/fork.patch` 已替换的行内，输入模型未变，因此不新增第三个源码代际；`AUTO_REVIEW_CURRENT_RELEASES` 追加两个 alpha 发布（联合集合 11 → **13** 个精确发布），编译 pin 前移到 `0.2.3-alpha.2`。冻结副本保持 `rc.5` 字节（9 个发布里 7 个逐字节命中），审计差异就是这两行；差分门禁新增断言：fork 必须经 `rootContext` 探测、不得直接拼任一 cordis 根 API。 |
+| `packages/experimental/auto-review/src/index.ts` | 与 `rc.5` 相比只有两行：import 顺序，以及 `ctx.root.fiber.state` → `ctx[Context.root].fiber.state`；`locales.ts` 逐字节不变。`alpha.1` 与 `alpha.2` 的 reviewer `src` 树逐字节相同（alpha.1 仅作源码对照；tree `9178184679…`，`index.ts` blob `3513c23f66`，sha256 `179e8f50…`）。 | **运行时适配（联合合同）**：两行都在 `current/fork.patch` 已替换的行内，输入模型未变，因此不新增第三个源码代际；`AUTO_REVIEW_CURRENT_RELEASES` 追加受支持的 alpha.2（联合集合 11 → **12** 个精确发布），编译 pin 前移到 `0.2.3-alpha.2`。冻结副本保持 `rc.5` 字节（8 个发布里 7 个逐字节命中），审计差异就是这两行；差分门禁新增断言：fork 必须经 `rootContext` 探测、不得直接拼任一 cordis 根 API。 |
 | `dsh-api-session-controller` 新增 `src/client/sessions/directories.ts` 与 `./client/directories` 导出 | `selectSessionDirectory(state, id)` = 投影的 `workingDirectory` ?? 头部 cwd；`sessionDirectory(sessions, id)` 在 gesture 时读 live 投影。文件视图、地址基与相对路径改用有效目录；头部 cwd 仍是项目身份。 | **客户端语义跟随**：插件的附加根树根永远是 RootSwitcher 选中的根或 `rootForPath` 结果，不从该选择器推导；但原生主根标签/路径显示应使用同一有效目录语义（插件已有的 `RootsView.effectiveCwd` 字段即此用途），Registry 键保持 `primaryRoot`。不得静态 import 新子路径（旧宿主没有该模块，整个 client bundle 会加载失败）；需要时结构化读取投影。 |
 | `packages/client/ui-sidebar-files/src/client/*` | `FileNavigator` / `FilesBody` / `NavigatorToggle` 改用 `selectSessionDirectory`；`FilesBody` 把 `sidebar.right.tab.files.actions` 包进新的 `div.externalActions` 并配套 header 对齐 CSS；`FilesBody.module.css` 的 covered 规则改成自定义属性（避免 Chromium 整页重排）、header 补 13.5px padding 与 16px 图标；`FileTree.module.css` 层级缩进改 `calc(16px + 6px)`；`face.ts` 支持 hold 期间目录变化后按新目录重跑搜索。 | **客户端复刻同步**：`src/client/styles.ts` 同步层级缩进与 `mrfw-open*` 规则；新增 `data-files-page` 下 `div.externalActions` 的 unwrap 规则（用 `:not(:has(> [data-files-path))` 区分新包装与旧直接子节点），否则附加根态 RootSwitcher 不再是 header 的伸缩项、原生 reload/search 与路径错位。插件 pane 是 portal 进 `data-files-page` / `aside[data-files-navigator]`，不复制上游 covered 变量规则（aside 本身即被该规则排除的 `.navigator` 子节点）。 |
 | `packages/client/ui-open-in-app/src/client/*` | `controller.ts` 的 `readAppsPayload` 重构；`index.ts` / `context-menus.tsx` / `session-open-with.ts` / `open-path.ts` 变化；`OpenTargetButton.module.css` hover 进入 `@media (hover: hover)`、新增 compact 边框与最小宽度。 | **客户端复刻同步**：插件只 fork 目录控制所需的六个文件；`controller.ts` 与 `OpenTargetButton.module.css` 重拷 alpha.2 字节（语义不变），CSS 规则同步进 `styles.ts` 的 `mrfw-open*` 块；其余上游注册面不 fork。 |
@@ -51,23 +61,24 @@
 ## 提升步骤（本分支已执行）
 
 1. `node scripts/upgrade-dsh.mjs 0.2.3-alpha.2` 重指 devDependencies / release-age / 生态 pin；
-2. `SUPPORTED_DSH_RELEASES` 末尾加入 `0.2.3-alpha.1`、`0.2.3-alpha.2`（28 个精确版本），同步 28 个 DSH peer、`peerDependencies.cordis` 追加 `4.2.0-alpha.1`；移除 probe overrides 后 `pnpm install --no-frozen-lockfile`，最终 lockfile 中旧 `0.2.2-rc.5` 包副本为 0、`pnpm peers check` 输出 `No peer dependency issues found`；
-3. Auto Review 联合合同：`AUTO_REVIEW_CURRENT_RELEASES` 加两个 alpha（13 个联合发布），编译 pin 前移到 `0.2.3-alpha.2`，新增 `src/compat/cordis-root.ts` 与差分门禁第 9 项；
+2. `SUPPORTED_DSH_RELEASES` 末尾只加入 `0.2.3-alpha.2`（27 个精确版本；`0.2.3-alpha.1` 发布不可启动，不纳入），同步全部 DSH peer、`peerDependencies.cordis` 追加 `4.2.0-alpha.1`；移除 probe overrides 后 `pnpm install --no-frozen-lockfile`，最终 lockfile 中旧 `0.2.2-rc.5` 包副本为 0、`pnpm peers check` 输出 `No peer dependency issues found`；
+3. Auto Review 联合合同：`AUTO_REVIEW_CURRENT_RELEASES` 加 `0.2.3-alpha.2`（12 个联合发布），编译 pin 前移到 `0.2.3-alpha.2`，新增 `src/compat/cordis-root.ts` 与差分门禁第 9 项；
 4. `pnpm-workspace.yaml`：release-age 条目整体重指；`libreoffice-kit` `0.1.3` → `0.2.3`、`cordis-plugin-*` `1.1.0` / `1.2.0` → `1.2.0-alpha.1` / `1.3.0-alpha.1`、`cosmokit` `1.9.0` → `1.10.0-alpha.1`、schemastery 排除范围追加 `3.20.0-alpha.1`，并新增 17 个新传递包；
 5. 安全适配：Session 原始目录成为所有 Registry/scope 身份来源（`src/compat/session-directory.ts` + `src/scope.ts` / `src/instructions.ts` / `src/review-context.ts` / `src/command.ts` / `src/workspace-files.ts` / `src/process-fence.ts`），并接受 `workspace-root/change`；
-7. SSH 地板随核心 pin 前移：`SUPPORTED_SSH_RELEASES` 追加 `0.2.3-alpha.1`/`0.2.3-alpha.2`（保持 `SUPPORTED_DSH_RELEASES` 后缀），四个 SSH 可选 peer 的 range 随 28 个精确发布全量更新，SSH 开发 pin 跟随核心 pin 到 `0.2.3-alpha.2`；SSH 能力仍只在 macOS/Linux 开放且默认关闭，包缺席或漂移只让 SSH 缺席。SSH 参考、用户指南与门禁计划的当前地板同步到两个 alpha。
-8. 更新 README 支持矩阵、`AGENTS.md` 兼容契约段、兼容笔记双语 §25、ADR-0012 修订、ADR-0040 修订五、路线账本与本文；`CHANGELOG` 条目随实际发版的发布流程写入，本分支不创建版本号或 tag。
+6. SSH 地板随核心 pin 前移：`SUPPORTED_SSH_RELEASES` 追加 `0.2.3-alpha.2`（保持 `SUPPORTED_DSH_RELEASES` 后缀），四个 SSH 可选 peer 的 range 随 27 个精确发布全量更新，SSH 开发 pin 跟随核心 pin 到 `0.2.3-alpha.2`；SSH 能力仍只在 macOS/Linux 开放且默认关闭，包缺席或漂移只让 SSH 缺席。SSH 参考、用户指南与门禁计划的当前地板同步到 alpha.2。
+7. 更新 README 支持矩阵、`AGENTS.md` 兼容契约段、兼容笔记双语 `25、ADR-0012 修订、ADR-0040 修订五、路线账本与本文；`CHANGELOG` 条目随实际发版的发布流程写入，本分支不创建版本号或 tag。
 
 ## 安静陷阱（开发树）
 
-- **Node 下限按发布分代**：`alpha.1` 仍可在 Node 24.9 运行，`alpha.2` 起必须 `^24.22.3 || >=26.13.1`；CI 不能再用单一 24.9 车道覆盖整个 0.2.3 线，也不要在插件 `engines` 里写死上游下限——插件的运行下限由宿主决定。
+- **Node 下限按发布分代**：`0.2.3-alpha.2` 起必须 `^24.22.3 || >=26.13.1`；CI 不能再用单一 24.9 车道覆盖整个 0.2.3 线，也不要在插件 `engines` 里写死上游下限——插件的运行下限由宿主决定。
 - **Auto Review 的开发包清单由合同映射驱动**：`upgrade-dsh.mjs` 只在目标发布能映射到某个基线时安装该基线的 21 个开发包；先把 alpha 发布写进 `AUTO_REVIEW_CURRENT_RELEASES` 再重跑升级脚本，否则这些包会被当作「不属于当前基线」删除，安装树出现旧版本 peer 副本。
-- **cordis root 有两种真实 API**：alpha.1 的实际安装是 cordis 4.1（`ctx.root`），alpha.2 是 4.2（`Context.root` 符号）；上游 alpha.1 自己的 reviewer 源码用符号，在真实 alpha.1 安装上卸载路径会抛错——不要照抄该单侧写法，也不要新增第三个源码代际，结构化探测已覆盖两代。
+- **cordis root 有两种真实 API**：current Auto Review 基线横跨 `0.2.2` 行（cordis 4.1，只有 `ctx.root`）与受支持的 `0.2.3-alpha.2`（cordis 4.2，只有 `Context.root` 符号）；alpha.1 源码已改用符号，但它的发布包不能启动，不要照抄单侧写法，也不要新增第三个源码代际，结构化探测已覆盖两代。
 - **身份与执行边界分离**：`policy.workspaceRoot` 现在是有效目录，只能作为上游执行边界和路径基；任何 Registry 键 / scope 表查找 / 面板 command 主根都必须用 `session.header.cwd`。按有效拼写查表会静默丢掉 deny 记录（安全回归），不是「只是找不到附加根」。
 - **客户端复刻的 DOM 变化是包装层**：alpha.1 起 Files header 把 actions 槽包进 `div.externalActions`；插件的 `styles.ts` 规则必须用 `:not(:has(> [data-files-path))` 兼容旧直接子节点布局，不能假设槽锚点仍是 header 直接子节点。
 - **不要静态 import 新客户端子路径** `@deepseek-ai/dsh-api-session-controller/client/directories`：旧宿主没有该导出，整个 client bundle 会加载失败；需要有效目录时读 `RootsView.effectiveCwd` 或结构化投影。
 - **release-age 不是可选清单**：`alpha.2` 引入 17 个新传递包与新的 cordis 生态版本，漏一行会在启用发布年龄门禁的 frozen install 里被拒绝；`node-addon-system` / `schemastery` 等既有 pin 走各自条目，不重复添加。
+- **tag 存在不等于可支持**：`0.2.3-alpha.1` 的源码与发布元数据不一致，`dsh --version` 直接失败。最小判别是在空目录 `npm install @deepseek-ai/dsh@<release>` 后运行 `dsh --version`；失败即只能作源码对照。
 
 ## 证据边界
 
-本文只记录上游源码与发布元数据对照。本机与 CI 的执行证据（含 Alpha 两条车道的 Auto Review 联合冒烟、三 OS 矩阵与实机目检）只记[路线账本](../plans/active/2026-09-12-multi-root-workspace.md)。
+本文只记录上游源码与发布元数据对照。本机与 CI 的执行证据（含 `0.2.3-alpha.2` 车道的 Auto Review 联合冒烟、三 OS 矩阵与实机目检）只记[路线账本](../plans/active/2026-09-12-multi-root-workspace.md)。

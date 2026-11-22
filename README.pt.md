@@ -61,7 +61,7 @@ Depois de instalar, adicione uma raiz adicional dentro de uma sessão:
 | `0.2.0` | `0.2.0-rc.1`, `0.2.0-rc.2` |
 | `0.2.1` | `0.2.1-alpha.1`, `0.2.1-alpha.2`, `0.2.1-alpha.3`, `0.2.1-alpha.4`, `0.2.1-alpha.5`, `0.2.1-rc.1`, `0.2.1-rc.2`, `0.2.1-rc.3`, `0.2.1-rc.4`, `0.2.1-rc.5` |
 | `0.2.2` | `0.2.2-alpha.2`, `0.2.2-alpha.3`, `0.2.2-rc.1`, `0.2.2-rc.2`, `0.2.2-rc.3`, `0.2.2-rc.4`, `0.2.2-rc.5` |
-| `0.2.3` | `0.2.3-alpha.1`, `0.2.3-alpha.2` |
+| `0.2.3` | `0.2.3-alpha.2` |
 
 Quando a versão do DSH não está na tabela, ou os pacotes `@deepseek-ai/dsh-*` estão em versões divergentes, o plugin não inicia — o comportamento é o de um plugin não instalado.
 

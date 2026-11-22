@@ -78,10 +78,12 @@
 
 本文只记录 tag 源码事实与接口判断；没有在本机运行 0.2.2 之前的任意宿主，也没有把源码兼容当成执行验证。每个基线支持声明的依据是该发布在 CI 矩阵车道上的真实安装树、完整单测与联合冒烟，以及本机对活跃开发 pin 的完整门禁；执行证据只写[路线账本](../plans/active/2026-09-12-multi-root-workspace.md)。
 
-## 0.2.3-alpha.1 / alpha.2 审查（2026-11-22）
+## 0.2.3-alpha.2 审查（2026-11-22）
 
-两个 alpha 的 reviewer `src` 树逐字节相同（tree `917818467912fd0f…`，`index.ts` blob `3513c23f66`，sha256 `179e8f50…`），与 `0.2.2-rc.5` 相比只有 import 顺序与 `ctx.root.fiber.state` → `ctx[Context.root].fiber.state` 两行；`locales.ts` 仍为 `4e25cd67…`。两行都落在 `current/fork.patch` 的替换范围内，输入模型未变，因此两个发布并入 current 基线（current 的第 8、第 9 个发布；联合集合 **13 个精确发布**），编译 pin 前移到 `0.2.3-alpha.2`，冻结副本保持 rc.5 字节（9 个发布中 7 个逐字节命中）。
+`0.2.3-alpha.1` 与 `0.2.3-alpha.2` 的 reviewer `src` 树逐字节相同（tree `917818467912fd0f…`，`index.ts` blob `3513c23f66`，sha256 `179e8f50…`），与 `0.2.2-rc.5` 相比只有 import 顺序与 `ctx.root.fiber.state` → `ctx[Context.root].fiber.state` 两行；`locales.ts` 仍为 `4e25cd67…`。两行都落在 `current/fork.patch` 的替换范围内，输入模型未变，因此把 `0.2.3-alpha.2` 并入 current 基线（current 的第 8 个发布；联合集合 **12 个精确发布**），编译 pin 前移到 `0.2.3-alpha.2`，冻结副本保持 rc.5 字节（8 个发布中 7 个逐字节命中）。
 
-**真实宿主的 cordis**：`0.2.3-alpha.1` 声明 `~4.1.0`，因此安装 `4.1.0`（`ctx.root` 可用，无 `Context.root` 静态，无 `Symbol.for('cordis.root')`）；`0.2.3-alpha.2` 安装 `4.2.0-alpha.1`（无 `ctx.root`，`Context.root` 是符号，`ctx[Symbol.for('cordis.root')] === ctx`）。两版发布的 cordis 都没有运行时 `FiberState` 导出，既有「字面量 2」改写继续正确。上游 alpha.1 自己的 reviewer 源码用符号拼写，在真实 alpha.1 安装上卸载路径会抛错——不要照抄。插件用 `src/compat/cordis-root.ts` 结构化探测（先符号、后 `root` 属性、都不存在则失败关闭），`scripts/check-auto-review-fork.mjs` 第 9 项禁止 fork 直接拼任一 API，并要求探测模块保留符号探测、属性回退与失败关闭。
+`0.2.3-alpha.1` 不进联合集合：它的 npm 发布包 vendor pin 未同步（cordis 4.1 / loader 1.1 对上 4.2 源码），`dsh --version` 直接失败；源码差异只用于解释接缝来源，不作为支持声明。
 
-**编译与证据**：`alpha.1` 车道按 ADR-0040 设计跳过实现类型检查（编译 pin 是 alpha.2），其 Auto Review 证据是运行时测试与联合冒烟；`alpha.2` 车道执行实现类型检查。请求身份分支不变（只有 `0.2.2-alpha.2` 不发送 `sessionId`/`purpose`）。
+**真实宿主的 cordis**：current 基线横跨 `0.2.2` 行（cordis 4.1，只有 `ctx.root`）与 `0.2.3-alpha.2`（cordis 4.2，只有 `Context.root` 符号，`ctx[Symbol.for('cordis.root')] === ctx`）。两代 cordis 都没有运行时 `FiberState` 导出，既有「字面量 2」改写继续正确。上游 alpha.1 自己的 reviewer 源码用符号拼写，不要照抄该单侧写法。插件用 `src/compat/cordis-root.ts` 结构化探测（先符号、后 `root` 属性、都不存在则失败关闭），`scripts/check-auto-review-fork.mjs` 第 9 项禁止 fork 直接拼任一 API，并要求探测模块保留符号探测、属性回退与失败关闭。
+
+**编译与证据**：`0.2.3-alpha.2` 车道执行实现类型检查（编译 pin 是 alpha.2）；证据是运行时测试与联合冒烟。请求身份分支不变（只有 `0.2.2-alpha.2` 不发送 `sessionId`/`purpose`）。
