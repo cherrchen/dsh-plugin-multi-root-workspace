@@ -8,6 +8,19 @@ English: [CHANGELOG.en.md](./CHANGELOG.en.md)
 - 安装方式、受支持的上游运行时与已知限制见 [README](./README.md)。
 - 每个版本的实施证据、编号口径与发布状态见[路线图 §进度总账](./docs/plans/active/2026-09-12-multi-root-workspace.md#进度总账)；GitHub Release 的正文由 `scripts/release-notes.mjs` 从 commit 历史生成，是本文件之外的完整原始清单。
 
+## [0.1.24-beta.2] - 2026-11-23
+
+本版是 `0.1.24` 线的第二个 beta，只处理启用个人 SSH 后的依赖准备与 Helper 安装诊断。开启 SSH 时若当前 Profile 的四个 SSH 包未就绪，界面直接给出可复制的精确安装命令；Helper 安装失败会说明失败阶段、远端状态与下一步。没有不兼容变更；未开启 SSH 时行为与 `v0.1.24-beta.1` 相同。
+
+### Added
+
+- **SSH 依赖修复引导**：Host 在 SSH 开关开启后检查当前 Profile 中的 `@deepseek-ai/dsh-ssh`、`@deepseek-ai/dsh-fs-ssh`、`@deepseek-ai/dsh-subprocess-ssh`、`@deepseek-ai/dsh-sandbox-ssh` 四个精确同版包，把全部缺失、部分缺失、版本不符、私有副本、无法解析与「已安装但需重启」分开；未就绪时自动打开「安装 SSH 依赖」对话框（也可从「管理 SSH 远端」进入），逐包显示状态，并在 Profile 由 CLI 管理时给出 `DSH_HOME=… dsh plugin --profile <name> add --save-exact <四个包>@<Host 版本>` 命令与复制按钮。「重新检测依赖」只读取状态，运行中的 Host 不替用户运行包管理器；依赖装好后仍需完全退出 Host、以同一 Profile 重启，刷新 Web 页面不等于重启。
+- **Helper 安装诊断**：安装失败归入 `host-preflight`、`ssh-connect`、`remote-prerequisites`、`remote-install`、`artifact-verification`、`entry-generation`、`config-commit` 之一，并携带是否可重试、修复方向、退出码、受限的 stderr 摘录、期望/实际版本、远端状态（`may-have-changed` / `installed` / `verified`）与登记状态（`not-committed` / `unconfirmed`）。连接页在瞬时提示之后保留可展开的详情，区分「远端可能已改动」「远端已安装或已校验但 Host 未登记」等需要人工核对的情况；OpenSSH 退出 255 只识别标准的 host key、认证、不可达、超时与中断诊断，无法识别时单独归为未知错误，远端写操作绝不因诊断自动重发。
+
+### Changed
+
+- **Helper 前置条件在首次远端写入前检查完**：远端必须是 Linux 或 macOS，Node.js ≥ 24.9.0 且为规范化绝对路径，npm 可运行，`$HOME` 与 `~/.dsh-helper/<版本>`（或最近的现存父目录）可写；远端 PATH 选中旧版 Node 时可在连接卡片的安装表单里指定新版 Node 的绝对路径。`npm install` 仍只执行一次且不重试，入口脚本以 0600 临时文件加原子改名部署，安装结果与 Host 登记结果分别确认。
+
 ## [0.1.24-beta.1] - 2026-11-22
 
 本版是 `0.1.24` 线的首个 beta 预发布：SSH 远端环境以实验性、默认关闭的个人模式进入发布包，另含 Workspace Folders 对话框附加根列表的滚动修复。没有不兼容变更；未配置附加根、未开启 SSH 时，行为与 `v0.1.23` 相同。
@@ -371,7 +384,8 @@ English: [CHANGELOG.en.md](./CHANGELOG.en.md)
 
 - 发布前外部评审提出的 8 项发现（其中 3 项发布阻断）全部修复，每项各带一个回归测试：登记目录被替换为符号链接后授权转移（引入 `recordedPath`，**重新解析路径不等于重新授权**）、并发修改注册表丢写或复活已撤销的授权（每个主根的变更串行）、刷新不重新检查目录、手输路径被目录选择器覆盖、`reveal` 的应答契约与失败码、重复 id 未校验、主根未纳入嵌套校验、CI 先测后构建。
 
-[Unreleased]: https://github.com/cherrchen/dsh-plugin-multi-root-workspace/compare/v0.1.24-beta.1...HEAD
+[Unreleased]: https://github.com/cherrchen/dsh-plugin-multi-root-workspace/compare/v0.1.24-beta.2...HEAD
+[0.1.24-beta.2]: https://github.com/cherrchen/dsh-plugin-multi-root-workspace/compare/v0.1.24-beta.1...v0.1.24-beta.2
 [0.1.24-beta.1]: https://github.com/cherrchen/dsh-plugin-multi-root-workspace/compare/v0.1.23...v0.1.24-beta.1
 [0.1.23]: https://github.com/cherrchen/dsh-plugin-multi-root-workspace/compare/v0.1.22...v0.1.23
 [0.1.22]: https://github.com/cherrchen/dsh-plugin-multi-root-workspace/compare/v0.1.21...v0.1.22

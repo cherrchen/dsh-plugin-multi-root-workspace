@@ -28,7 +28,7 @@ Nem todo projeto é um monorepo. Um projeto de desenvolvimento costuma ser compo
 - **Ambientes remotos SSH (experimental, desativado por padrão)** — Ative o SSH pessoal na página do plugin para usar `remote_copy` e `remote_bash` em diretórios remotos registrados. As conexões e os vínculos do workspace são gerenciados separadamente, e o Registry autoriza cada chamada.
 - **Sem registro, sem diferença**: sem nenhuma raiz adicional, o comportamento é idêntico ao de um plugin não instalado; uma configuração inválida gera erro, em vez de degradar em silêncio.
 
-A publicação mais recente é a beta `v0.1.24-beta.1`; a tag `latest` do npm continua apontando para a versão estável `v0.1.23`, então instale a beta indicando `@beta`. As mudanças visíveis ao usuário de cada versão estão no [CHANGELOG](./CHANGELOG.en.md); o progresso e o estado das versões estão no [balanço de progresso do roadmap](./docs/plans/active/2026-09-12-multi-root-workspace.md#进度总账).
+A publicação mais recente é a beta `v0.1.24-beta.2`; a tag `latest` do npm continua apontando para a versão estável `v0.1.23`, então instale a beta indicando `@beta`. As mudanças visíveis ao usuário de cada versão estão no [CHANGELOG](./CHANGELOG.en.md); o progresso e o estado das versões estão no [balanço de progresso do roadmap](./docs/plans/active/2026-09-12-multi-root-workspace.md#进度总账).
 
 ## Início rápido
 
@@ -89,7 +89,7 @@ O `dsh plugin` aceita quatro origens de instalação, mostradas aqui com o perfi
 dsh plugin --profile web add @dsh-electron/dsh-plugin-multi-root-workspace
 ```
 
-Atualmente, `latest` é a versão estável `v0.1.23`; para instalar a beta (neste lançamento, `v0.1.24-beta.1`), informe `@beta` explicitamente:
+Atualmente, `latest` é a versão estável `v0.1.23`; para instalar a beta (neste lançamento, `v0.1.24-beta.2`), informe `@beta` explicitamente:
 
 ```sh
 dsh plugin --profile web add @dsh-electron/dsh-plugin-multi-root-workspace@beta
@@ -100,8 +100,8 @@ dsh plugin --profile web add @dsh-electron/dsh-plugin-multi-root-workspace@beta
 ```sh
 pnpm pack @dsh-electron/dsh-plugin-multi-root-workspace
 # ou baixe o tgz dos assets da GitHub Release, por exemplo:
-# https://github.com/cherrchen/dsh-plugin-multi-root-workspace/releases/download/v0.1.24-beta.1/dsh-electron-dsh-plugin-multi-root-workspace-0.1.24-beta.1.tgz
-dsh plugin --profile web add ./dsh-electron-dsh-plugin-multi-root-workspace-0.1.24-beta.1.tgz
+# https://github.com/cherrchen/dsh-plugin-multi-root-workspace/releases/download/v0.1.24-beta.2/dsh-electron-dsh-plugin-multi-root-workspace-0.1.24-beta.2.tgz
+dsh plugin --profile web add ./dsh-electron-dsh-plugin-multi-root-workspace-0.1.24-beta.2.tgz
 ```
 
 Também é um artefato pré-compilado, adequado para entrega em redes internas ou ambientes offline.
@@ -121,10 +121,10 @@ allowBuilds:
   '@dsh-electron/dsh-plugin-multi-root-workspace@github:cherrchen/dsh-plugin-multi-root-workspace#<commit>': true
 ```
 
-Recomenda-se fixar a versão (por exemplo, `#v0.1.24-beta.1`), para que um push posterior não altere em silêncio o que realmente é executado:
+Recomenda-se fixar a versão (por exemplo, `#v0.1.24-beta.2`), para que um push posterior não altere em silêncio o que realmente é executado:
 
 ```sh
-dsh plugin --profile web add github:cherrchen/dsh-plugin-multi-root-workspace#v0.1.24-beta.1
+dsh plugin --profile web add github:cherrchen/dsh-plugin-multi-root-workspace#v0.1.24-beta.2
 ```
 
 #### Instalar a partir do código-fonte local
@@ -218,12 +218,12 @@ O DeepSeek Harness Desktop permite instalar um comando `dsh` global pelo menu do
 1. Encerre o Desktop por completo, incluindo o ícone da bandeja.
 2. Instalação nova:
    ```sh
-   dsh plugin --profile desktop add @dsh-electron/dsh-plugin-multi-root-workspace@0.1.24-beta.1
+   dsh plugin --profile desktop add @dsh-electron/dsh-plugin-multi-root-workspace@0.1.24-beta.2
    ```
 3. Já instalado, mas sem o registro do bundle: execute `remove` e depois `add` (repetir apenas o `add` não registra o bundle):
    ```sh
    dsh plugin --profile desktop remove @dsh-electron/dsh-plugin-multi-root-workspace
-   dsh plugin --profile desktop add @dsh-electron/dsh-plugin-multi-root-workspace@0.1.24-beta.1
+   dsh plugin --profile desktop add @dsh-electron/dsh-plugin-multi-root-workspace@0.1.24-beta.2
    ```
 4. Abra `$DSH_HOME/profiles/desktop/package.json` (normalmente `~/.dsh/profiles/desktop/package.json` quando `DSH_HOME` não está definido) e confirme que `dsh.profile.bundles` contém o pacote.
 5. Abra o Desktop novamente (inicialização a frio).

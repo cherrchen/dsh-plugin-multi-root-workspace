@@ -8,6 +8,19 @@ This file records the user-visible changes of every **released** version.
 - For installation sources, the supported upstream runtimes, and known limitations, see the [README](./README.en.md).
 - The evidence, numbering, and release state of each version live in the [roadmap progress ledger](./docs/plans/active/2026-09-12-multi-root-workspace.md#进度总账). The body of each GitHub Release is generated from the commit history by `scripts/release-notes.mjs` and is the complete raw list behind this file.
 
+## [0.1.24-beta.2] - 2026-11-23
+
+This is the second beta of the `0.1.24` line and only addresses dependency preparation and Helper installation diagnostics after personal SSH is enabled. When the four SSH packages are not ready in the current profile, enabling SSH now shows the exact install command to copy; a failed Helper installation names its stage, the remote state, and the next step. There are no breaking changes; with SSH off, behavior matches `v0.1.24-beta.1`.
+
+### Added
+
+- **SSH dependency repair guidance**: once the SSH switch is on, the Host inspects `@deepseek-ai/dsh-ssh`, `@deepseek-ai/dsh-fs-ssh`, `@deepseek-ai/dsh-subprocess-ssh`, and `@deepseek-ai/dsh-sandbox-ssh` in the current profile and reports one of six states — all missing, partially missing, version mismatch, private copy, unresolvable, or installed but restart required. When the set is not ready, an **Install SSH dependencies** dialog opens automatically (also reachable from **Manage SSH environments**), lists each package's state, and, when the profile is CLI-managed, shows a `DSH_HOME=… dsh plugin --profile <name> add --save-exact <four packages>@<Host version>` command with a copy button. **Recheck dependencies** only reads state; a running Host never runs the package manager for the user, and after installing the packages the Host still has to be fully quit and restarted with the same profile — refreshing the Web page is not a restart.
+- **Helper installation diagnostics**: a failed installation is classified under `host-preflight`, `ssh-connect`, `remote-prerequisites`, `remote-install`, `artifact-verification`, `entry-generation`, or `config-commit` and carries whether it is retryable, the remediation, the exit code, a bounded stderr excerpt, expected and actual versions, the remote state (`may-have-changed` / `installed` / `verified`), and the registration state (`not-committed` / `unconfirmed`). The connection page keeps expandable details after the transient notice and distinguishes "the remote side may have changed" from "the remote side is installed or verified but Host registration is unconfirmed", which need manual checking. OpenSSH exit 255 recognizes only the standard host-key, authentication, unreachable, timeout, and interrupted diagnostics; anything else is reported as a separate unknown error, and a remote write is never retried because of a diagnostic.
+
+### Changed
+
+- **Helper prerequisites are checked before the first remote write**: the server must be Linux or macOS, run Node.js ≥ 24.9.0 at a normalized absolute path, provide a working npm, and allow writing `$HOME` and `~/.dsh-helper/<version>` (or its nearest existing parent). When the remote PATH selects an older Node, the connection card's installation form accepts the absolute path of the newer executable. `npm install` still runs exactly once and is never retried, the entry script is deployed as a 0600 temporary file followed by an atomic rename, and the installation and Host registration results are confirmed separately.
+
 ## [0.1.24-beta.1] - 2026-11-22
 
 This is the first beta of the `0.1.24` line: SSH remote environments enter the published package as an experimental, off-by-default personal mode, together with a scrolling fix for the additional-root list in the Workspace Folders dialog. There are no breaking changes; with no additional root configured and SSH off, behavior matches `v0.1.23`.
@@ -371,7 +384,8 @@ The first release: the three MVP milestones (M1–M3).
 
 - All eight findings of the pre-release external review (three of them release-blocking) are fixed, each with a regression test: a registered directory replaced by a symlink transplanting its authority (which introduced `recordedPath` — **re-resolving a path is not re-authorizing it**), concurrent registry mutations losing a write or reviving a revoked grant (per-primary-root mutations are serialized), a refresh not re-checking directories, a typed path being overwritten by the directory picker, the `reveal` response contract and failure code, duplicate ids not validated, the primary root missing from nesting validation, and CI testing before building.
 
-[Unreleased]: https://github.com/cherrchen/dsh-plugin-multi-root-workspace/compare/v0.1.24-beta.1...HEAD
+[Unreleased]: https://github.com/cherrchen/dsh-plugin-multi-root-workspace/compare/v0.1.24-beta.2...HEAD
+[0.1.24-beta.2]: https://github.com/cherrchen/dsh-plugin-multi-root-workspace/compare/v0.1.24-beta.1...v0.1.24-beta.2
 [0.1.24-beta.1]: https://github.com/cherrchen/dsh-plugin-multi-root-workspace/compare/v0.1.23...v0.1.24-beta.1
 [0.1.23]: https://github.com/cherrchen/dsh-plugin-multi-root-workspace/compare/v0.1.22...v0.1.23
 [0.1.22]: https://github.com/cherrchen/dsh-plugin-multi-root-workspace/compare/v0.1.21...v0.1.22

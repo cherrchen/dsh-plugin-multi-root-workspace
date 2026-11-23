@@ -31,7 +31,7 @@ DSH Desktop 的**插件**页安装本插件后，出现下面任意一组：
 
 运行中启用 bundle 时，宿主走的是热重组。从 Loader 的实现看，`EntryGroup.update` 会并行处理所有新行和已存在行：旧 `fs-sandbox` / `sandbox` 行收到 `disabled: true` 后开始 dispose，但 Cordis 的 Fiber 要等所有依赖者卸载后才释放 service；与此同时，新插入的 `multi-root-fs` / `multi-root-sandbox` 已经开始注册 `fs` / `sandbox`。旧 service 还在，Cordis 便以重复注册拒绝。错误里的 `<SandboxedFileSystem>` 和 `<LocalSandboxProvider>` 正是旧行拥有的实现，不是本插件重复插入。
 
-这是宿主热重组的执行顺序问题，不是两个 provider 类的实现缺陷；`v0.1.18` 到 `v0.1.24-beta.1` 的 provider 替换补丁没有变化。
+这是宿主热重组的执行顺序问题，不是两个 provider 类的实现缺陷；`v0.1.18` 到 `v0.1.24-beta.2` 的 provider 替换补丁没有变化。
 
 ### bundle 登记消失的实际写入者
 
@@ -54,7 +54,7 @@ DSH Desktop 的**插件**页安装本插件后，出现下面任意一组：
 
 ```sh
 dsh plugin --profile desktop remove @dsh-electron/dsh-plugin-multi-root-workspace
-dsh plugin --profile desktop add @dsh-electron/dsh-plugin-multi-root-workspace@0.1.24-beta.1
+dsh plugin --profile desktop add @dsh-electron/dsh-plugin-multi-root-workspace@0.1.24-beta.2
 ```
 
 确认 `dsh.profile.bundles` 出现本包后再打开 Desktop。完整步骤见 [README §安装](../../README.md#安装)的 DSH Desktop 小节。
