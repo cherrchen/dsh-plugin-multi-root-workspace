@@ -28,7 +28,7 @@
 - **SSH 远端环境（实验性，默认关闭）**：在插件详情页开启个人 SSH 后，Agent 可对已登记的远端目录调用 `remote_copy` 和 `remote_bash`。连接和工作区目录绑定分别管理，每次调用经过 Registry 准入。
 - **不登记等于没装**：没有附加根时，行为和未安装插件完全一致；配置有误会直接报错，不会悄悄降级。
 
-当前最新发布为 beta 预发布 `v0.1.24-beta.2`；npm 的 `latest` 标签仍指向稳定版 `v0.1.23`，安装 beta 请显式指定 `@beta`。各版本的用户可见变更见 [CHANGELOG](./CHANGELOG.md)；进度与发布状态见[路线图 §进度总账](./docs/plans/active/2026-09-12-multi-root-workspace.md#进度总账)。
+当前最新发布为 beta 预发布 `v0.1.24-beta.3`；npm 的 `latest` 标签仍指向稳定版 `v0.1.23`，安装 beta 请显式指定 `@beta`。各版本的用户可见变更见 [CHANGELOG](./CHANGELOG.md)；进度与发布状态见[路线图 §进度总账](./docs/plans/active/2026-09-12-multi-root-workspace.md#进度总账)。
 
 ## 快速开始
 
@@ -89,7 +89,7 @@ DSH 版本不在表内、或 `@deepseek-ai/dsh-*` 各包版本不一致时，插
 dsh plugin --profile web add @dsh-electron/dsh-plugin-multi-root-workspace
 ```
 
-当前 `latest` 是稳定版 `v0.1.23`；安装 beta 预发布（本次为 `v0.1.24-beta.2`）时显式指定 `@beta`：
+当前 `latest` 是稳定版 `v0.1.23`；安装 beta 预发布（本次为 `v0.1.24-beta.3`）时显式指定 `@beta`：
 
 ```sh
 dsh plugin --profile web add @dsh-electron/dsh-plugin-multi-root-workspace@beta
@@ -100,8 +100,8 @@ dsh plugin --profile web add @dsh-electron/dsh-plugin-multi-root-workspace@beta
 ```sh
 pnpm pack @dsh-electron/dsh-plugin-multi-root-workspace
 # 或从 GitHub Release 资产下载，例如：
-# https://github.com/cherrchen/dsh-plugin-multi-root-workspace/releases/download/v0.1.24-beta.2/dsh-electron-dsh-plugin-multi-root-workspace-0.1.24-beta.2.tgz
-dsh plugin --profile web add ./dsh-electron-dsh-plugin-multi-root-workspace-0.1.24-beta.2.tgz
+# https://github.com/cherrchen/dsh-plugin-multi-root-workspace/releases/download/v0.1.24-beta.3/dsh-electron-dsh-plugin-multi-root-workspace-0.1.24-beta.3.tgz
+dsh plugin --profile web add ./dsh-electron-dsh-plugin-multi-root-workspace-0.1.24-beta.3.tgz
 ```
 
 同样是预构建产物，适合内网或离线环境交付。
@@ -121,10 +121,10 @@ allowBuilds:
   '@dsh-electron/dsh-plugin-multi-root-workspace@github:cherrchen/dsh-plugin-multi-root-workspace#<commit>': true
 ```
 
-建议锁定版本（如 `#v0.1.24-beta.2`），让后续推送无法悄悄改变实际运行的内容：
+建议锁定版本（如 `#v0.1.24-beta.3`），让后续推送无法悄悄改变实际运行的内容：
 
 ```sh
-dsh plugin --profile web add github:cherrchen/dsh-plugin-multi-root-workspace#v0.1.24-beta.2
+dsh plugin --profile web add github:cherrchen/dsh-plugin-multi-root-workspace#v0.1.24-beta.3
 ```
 
 #### 从本地源码安装
@@ -218,12 +218,12 @@ DeepSeek Harness Desktop 可以在应用菜单的「管理 dsh 命令…」中�
 1. 完全退出 Desktop，包括托盘图标。
 2. 新装：
    ```sh
-   dsh plugin --profile desktop add @dsh-electron/dsh-plugin-multi-root-workspace@0.1.24-beta.2
+   dsh plugin --profile desktop add @dsh-electron/dsh-plugin-multi-root-workspace@0.1.24-beta.3
    ```
 3. 已安装但缺少 bundle 登记：先 `remove` 再 `add`（只重跑 `add` 不会补登记）：
    ```sh
    dsh plugin --profile desktop remove @dsh-electron/dsh-plugin-multi-root-workspace
-   dsh plugin --profile desktop add @dsh-electron/dsh-plugin-multi-root-workspace@0.1.24-beta.2
+   dsh plugin --profile desktop add @dsh-electron/dsh-plugin-multi-root-workspace@0.1.24-beta.3
    ```
 4. 打开 `$DSH_HOME/profiles/desktop/package.json`（未设置 `DSH_HOME` 时通常是 `~/.dsh/profiles/desktop/package.json`），确认 `dsh.profile.bundles` 包含本包。
 5. 重新打开 Desktop（冷启动）。

@@ -8,7 +8,9 @@ This file records the user-visible changes of every **released** version.
 - For installation sources, the supported upstream runtimes, and known limitations, see the [README](./README.en.md).
 - The evidence, numbering, and release state of each version live in the [roadmap progress ledger](./docs/plans/active/2026-09-12-multi-root-workspace.md#进度总账). The body of each GitHub Release is generated from the commit history by `scripts/release-notes.mjs` and is the complete raw list behind this file.
 
-## [Unreleased]
+## [0.1.24-beta.3] - 2026-11-23
+
+This is the third beta of the `0.1.24` line and only fixes remote-directory registration on DSH Desktop: Electron's BoringSSL does not implement the GCM-PSK suite that upstream pins for forwarded streams, so the Host fails with `NO_CIPHER_MATCH` while creating the local TLS context and the directory probe and registration stop. On a BoringSSL runtime the plugin now rewrites only that upstream stream call to use AEAD ChaCha20-PSK and installs an additive Helper entry; a plain-Node Host keeps negotiating the original suite, the recorded state and registered Roots stay unchanged, and a desktop Host must reinstall an older Helper once. There are no breaking changes; with SSH off, behavior matches `v0.1.24-beta.2`.
 
 ### Fixed
 
@@ -390,7 +392,8 @@ The first release: the three MVP milestones (M1–M3).
 
 - All eight findings of the pre-release external review (three of them release-blocking) are fixed, each with a regression test: a registered directory replaced by a symlink transplanting its authority (which introduced `recordedPath` — **re-resolving a path is not re-authorizing it**), concurrent registry mutations losing a write or reviving a revoked grant (per-primary-root mutations are serialized), a refresh not re-checking directories, a typed path being overwritten by the directory picker, the `reveal` response contract and failure code, duplicate ids not validated, the primary root missing from nesting validation, and CI testing before building.
 
-[Unreleased]: https://github.com/cherrchen/dsh-plugin-multi-root-workspace/compare/v0.1.24-beta.2...HEAD
+[Unreleased]: https://github.com/cherrchen/dsh-plugin-multi-root-workspace/compare/v0.1.24-beta.3...HEAD
+[0.1.24-beta.3]: https://github.com/cherrchen/dsh-plugin-multi-root-workspace/compare/v0.1.24-beta.2...v0.1.24-beta.3
 [0.1.24-beta.2]: https://github.com/cherrchen/dsh-plugin-multi-root-workspace/compare/v0.1.24-beta.1...v0.1.24-beta.2
 [0.1.24-beta.1]: https://github.com/cherrchen/dsh-plugin-multi-root-workspace/compare/v0.1.23...v0.1.24-beta.1
 [0.1.23]: https://github.com/cherrchen/dsh-plugin-multi-root-workspace/compare/v0.1.22...v0.1.23

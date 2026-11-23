@@ -8,7 +8,9 @@ English: [CHANGELOG.en.md](./CHANGELOG.en.md)
 - 安装方式、受支持的上游运行时与已知限制见 [README](./README.md)。
 - 每个版本的实施证据、编号口径与发布状态见[路线图 §进度总账](./docs/plans/active/2026-09-12-multi-root-workspace.md#进度总账)；GitHub Release 的正文由 `scripts/release-notes.mjs` 从 commit 历史生成，是本文件之外的完整原始清单。
 
-## [Unreleased]
+## [0.1.24-beta.3] - 2026-11-23
+
+本版是 `0.1.24` 线的第三个 beta，只修复 DSH Desktop 上登记远端目录失败：Electron 的 BoringSSL 不实现上游转发流固定的 GCM-PSK 套件，Host 在本地创建 TLS 上下文时报 `NO_CIPHER_MATCH`，目录核验与登记中断。插件在 BoringSSL 运行时只改写上游的那一次转发流调用，改用 AEAD 的 ChaCha20-PSK，并给 Helper 部署附加入口；plain Node Host 继续协商原套件，记录与已登记 Root 不变，桌面端旧 Helper 需重装一次。没有不兼容变更；未开启 SSH 时行为与 `v0.1.24-beta.2` 相同。
 
 ### Fixed
 
@@ -390,7 +392,8 @@ English: [CHANGELOG.en.md](./CHANGELOG.en.md)
 
 - 发布前外部评审提出的 8 项发现（其中 3 项发布阻断）全部修复，每项各带一个回归测试：登记目录被替换为符号链接后授权转移（引入 `recordedPath`，**重新解析路径不等于重新授权**）、并发修改注册表丢写或复活已撤销的授权（每个主根的变更串行）、刷新不重新检查目录、手输路径被目录选择器覆盖、`reveal` 的应答契约与失败码、重复 id 未校验、主根未纳入嵌套校验、CI 先测后构建。
 
-[Unreleased]: https://github.com/cherrchen/dsh-plugin-multi-root-workspace/compare/v0.1.24-beta.2...HEAD
+[Unreleased]: https://github.com/cherrchen/dsh-plugin-multi-root-workspace/compare/v0.1.24-beta.3...HEAD
+[0.1.24-beta.3]: https://github.com/cherrchen/dsh-plugin-multi-root-workspace/compare/v0.1.24-beta.2...v0.1.24-beta.3
 [0.1.24-beta.2]: https://github.com/cherrchen/dsh-plugin-multi-root-workspace/compare/v0.1.24-beta.1...v0.1.24-beta.2
 [0.1.24-beta.1]: https://github.com/cherrchen/dsh-plugin-multi-root-workspace/compare/v0.1.23...v0.1.24-beta.1
 [0.1.23]: https://github.com/cherrchen/dsh-plugin-multi-root-workspace/compare/v0.1.22...v0.1.23
