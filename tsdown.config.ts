@@ -78,6 +78,7 @@ const hostConfig: UserConfig = {
     'process-fence': 'src/process-fence.ts',
     'windows-runner': 'src/windows-runner.ts',
     'remote-tools': 'src/remote/tools.ts',
+    'install-ssh-deps': 'src/remote/install-ssh-deps.ts',
   },
   tsconfig: 'tsconfig.host.json',
   outDir: 'lib',

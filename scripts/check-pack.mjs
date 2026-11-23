@@ -45,6 +45,8 @@ const REQUIRED = [
   'package/lib/index.js',
   'package/lib/client.js',
   'package/lib/windows-runner.js',
+  'package/lib/install-ssh-deps.js',
+  'package/scripts/install-ssh-deps.mjs',
   'package/scripts/windows-broker/install.ps1',
   'package/scripts/windows-broker/service.cs',
   'package/scripts/windows-broker/rights.cs',

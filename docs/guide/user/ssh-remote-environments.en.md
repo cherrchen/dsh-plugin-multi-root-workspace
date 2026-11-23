@@ -29,9 +29,17 @@ Personal SSH is experimental and off by default. Once enabled, the Agent can use
 
 Installing Multi-root Workspace makes the local workspace features available. After you confirm that you want to enable personal SSH, **Install SSH dependencies** opens automatically if the active profile needs attention. You can close it and check the four packages later in **Manage SSH environments**. If the dependencies are ready, proceed to connection setup.
 
-1. If a package is missing, only part of the set is installed, or a version differs, click **Copy install command**.
-2. Fully quit the affected DSH Host. Run the command on the machine hosting DSH using the `dsh` CLI at the **exact** release shown in the dialog. For Web, use the machine running the Web Host. For Desktop, quit the app before running the command for the `desktop` profile. The command includes the active profile, DSH Home, and four exact package versions.
+There are two entries for the repair; either one writes only to the current profile and never asks you to install packages one by one or type a version.
+
+1. **One-click Desktop install (when the launcher supports it)**: the dialog shows **Install and restart**. The Desktop launcher verifies the current Host, profile, and release, stops the Host and waits for it to exit, reuses the same install core as the command below, and restarts the same `desktop` profile with its original configuration. The button reports stopping, installing, restarting, and checking states. Web, older Desktop builds, and launchers without this capability do not show it.
+2. **Copy install command (every host)**: click **Copy install command**, fully quit the affected DSH Host, and run it on the machine hosting DSH. The command uses the CLI at the **exact** release shown in the dialog, the exact profile and DSH Home, and runs one `dsh plugin --profile <name> add --save-exact` operation to align all four packages. For Web, use the machine running the Web Host; for Desktop, quit the app completely before running the command for the `desktop` profile. Repeating it is safe: a profile that is already aligned reports **ready** without another write.
 3. Restart the Host with the same profile and reopen **Manage SSH environments**. If a dependency message remains, click **Recheck dependencies** and review the state of each package. The check only reads state. When the running Host detects repaired files, it still requires a restart.
+
+Keep the three results apart:
+
+- **Installed**: this command or launcher operation wrote the four packages;
+- **Restart required**: the packages on disk are aligned, but this process still uses the dependencies it loaded at startup;
+- **Ready**: the current Host resolves all four matching packages, so connection setup can proceed.
 
 After changing DSH versions, run the command shown by the new Host to align all four packages. See the [SSH technical reference](../../reference/ssh-remote-environments.md#host-profile-依赖) for version and deployment details.
 

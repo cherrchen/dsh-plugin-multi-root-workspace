@@ -780,7 +780,9 @@ describe.skipIf(process.platform === 'win32')('personal RPC refusals through the
     expect(dependencies.packages).toHaveLength(4)
     if (dependencies.code !== 'ssh-host-unsupported') {
       expect(dependencies.code).toMatch(/^ssh-deps-(?:private|missing)$/)
-      expect(dependencies.command).toContain('dsh plugin --profile web add --save-exact')
+      expect(dependencies.command).toContain('install-ssh-deps.mjs')
+      expect(dependencies.command).toContain('--profile web')
+      expect(dependencies.command).toContain('--release 0.2.2-rc.5')
     }
     const response = await world.panel('sshHelperInstall', { revision: 0, environmentId: 'dev-box' }, SSH_SETTINGS_CHANNEL)
     expect(response.ok).toBe(false)

@@ -10,8 +10,29 @@
 
 - `SUPPORTED_SSH_RELEASES` 是 SSH 支持的精确版本真源。四个官方包分别为 `@deepseek-ai/dsh-ssh`、`@deepseek-ai/dsh-fs-ssh`、`@deepseek-ai/dsh-subprocess-ssh` 和 `@deepseek-ai/dsh-sandbox-ssh`，都须与当前 Host 同版。它们在插件 manifest 中仍是 optional peers，局部安装故障只阻断 SSH。
 - 上游 Profile 使用 `nodeLinker: hoisted`、`autoInstallPeers: false`。CLI 的 `dsh plugin --profile <name> add` 支持普通 npm 依赖，并将它们写入该 Profile 的 `package.json` 与锁文件，安装到该 Profile 的 `node_modules`。Bundle 选择保持原样。官方安装闭包为共用包提供回退。运行中 Plugin Manager 的 Bundle 安装接口拒绝普通包。决策依据见 [ADR-0049](../decisions/ADR-0049-ssh-custody-modes.md)。
+- 发布 tarball 带 `scripts/install-ssh-deps.mjs` 与构建入口 `lib/install-ssh-deps.js`。命令由 `src/compat/ssh-profile.ts` 从可信安装上下文生成：Desktop 使用 `process.resourcesPath/runtime/cli/bin/dsh` 与 `runtime/bin/node`，Web 从 `profileContext.installAnchor` 指向的 `@deepseek-ai/dsh` manifest 解析 `bin.dsh`，并复用当前进程的 Node。命令携带脚本、精确 CLI、Profile、DSH Home 与 Host 版本；脚本先运行一次 `dsh --version` 核对版本、校验 Profile 位于该 Home 且不是重定向目录，然后以结构化 argv 执行一次 `dsh plugin --profile <name> add --save-exact`，绝不从调用方接收包名。四包已对齐时直接报告已就绪，不再次写入；版本不符、Profile 不在该 Home、Desktop Profile 未初始化或版本不在 `SUPPORTED_SSH_RELEASES` 时返回诊断并停止。路径中的空格、单引号与非 ASCII 字符由 POSIX 引用与 argv 传递共同支持。
 - 插件优先使用上游发布的安装闭包中的 SSH 包，否则从当前 Profile 的直接依赖中解析。Profile 副本的模块入口必须位于对应包目录，DSH/Cordis peers 必须指向当前安装闭包，SSH 包间的 peer 必须指向同一组副本。插件私有副本只用于诊断。启动时记录的包位置和身份与现状不同则要求重启。重新检测只读取状态，开关、工具启动及 RPC 均不会运行本地包管理器。
-- Settings 的 `status` 和工作区的 `remotes` 可返回 `dependencies`，含 Host 版本、可用的 Profile 名称、每包状态和可选的精确安装命令。仅在启动器目录对应 CLI 管理的 Profile 时生成命令。用户步骤见[个人 SSH 指南](../guide/user/ssh-remote-environments.md#安装当前-profile-的-ssh-依赖)。
+- Settings 的 `status` 和工作区的 `remotes` 可返回 `dependencies`，含 Host 版本、Profile 名称、每包状态和可选的精确安装命令。仅在启动器目录对应 CLI 管理的 Profile 且能确定唯一目标 CLI 时生成命令；否则返回诊断。三种结果分开：本次写入成功（安装完成）、磁盘已对齐但当前进程仍需重启（`ssh-deps-restart`）、当前 Host 已能解析四包（`ready`）。用户步骤见[个人 SSH 指南](../guide/user/ssh-remote-environments.md#安装当前-profile-的-ssh-依赖)。
+
+### Desktop 一键安装的启动器接缝
+
+客户端只在 `view.code` 为 `ssh-deps-missing` 或 `ssh-deps-partial`、且启动器显式声明能力时显示 **安装并重启**。能力对象是 `window.dshDesktop.sshDependencies`（Rivetdeck 桥为 `window.deepseekDesktop.sshDependencies`），形状固定为：
+
+```ts
+{
+  protocolVersion: 1,
+  install(request: { profile: string; release: string }): Promise<{
+    status: 'ready' | 'installed' | 'restart-required',
+    profile: string,
+    release: string,
+  }>,
+  subscribe(listener: (phase: 'stopping' | 'installing' | 'restarting' | 'checking' | 'done') => void): () => void,
+}
+```
+
+启动器必须用自己的可信状态校验请求的 Host、Profile 与版本（不接收包名、argv 或任意命令），合并或拒绝同一 Profile 的并发请求；先停止目标 Host 并等待退出，再复用 `scripts/install-ssh-deps.mjs` 的安装核心，最后以原配置重启同一 Profile，并在每个阶段发出上述事件。停止失败必须结束请求；安装失败且 Host 已停止时尝试恢复启动并保留可重试诊断；新 Host 启动后由既有 `dependencies` 检测确认四包解析与加载，未就绪时继续显示依赖提示。
+
+**当前阻塞点**：本仓库的硬约束是不修改上游 `deepseek-harness` 任何包，而 `dsh-v0.2.2-rc.5` 的 `apps/desktop` 只暴露 `dshDesktop` 的既有 IPC（文件、更新、快捷键、浏览器、目录选择等），没有 Profile 安装或 Host 停止/重启的桥接口；实际启动器也不在本仓库。因此 Web 与当前 Desktop 不显示该按钮，客户端保留复制命令与重新检测。接入方只需在启动器主进程按上述对象实现能力并通过 preload 暴露；插件侧无需再改协议。
 
 ### 停用的旧配置
 
@@ -80,9 +101,13 @@ SFTP 使用独立的 SSH 子进程，同样在命令行强制 `StrictHostKeyChec
 - 密码引导先做 revision 预检，然后固定已确认的主机公钥、账号及一次性密码副本。远端按公钥精确、串行地更新 `authorized_keys`。保存冲突时，目标身份和访问密钥引用均未变化才允许复用密钥重试一次。仍失败则用同一目标回滚远端条目，再删除本地密钥。如果远端无法确认回滚或读不出持久状态，返回 `access-key-reconcile-required`，保留该密钥记录及核对编号。
 - 私钥导入：带口令的私钥经 `SSH_ASKPASS`/`SSH_ASKPASS_REQUIRE=force`（凭据根内私有临时目录中的 0600 口令文件 + 0700 脚本，用完即删）把旧口令交给 `ssh-keygen -p` 解密后重新保存，口令不进入命令行参数；材料或口令被拒报 `credential-import-failed` 并清除半成品密钥文件。
 
-## 实时开关
+## 实时开关与卸载清理
 
-启用通过 `configureRemote` 加载个人连接和工作区目录绑定。停用时先卸载工具子树并以取消信号收束在飞操作，再关闭远端域与 IPC。
+启用通过 `configureRemote` 加载个人连接和工作区目录绑定。停用时先停止接纳新的 SSH 操作，取消并收束在途传输、连接和 Helper，再按依赖逆序拆除 fiber。
+
+管理器的关闭是一个幂等事务：`disposeAll()` 在第一次调用时置为关闭状态，后续与并发的重复调用共享同一完成；`open`、`openSftp` 与 `openTransferSftp` 在进入和异步完成后都检查关闭状态，关闭开始后才完成的连接会被立即释放并拒绝返回。传输先中止并等待各自的收束，随后 Helper 与 SFTP 会话逐项独立清理：一个 Helper、SFTP 会话或 fiber 失败只记录带资源标识的警告，其余资源继续释放。fiber 按反向挂载顺序拆除（sandbox → subprocess → fs → ssh → policy → projections），单个 fiber 失败不阻止后续 fiber。
+
+清理同时保护转发流的事件逃逸。上游 `SshConnection` 在 TLS 认证的 `secureConnect` 上移除一次性的 `error` 监听，之后才挂上连接的永久监听；连接丢失若落在这一窗口，`socket.destroy(error)` 会让 Node 以未处理的 `'error'` 事件终止进程。插件在 `tls.connect` 返回时同步给上游转发流套接字附加一个只吞掉未处理错误的监听（精确匹配上游 stream 选项形状），它不替换连接自身的监听、不改变真实掉线的失效与上报，也不安装进程级 `uncaughtException` 处理器。该保护在 native 与 BoringSSL 运行时都安装，且先于任何 abort 回调可运行。
 
 personal 子树首次等到控制面就绪再挂载，常规配置保存更新现有管理器。环境授权身份改变时只废弃该环境的 SFTP 与 Helper 代次。绑定编辑交由准入指纹失效，已无绑定引用的目录 Helper 在撤权复核后回收。其他环境和仍有效的目录可继续使用已有连接。
 

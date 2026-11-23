@@ -1,6 +1,6 @@
-import { readFileSync, realpathSync, statSync } from 'node:fs'
+import { existsSync, readFileSync, realpathSync, statSync } from 'node:fs'
 import { createRequire } from 'node:module'
-import { dirname, isAbsolute, join } from 'node:path'
+import { dirname, isAbsolute, join, resolve } from 'node:path'
 import type { Context } from '@deepseek-ai/cordis'
 import type { SshDependencyView } from '../remote/ssh-diagnostics.ts'
 import {
@@ -132,16 +132,62 @@ function quoteProfileValue(value: string): string {
   return "'" + value.replace(/'/g, "'\\''") + "'"
 }
 
+function resourcesPath(): string | undefined {
+  const value = (process as NodeJS.Process & { resourcesPath?: unknown }).resourcesPath
+  return typeof value === 'string' && isAbsolute(value) ? value : undefined
+}
+
+/**
+ * The exact DSH CLI that belongs to this Host installation.
+ *
+ * Desktop's bundled CLI lives outside its `app.asar` and is the only
+ * executable that carries the Desktop runtime; PATH may hold another release.
+ * A plain Web Host derives the CLI from the installation manifest that
+ * anchors its own profile resolution.
+ */
+function dshCommand(profile: ProfileContext): string | undefined {
+  const resources = resourcesPath()
+  if (resources !== undefined) {
+    const desktop = join(resources, 'runtime', 'cli', 'bin', 'dsh')
+    return existsSync(desktop) ? desktop : undefined
+  }
+  try {
+    const manifest = JSON.parse(readFileSync(profile.installAnchor, 'utf8')) as { name?: unknown; bin?: unknown }
+    if (manifest.name !== '@deepseek-ai/dsh') return undefined
+    const bin = typeof manifest.bin === 'string' ? manifest.bin
+      : typeof manifest.bin === 'object' && manifest.bin !== null
+        && typeof (manifest.bin as { dsh?: unknown }).dsh === 'string'
+        ? (manifest.bin as { dsh: string }).dsh : undefined
+    if (bin === undefined) return undefined
+    const candidate = resolve(dirname(profile.installAnchor), bin)
+    return existsSync(candidate) ? candidate : undefined
+  } catch { return undefined }
+}
+
+/** The exact Node runtime able to execute the installer script after the Host quits. */
+function nodeCommand(): string | undefined {
+  const resources = resourcesPath()
+  if (resources !== undefined) {
+    const desktop = join(resources, 'runtime', 'bin', 'node')
+    return existsSync(desktop) ? desktop : undefined
+  }
+  return isAbsolute(process.execPath) && existsSync(process.execPath) ? process.execPath : undefined
+}
+
 function commandFor(profile: ProfileContext | undefined, release: string): string | undefined {
   if (profile === undefined || !isAbsolute(profile.home) || profile.name.length === 0
     || ['.', '..', 'node_modules'].includes(profile.name) || /[/\\\0\r\n]/.test(profile.name)
     || /[\0\r\n]/.test(profile.home)) return undefined
   const expected = real(join(profile.home, 'profiles', profile.name))
   if (expected === undefined || expected !== real(profile.dir)) return undefined
-  const specs = SSH_PEER_PACKAGES.map(name => `${name}@${release}`)
+  const dsh = dshCommand(profile)
+  const node = nodeCommand()
+  const script = pluginRoot === undefined ? undefined : join(pluginRoot, 'scripts', 'install-ssh-deps.mjs')
+  if (dsh === undefined || node === undefined || script === undefined || !existsSync(script)) return undefined
   const selection = /^[a-zA-Z0-9_][a-zA-Z0-9_.-]*$/.test(profile.name)
     ? `--profile ${profile.name}` : `--profile=${quoteProfileValue(profile.name)}`
-  return `DSH_HOME=${quoteProfileValue(profile.home)} dsh plugin ${selection} add --save-exact ${specs.join(' ')}`
+  return [quoteProfileValue(node), quoteProfileValue(script), '--dsh', quoteProfileValue(dsh),
+    selection, '--home', quoteProfileValue(profile.home), '--release', release].join(' ')
 }
 
 export function inspectSshProfile(ctx: Context): { view: SshDependencyView; gate?: SshCapability } {

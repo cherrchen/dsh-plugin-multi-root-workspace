@@ -8,6 +8,19 @@ This file records the user-visible changes of every **released** version.
 - For installation sources, the supported upstream runtimes, and known limitations, see the [README](./README.en.md).
 - The evidence, numbering, and release state of each version live in the [roadmap progress ledger](./docs/plans/active/2026-09-12-multi-root-workspace.md#进度总账). The body of each GitHub Release is generated from the commit history by `scripts/release-notes.mjs` and is the complete raw list behind this file.
 
+## [Unreleased]
+
+This release fixes the Host exit caused by uninstalling the plugin while a personal SSH connection is active, and reduces SSH dependency installation to one command shipped with the package. There are no configuration or protocol changes; SSH remains experimental and off by default.
+
+### Fixed
+
+- **Uninstalling the plugin while a live SSH connection is held terminated the Host with an uncaught exception**: upstream `SshConnection` removes its one-shot authentication `error` listener on a forwarded stream's TLS `secureConnect` and attaches the connection's permanent listener only afterwards. A connection loss in that gap makes `socket.destroy(error)` raise the `SSH connection lost` error constructed by `SshRpcPeer.close()` as an unhandled `'error'` event. The plugin now attaches an error guard synchronously when `tls.connect` returns for upstream forwarded streams, on both native and BoringSSL runtimes; it does not replace the connection's own listener, does not change real-loss invalidation or reporting, and installs no process-level exception handler. Manager shutdown is now an idempotent transaction: stop accepting new work, cancel and await in-flight transfers, then release Helpers, SFTP sessions, and fibers independently; a connection that completes after shutdown starts is reclaimed, a failed resource is diagnosed while the others still proceed.
+
+### Added
+
+- **An SSH dependency install command shipped with the plugin**: the published tarball now carries `scripts/install-ssh-deps.mjs` and `lib/install-ssh-deps.js`. The command resolves the exact DSH CLI, profile, DSH Home, and Host release from the trusted installation context, verifies them, and runs one structured-argv `dsh plugin --profile <name> add --save-exact` operation that aligns all four SSH packages to the Host release. Repeating it reports ready without another write, and paths containing spaces, single quotes, or non-ASCII characters are supported.
+- **A one-click Desktop install entry**: when the Desktop launcher explicitly supports it, the dependency dialog shows **Install and restart**, while keeping the copy-command and recheck entries. The launcher accepts only the fixed action, and the trusted side supplies the profile, release, and arguments. Web and older Desktop builds keep using the copy command.
+
 ## [0.1.24-beta.3] - 2026-11-23
 
 This is the third beta of the `0.1.24` line and only fixes remote-directory registration on DSH Desktop: Electron's BoringSSL does not implement the GCM-PSK suite that upstream pins for forwarded streams, so the Host fails with `NO_CIPHER_MATCH` while creating the local TLS context and the directory probe and registration stop. On a BoringSSL runtime the plugin now rewrites only that upstream stream call to use AEAD ChaCha20-PSK and installs an additive Helper entry; a plain-Node Host keeps negotiating the original suite, the recorded state and registered Roots stay unchanged, and a desktop Host must reinstall an older Helper once. There are no breaking changes; with SSH off, behavior matches `v0.1.24-beta.2`.

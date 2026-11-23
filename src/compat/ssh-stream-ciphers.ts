@@ -9,12 +9,16 @@
  * Node/OpenSSL, which implements both.
  *
  * The upstream constant cannot be edited out of tree, so this module makes
- * two structural adaptations:
+ * three structural adaptations:
  *
  * - before the Host evaluates `@deepseek-ai/dsh-ssh`,
  *   {@link installClientPskFallback} rewrites the one `tls.connect` call the
  *   upstream stream layer makes (exact option shape), and only on a runtime
  *   that cannot create the suite. Every other TLS connection is untouched;
+ * - the same patch attaches a persistent error guard to each upstream
+ *   forwarded stream before its authentication listener is removed, so a
+ *   connection loss in the gap becomes a reported failure rather than an
+ *   unhandled `'error'` event;
  * - the generated remote Helper entry embeds {@link helperServerShimSource},
  *   which widens the Helper's TLS server list with the same fallback. A
  *   plain-Node Host keeps offering the upstream suite, so the
@@ -67,6 +71,25 @@ export interface ClientPskInstall {
   readonly installed: boolean
   /** Restore the original `connect`; production never calls this. */
   restore(): void
+}
+
+/**
+ * Keep every upstream forwarded stream error observable.
+ *
+ * Upstream authenticates the forwarding socket with TLS, removes its one-shot
+ * `error` handler on `secureConnect`, and only then attaches the connection's
+ * permanent handler. A connection loss in that gap destroys the socket with
+ * the RPC peer's `SSH connection lost` error and Node raises it as an
+ * uncaughtException. The listener is attached synchronously when `tls.connect`
+ * returns, before the first event can fire, and stays for the socket lifetime;
+ * it does not replace the connection's own listener or suppress its reporting.
+ * @param stream - the value returned by `tls.connect`.
+ */
+function guardStreamErrors(stream: unknown): void {
+  if (stream === null || typeof stream !== 'object') return
+  const on = (stream as { on?: unknown }).on
+  if (typeof on !== 'function') return
+  ;(stream as { on(event: string, listener: () => void): unknown }).on('error', () => {})
 }
 
 const patchedModules = new WeakSet<object>()
@@ -132,13 +155,18 @@ export function rewritePskConnectOptions<T extends object>(
 }
 
 /**
- * Install the client-side cipher fallback before `@deepseek-ai/dsh-ssh` is
+ * Install the client-side stream patch before `@deepseek-ai/dsh-ssh` is
  * evaluated.
  *
- * Named ESM imports of a core module are bound when the module is linked
- * (`import { connect } from 'node:tls'`), so the replacement is followed by
- * `syncBuiltinESMExports()`; this also updates imports that were linked
- * earlier in the process.
+ * On a BoringSSL runtime the upstream GCM-PSK suite is absent, so the patch
+ * rewrites exactly that `tls.connect` call to the AEAD fallback. On every
+ * runtime it also attaches the forwarded-stream error guard to the socket
+ * `tls.connect` returns, covering the window in which upstream has removed
+ * its authentication error handler but has not attached the connection's
+ * handler yet. Named ESM imports of a core module are bound when the module is
+ * linked (`import { connect } from 'node:tls'`), so the replacement is
+ * followed by `syncBuiltinESMExports()`; this also updates imports that were
+ * linked earlier in the process.
  * @param options - dependency injection for tests; production passes nothing.
  * @returns the plan and whether this call installed the patch.
  */
@@ -148,17 +176,22 @@ export function installClientPskFallback(options: {
 } = {}): ClientPskInstall {
   const tls = options.tls ?? hostTls()
   const plan = clientPskPlan(() => tls.getCiphers())
-  if (plan.kind !== 'fallback') return { plan, installed: false, restore: () => {} }
+  if (plan.kind === 'unsupported') return { plan, installed: false, restore: () => {} }
   if (patchedModules.has(tls)) return { plan, installed: false, restore: () => {} }
   const original = tls.connect
   const sync = options.sync ?? (options.tls === undefined ? syncBuiltinESMExports : () => {})
   tls.connect = function patchedPskConnect(this: unknown, ...args: unknown[]): unknown {
     const first = args[0]
-    if (first !== null && typeof first === 'object' && !Array.isArray(first)) {
-      const rewritten = rewritePskConnectOptions(first, plan)
-      if (rewritten !== first) args[0] = rewritten
+    const streamOptions = first !== null && typeof first === 'object' && !Array.isArray(first)
+      ? first as Record<string, unknown>
+      : undefined
+    if (streamOptions !== undefined && plan.kind === 'fallback') {
+      const rewritten = rewritePskConnectOptions(streamOptions, plan)
+      if (rewritten !== streamOptions) args[0] = rewritten
     }
-    return original.apply(this, args)
+    const stream = original.apply(this, args)
+    if (streamOptions !== undefined && isUpstreamStreamConnectOptions(streamOptions)) guardStreamErrors(stream)
+    return stream
   }
   patchedModules.add(tls)
   sync()
