@@ -479,7 +479,7 @@ export const ru = {
   'error.helper-install-failed': 'Не удалось установить helper на удалённом хосте.',
   'error.helper-hash-mismatch': 'Хэш helper на удалённом хосте не совпадает с копией Host.',
   'error.helper-node-missing': 'На удалённом хосте нет подходящего node (требуется абсолютный путь).',
-  'error.helper-outdated': 'Записанный helper предшествует проверке целостности всего набора файлов; переустановите helper.',
+  'error.helper-outdated': 'Записанный helper использует старую точку входа транспорта; переустановите helper.',
   'error.host-identity-unverifiable': 'В known_hosts не найден однозначный ключ хоста.',
   'error.credential-import-failed': 'Не удалось импортировать закрытый ключ: недопустимый файл или неверная парольная фраза.',
   'error.personal-config-invalid': 'Персональная конфигурация недопустима и не была записана.',

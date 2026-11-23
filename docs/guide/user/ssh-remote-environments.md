@@ -85,7 +85,7 @@ Profile 就绪后，连接和绑定在 GUI 中配置，无需 root 权限、独�
 - **`ssh-config-not-linked`**（个人模式）：存在托管凭据的环境但尚未把插件生成的配置链接进 `~/.ssh/config`，在「远端连接」中点击 **链接到 ~/.ssh/config**。
 - **`access-key-reconcile-required`**：安装或回滚的结果无法确认。使用错误消息中的密钥编号，在原 SSH 主机上核对 `authorized_keys` 后再重试。
 - **Helper 安装失败**：连接页显示失败阶段、修复建议和可展开的技术详情。如果显示远端可能已改动，先检查服务器上的安装目录和 npm 日志。如果显示远端已校验但 Host 登记未确认，先重新读取连接状态，再决定是否重新安装。参见 [SSH 故障排查](../../troubleshooting/ssh-panel-operation-failed.md#helper-安装诊断)。
-- **`helper-outdated`**：记录的 Helper 早于 Host 侧入口完整性校验，在对应连接卡片上重新 **安装 Helper**。
+- **`helper-outdated`**：记录的 Helper 使用旧版传输入口（早于 `integrity: 3`），在对应连接卡片上重新 **安装 Helper**。
 - **`unknown` 返回与 `reconcileId`**：远端命令启动后连接断开或文件发布应答丢失时，工具不会自动重试（避免重复执行或覆盖文件），请凭返回的 `reconcileId` 到远端对账后再决定后续操作。
 
 关于协议字段、全部错误码与架构细节，参见技术参考 [SSH 远端环境参考](../../reference/ssh-remote-environments.md) 与 [多执行环境控制面参考](../../reference/multi-environment-control-plane.md)。

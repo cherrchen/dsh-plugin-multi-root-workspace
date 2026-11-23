@@ -8,6 +8,12 @@ English: [CHANGELOG.en.md](./CHANGELOG.en.md)
 - 安装方式、受支持的上游运行时与已知限制见 [README](./README.md)。
 - 每个版本的实施证据、编号口径与发布状态见[路线图 §进度总账](./docs/plans/active/2026-09-12-multi-root-workspace.md#进度总账)；GitHub Release 的正文由 `scripts/release-notes.mjs` 从 commit 历史生成，是本文件之外的完整原始清单。
 
+## [Unreleased]
+
+### Fixed
+
+- **DSH Desktop 登记远端目录时报 `NO_CIPHER_MATCH`**：Electron 的 BoringSSL 不实现上游 `@deepseek-ai/dsh-ssh` 为转发流固定的 `PSK-AES256-GCM-SHA384`，Host 在本地创建 TLS 上下文时就失败，目录核验与登记授权因此中断。插件现在在 BoringSSL 运行时把该套件替换为 `ECDHE-PSK-CHACHA20-POLY1305`（AEAD 且带前向保密；不支持时退到 `PSK-AES256-CBC-SHA`），并在插件生成的 Helper 入口加载上游 Helper 前给服务端 cipher 列表追加同一组 fallback；仍然只提供 PSK、不加入证书回退，plain Node 的 Host 继续协商原套件。Helper 入口格式随之升级为 `integrity: 3`，已安装的旧 Helper 需要在连接卡片重新安装一次。实现与备选方案见 [ADR-0051](./docs/decisions/ADR-0051-ssh-stream-psk-boringssl-fallback.md)。
+
 ## [0.1.24-beta.2] - 2026-11-23
 
 本版是 `0.1.24` 线的第二个 beta，只处理启用个人 SSH 后的依赖准备与 Helper 安装诊断。开启 SSH 时若当前 Profile 的四个 SSH 包未就绪，界面直接给出可复制的精确安装命令；Helper 安装失败会说明失败阶段、远端状态与下一步。没有不兼容变更；未开启 SSH 时行为与 `v0.1.24-beta.1` 相同。

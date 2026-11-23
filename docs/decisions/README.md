@@ -101,4 +101,5 @@ ADR-0002-short-title.md
 - [ADR-0034](./ADR-0034-binary-transfer.md) — 跨环境二进制复制的授权、发布与失败语义 (Accepted).
 - [ADR-0048](./ADR-0048-credential-broker.md) — 独立 OS 账户托管 SSH 连接的本机凭据代理、认证与证明条件 (Proposed).
 - [ADR-0049](./ADR-0049-ssh-custody-modes.md) — SSH 远端环境的三档凭据托管：personal（Host 进程内直跑官方栈、用户凭据）、team（broker 托管、放宽部署证明）、hardened（ADR-0048 全量证据）(Accepted).
+- [ADR-0051](./ADR-0051-ssh-stream-psk-boringssl-fallback.md) — SSH 转发流的 BoringSSL PSK 套件回退：Host 只改写目标 `tls.connect`，插件生成的 Helper 入口给服务端追加 ChaCha20/CBC fallback，仍保持 PSK-only；Helper 入口格式升级为 `integrity: 3`（Accepted）。
 - [ADR-0050](./ADR-0050-add-affordance-and-wizard-kit.md) — 工作区面板底栏收口为单一 `+` 按钮（按 remote-tools 开关呈双形态）、本地添加的信任确认 Dialog，以及为旧 SSH 弹窗迁移预留的向导设计套件 `src/client/wizard/` (Accepted).

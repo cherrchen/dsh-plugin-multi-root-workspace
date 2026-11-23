@@ -429,10 +429,10 @@ export class SshEnvironmentManager {
     if (environment === undefined) throw new SshEnvironmentError('unknown-environment', `no manifest environment "${environmentId}"`)
     this.requireGate()
     if (environment.transport !== 'helper') throw new SshEnvironmentError('transport-not-helper', `environment "${environmentId}" uses transport "${environment.transport}"`)
-    // A helper installed before full-artifact integrity has no entry point to
-    // verify its file set: refuse rather than trust the single-file digest.
-    if (this.personalCustody && (environment.helper!.integrity !== 2 || environment.helper!.treeSha256 === undefined)) {
-      throw new SshEnvironmentError('helper-outdated', 'the recorded Helper predates Host-pinned integrity; reinstall the Helper')
+    // A helper installed before the stream-TLS entry format has no entry point
+    // that can widen the server cipher list for a BoringSSL Host.
+    if (this.personalCustody && (environment.helper!.integrity !== 3 || environment.helper!.treeSha256 === undefined)) {
+      throw new SshEnvironmentError('helper-outdated', 'the recorded Helper predates the stream-TLS entry format; reinstall the Helper')
     }
     if (environment.credentialIsolation !== 'attested' && !this.allowUnattested && !this.brokerCustody) {
       throw new SshEnvironmentError('credential-isolation-unattested', `environment "${environmentId}" is declared unattested; connections require an attested deployment`)

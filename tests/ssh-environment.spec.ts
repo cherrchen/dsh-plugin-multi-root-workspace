@@ -92,14 +92,17 @@ describe('SshEnvironmentManager refusal ordering', () => {
     await expect(open({ allow: false })).rejects.toMatchObject({ code: 'credential-isolation-unattested' })
     expect(calls.filter(call => call.startsWith('ssh -G'))).toHaveLength(0)
   })
-  it('refuses a personal helper that predates full-artifact integrity', async () => {
-    const manager = new SshEnvironmentManager({
-      manifest: manifest([environment()]), logger, gate: eligible, custody: 'personal', exec, readFile: () => KEY_LINE,
-    })
-    await expect(manager.open('vps-app')).rejects.toMatchObject({ code: 'helper-outdated' })
+  it('refuses a personal helper from before the stream-TLS entry format', async () => {
+    for (const integrity of [undefined, 1, 2] as const) {
+      const manager = new SshEnvironmentManager({
+        manifest: manifest([environment({ helper: { sha256: 'a'.repeat(64), protocol: 1, ...(integrity === undefined ? {} : { integrity }), treeSha256: 'b'.repeat(64) } })]),
+        logger, gate: eligible, custody: 'personal', exec, readFile: () => KEY_LINE,
+      })
+      await expect(manager.open('vps-app')).rejects.toMatchObject({ code: 'helper-outdated' })
+    }
     expect(calls.filter(call => call.startsWith('ssh -G'))).toHaveLength(0)
     const upgraded = new SshEnvironmentManager({
-      manifest: manifest([environment({ helper: { sha256: 'a'.repeat(64), protocol: 1, integrity: 2 as const, treeSha256: 'b'.repeat(64) } })]),
+      manifest: manifest([environment({ helper: { sha256: 'a'.repeat(64), protocol: 1, integrity: 3 as const, treeSha256: 'b'.repeat(64) } })]),
       logger, gate: eligible, custody: 'personal', exec, readFile: () => KEY_LINE,
     })
     // Past the integrity gate, the next refusal is the personal workspace check.

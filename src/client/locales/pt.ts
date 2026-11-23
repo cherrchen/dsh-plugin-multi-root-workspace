@@ -479,7 +479,7 @@ export const pt = {
   'error.helper-install-failed': 'A instalação do helper remoto falhou.',
   'error.helper-hash-mismatch': 'O hash do helper remoto não corresponde ao do Host.',
   'error.helper-node-missing': 'O host remoto não tem um node utilizável (é necessário um caminho absoluto).',
-  'error.helper-outdated': 'O helper registrado é anterior à verificação de integridade do conjunto de arquivos; reinstale o helper.',
+  'error.helper-outdated': 'O helper registrado usa uma entrada de transporte mais antiga; reinstale o helper.',
   'error.host-identity-unverifiable': 'Nenhuma chave de host única foi encontrada no known_hosts.',
   'error.credential-import-failed': 'A importação da chave privada falhou: o material é inválido ou a passphrase está errada.',
   'error.personal-config-invalid': 'A configuração pessoal é inválida e não foi gravada.',

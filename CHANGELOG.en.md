@@ -8,6 +8,12 @@ This file records the user-visible changes of every **released** version.
 - For installation sources, the supported upstream runtimes, and known limitations, see the [README](./README.en.md).
 - The evidence, numbering, and release state of each version live in the [roadmap progress ledger](./docs/plans/active/2026-09-12-multi-root-workspace.md#进度总账). The body of each GitHub Release is generated from the commit history by `scripts/release-notes.mjs` and is the complete raw list behind this file.
 
+## [Unreleased]
+
+### Fixed
+
+- **Registering a remote directory from DSH Desktop reports `NO_CIPHER_MATCH`**: Electron's BoringSSL does not implement `PSK-AES256-GCM-SHA384`, the suite `@deepseek-ai/dsh-ssh` pins for forwarded streams, so the Host fails while creating the local TLS context and the directory probe and registration never complete. The plugin now replaces that suite on a BoringSSL runtime with `ECDHE-PSK-CHACHA20-POLY1305` (AEAD with forward secrecy, falling back to `PSK-AES256-CBC-SHA` when unavailable), and the plugin-generated Helper entry appends the same fallbacks to the server cipher list before loading the upstream Helper. The stream remains PSK-only with no certificate fallback, and a plain-Node Host keeps negotiating the original suite. The Helper entry format becomes `integrity: 3`, so an already installed Helper must be reinstalled from its connection card once. See [ADR-0051](./docs/decisions/ADR-0051-ssh-stream-psk-boringssl-fallback.md).
+
 ## [0.1.24-beta.2] - 2026-11-23
 
 This is the second beta of the `0.1.24` line and only addresses dependency preparation and Helper installation diagnostics after personal SSH is enabled. When the four SSH packages are not ready in the current profile, enabling SSH now shows the exact install command to copy; a failed Helper installation names its stage, the remote state, and the next step. There are no breaking changes; with SSH off, behavior matches `v0.1.24-beta.1`.

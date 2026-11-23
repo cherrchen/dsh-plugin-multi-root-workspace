@@ -12,6 +12,7 @@ import { managedHostAlias, renderAskpass } from './ssh-files.ts'
 import type { PersonalEnvironment } from './config.ts'
 import { isRemoteNodePath, REMOTE_NODE_MIN_VERSION, remoteNodeVersionStatus, type SshFailureDetails } from '../ssh-diagnostics.ts'
 import { helperCommandError, HelperInstallError } from './helper-error.ts'
+import { helperServerShimSource } from '../../compat/ssh-stream-ciphers.ts'
 
 export class RemoteOperationError extends Error {
   constructor(readonly code: string, message: string) {
@@ -135,7 +136,7 @@ export interface HelperInstallResult {
   readonly nodePath: string
   readonly helperPath: string
   readonly sha256: string
-  readonly integrity: 2
+  readonly integrity: 3
   readonly treeSha256: string
 }
 
@@ -200,6 +201,7 @@ if (digest(root) !== ${JSON.stringify(expected)}) {
   process.stderr.write("dsh remote helper integrity check failed: the installed artifact set differs from the recorded digest\\n")
   process.exit(78)
 }
+${helperServerShimSource()}
 await import("./node_modules/@deepseek-ai/dsh-ssh/lib/helper.js")
 `
 
@@ -413,7 +415,7 @@ export async function installHelper(
     throw remoteFailure('entry-generation', disk ? 'helper-disk-space' : 'helper-entry-write',
       'The server did not confirm the Helper entry write.', disk ? 'directory' : 'verify', artifactFacts)
   }
-  return { nodePath, helperPath: entryAbs, sha256: hostLib['helper.js']!, integrity: 2, treeSha256: installed.tree }
+  return { nodePath, helperPath: entryAbs, sha256: hostLib['helper.js']!, integrity: 3, treeSha256: installed.tree }
 }
 
 /** Verify the installed entry against Host-owned metadata before opening it. */

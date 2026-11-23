@@ -60,7 +60,7 @@ const environmentSchema = z.object({
   hostKey: z.string().regex(/^SHA256:[A-Za-z0-9+/]{43}$/),
   namespace: z.string().min(1).max(128),
   transport: z.enum(['helper', 'sftp']),
-  helper: z.object({ sha256: z.string().regex(/^[0-9a-f]{64}$/), protocol: z.number().int().min(1), integrity: z.union([z.literal(1), z.literal(2)]).optional(), treeSha256: z.string().regex(/^[0-9a-f]{64}$/).optional() }).strict().nullable(),
+  helper: z.object({ sha256: z.string().regex(/^[0-9a-f]{64}$/), protocol: z.number().int().min(1), integrity: z.union([z.literal(1), z.literal(2), z.literal(3)]).optional(), treeSha256: z.string().regex(/^[0-9a-f]{64}$/).optional() }).strict().nullable(),
   connection: connectionSchema,
   exec: execSchema.optional(),
   transfer: z.object({

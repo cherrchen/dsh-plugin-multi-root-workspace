@@ -478,7 +478,7 @@ export const zh = {
   'error.helper-install-failed': '远端 helper 安装失败。',
   'error.helper-hash-mismatch': '远端 helper 哈希与 Host 不一致。',
   'error.helper-node-missing': '远端缺少可用的 node（需要绝对路径）。',
-  'error.helper-outdated': '记录的 Helper 早于整集完整性校验，请重新安装 Helper。',
+  'error.helper-outdated': '记录的 Helper 使用旧版传输入口，请重新安装 Helper。',
   'error.host-identity-unverifiable': 'known_hosts 中找不到唯一的主机密钥。',
   'error.credential-import-failed': '私钥导入失败：文件无效或口令错误。',
   'error.personal-config-invalid': '个人配置无效，未写入。',

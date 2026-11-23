@@ -524,13 +524,15 @@ describe.skipIf(process.platform === 'win32')('operations argv/env and hash chec
     expect(result).toEqual({
       nodePath: '/usr/bin/node',
       helperPath: '/home/builder/.dsh-helper/0.2.2-rc.2/helper-entry.mjs',
-      sha256: helperHash, integrity: 2, treeSha256: 'd'.repeat(64),
+      sha256: helperHash, integrity: 3, treeSha256: 'd'.repeat(64),
     })
     expect(exec.mock.calls.map(([, args]) => stageOf(args.at(-1)!))).toEqual([
       'ssh-connect', 'remote-prerequisites', 'remote-install', 'artifact-verification', 'entry-generation',
     ])
     const entry = exec.mock.calls[4]![2]?.input
     expect(entry).toContain('integrity check failed')
+    expect(entry).toContain('ECDHE-PSK-CHACHA20-POLY1305')
+    expect(entry).toContain('syncTlsExports()')
     expect(entry).toContain('import("./node_modules/@deepseek-ai/dsh-ssh/lib/helper.js")')
     expect(entry).toContain('d'.repeat(64))
     expect(exec.mock.calls.every(([, args]) => args.includes('BatchMode=yes'))).toBe(true)
@@ -632,7 +634,7 @@ printf %s HELPER-BYTES > "$lib/helper.js"
     const result = handlePersonalEndpoint(ctx, registry, '/w',
       { endpoint: 'sshHelperInstall', sessionId: 's', revision: 0, environmentId: 'dev-box' }, { exec })
     if (outcome === 'saved') {
-      await expect(result).resolves.toMatchObject({ revision: 1, environments: [{ helper: { sha256: helperHash, protocol: 3, integrity: 2 } }] })
+      await expect(result).resolves.toMatchObject({ revision: 1, environments: [{ helper: { sha256: helperHash, protocol: 3, integrity: 3 } }] })
     } else {
       const failure = await result.catch((error: unknown) => error)
       expect(failure).toMatchObject({

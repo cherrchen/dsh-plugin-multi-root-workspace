@@ -479,7 +479,7 @@ export const fr = {
   'error.helper-install-failed': 'L’installation du helper distant a échoué.',
   'error.helper-hash-mismatch': 'L’empreinte du helper distant ne correspond pas à la copie du Host.',
   'error.helper-node-missing': 'L’hôte distant n’a pas de node utilisable (un chemin absolu est requis).',
-  'error.helper-outdated': 'L’helper enregistré est antérieur à la vérification d’intégrité de l’ensemble des fichiers ; réinstallez l’helper.',
+  'error.helper-outdated': 'L’helper enregistré utilise une entrée de transport plus ancienne ; réinstallez l’helper.',
   'error.host-identity-unverifiable': 'Aucune clé d’hôte unique n’a été trouvée dans known_hosts.',
   'error.credential-import-failed': 'L’importation de la clé privée a échoué : le matériel de clé est invalide ou la phrase secrète est erronée.',
   'error.personal-config-invalid': 'La configuration personnelle est invalide et n’a pas été écrite.',
