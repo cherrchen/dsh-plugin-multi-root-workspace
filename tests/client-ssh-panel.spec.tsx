@@ -853,8 +853,8 @@ describe('the SSH management dialog', () => {
       shell: ['/bin/sh', '-c'],
       env: { PATH: '/usr/local/bin:/usr/bin:/bin' },
       maxTimeoutMs: 600_000,
-      stdoutLimit: 65_536,
-      stderrLimit: 65_536,
+      stdoutLimit: 1_048_576,
+      stderrLimit: 262_144,
       terminateGraceMs: 2_000,
     })
     expect(draft.transfer).toEqual({ maxBytes: 268_435_456, timeoutMs: 600_000 })

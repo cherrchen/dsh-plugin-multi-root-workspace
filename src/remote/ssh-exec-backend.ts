@@ -125,12 +125,9 @@ export function sshExecBackend(
       } catch (error) { throw lost(error) }
       // Whole-stream coordinates passed through from the upstream collector:
       // nextOffset is the raw total it observed, lossy means the returned text
-      // is a tail (a head was already dropped). A lossy window can be cut
-      // mid-codepoint at either end, so a leading/trailing U+FFFD is an artifact
-      // of that cut, not stream content: strip it and mark the window
-      // approximate so the tool reports the dropped count as unknown instead of
-      // guessing it from a re-encoded length. Older collectors expose only
-      // text; the tool then reports the totals as explicitly unknown.
+      // is a tail (a head was already dropped). The text interface cannot
+      // distinguish a literal U+FFFD from one inserted during decoding. Keep
+      // the text intact and omit exact window coordinates in that case.
       const feed = () => {
         for (const [name, stream] of [['stdout', handle.collected?.stdout], ['stderr', handle.collected?.stderr]] as const) {
           if (stream === undefined) continue
@@ -139,11 +136,9 @@ export function sshExecBackend(
           const lossy = collected.lossy === true
           const totalBytes = collected.nextOffset
           const knownTotal = typeof totalBytes === 'number' && Number.isInteger(totalBytes) && totalBytes >= 0
-          const boundaryReplacement = lossy && (collected.text.startsWith('\uFFFD') || collected.text.endsWith('\uFFFD'))
-          const text = lossy ? collected.text.replace(/^\uFFFD/, '').replace(/\uFFFD$/, '') : collected.text
-          const bytes = new TextEncoder().encode(text)
-          const approximate = boundaryReplacement || text.includes('\uFFFD')
-            || (knownTotal && !lossy && Buffer.byteLength(text, 'utf8') !== totalBytes)
+          const bytes = new TextEncoder().encode(collected.text)
+          const approximate = collected.text.includes('\uFFFD')
+            || (knownTotal && (lossy ? bytes.byteLength > totalBytes : bytes.byteLength !== totalBytes))
           const meta: OutputChunkMeta = {
             lossy,
             ...(knownTotal ? { totalBytes } : {}),

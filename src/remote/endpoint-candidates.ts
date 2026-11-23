@@ -10,9 +10,10 @@
  * @module @dsh-electron/dsh-plugin-multi-root-workspace/remote-endpoint-candidates
  */
 import type { MultiRootRegistry } from '../registry.ts'
+import { effectiveRootAccess } from '../contract.ts'
 import { primaryKey } from '../roots.ts'
-import type { DeploymentManifest } from './manifest.ts'
-import type { RemoteEndpointRef, RemoteGrant, RemoteGrantState } from './contract.ts'
+import type { DeploymentManifest, RemoteBinding } from './manifest.ts'
+import type { RemoteEndpointRef, RemoteGrant, RemoteGrantState, RemoteOperationSession } from './contract.ts'
 
 /** Which side of an operation a candidate must be able to serve. */
 export type CandidateDirection = 'source' | 'destination' | 'exec'
@@ -21,6 +22,12 @@ export type CandidateDirection = 'source' | 'destination' | 'exec'
 export interface CandidateRequest {
   readonly direction: CandidateDirection
   readonly peer?: RemoteEndpointRef
+}
+
+interface CopyCandidateScope {
+  readonly source: readonly string[]
+  readonly destination: readonly string[]
+  readonly remoteDestination: boolean
 }
 
 /** The Registry reads the candidate lookup needs; a fake may implement both. */
@@ -46,6 +53,7 @@ const LOCAL_CANDIDATE_LIMIT = 8
  * @param grants - the owner snapshot's grants with their states.
  * @param primaryRoot - the session workspace root (any spelling).
  * @param request - direction plus optional known peer.
+ * @param copy - local endpoints and remote write capability for this call.
  * @returns sorted, bounded `environmentId:rootId` candidates.
  */
 export function endpointCandidates(
@@ -53,39 +61,84 @@ export function endpointCandidates(
   grants: readonly (RemoteGrant & { readonly state: RemoteGrantState })[],
   primaryRoot: string,
   request: CandidateRequest,
+  copy?: CopyCandidateScope,
 ): string[] {
   const key = primaryKey(primaryRoot)
   const registered = new Set(grants
     .filter(grant => grant.state === 'registered')
     .map(grant => `${grant.environmentId}:${grant.rootId}`))
-  const found: string[] = []
-  for (const binding of manifest.bindings) {
-    if (primaryKey(binding.primary) !== key) continue
-    const id = `${binding.environmentId}:${binding.rootId}`
-    if (!registered.has(id)) continue
-    if (request.direction === 'exec') {
-      if (!binding.actions.includes('exec')) continue
-    } else if (request.direction === 'source') {
-      if (!binding.actions.includes('read')) continue
-      if (request.peer !== undefined && !paired(binding, 'export', request.peer)) continue
-    } else {
-      if (!binding.actions.includes('write')) continue
-      if (request.peer !== undefined && !paired(binding, 'import', request.peer)) continue
-    }
-    if (!found.includes(id)) found.push(id)
-    if (found.length >= CANDIDATE_LIMIT) break
+  const bindings = manifest.bindings.filter(binding => primaryKey(binding.primary) === key && registered.has(endpointId(binding)))
+  const { direction, peer } = request
+  if (direction === 'exec') {
+    return bindings.filter(binding => binding.actions.includes('exec')).map(endpointId).sort().slice(0, CANDIDATE_LIMIT)
   }
-  return found.sort()
+  const source = direction === 'source'
+  const ownAction = source ? 'read' : 'write'
+  const ownPair = source ? 'export' : 'import'
+  const peerDirection = source ? 'destination' : 'source'
+  const remote = bindings.filter(binding => binding.actions.includes(ownAction))
+  if (peer === undefined) return remote.map(endpointId).sort().slice(0, CANDIDATE_LIMIT)
+
+  if (source && peer.environmentId !== 'local' && copy?.remoteDestination === false) return []
+  if (peer.environmentId === 'local') {
+    if (copy !== undefined && !copy[peerDirection].includes(peer.rootId)) return []
+    if (!source && copy?.remoteDestination === false) return []
+    return remote.filter(binding => paired(binding, ownPair, peer)).map(endpointId).sort().slice(0, CANDIDATE_LIMIT)
+  }
+
+  const peerBinding = bindings.find(binding => endpointId(binding) === endpointId(peer))
+  if (!peerBinding?.actions.includes(source ? 'write' : 'read')) return []
+  const peerPair = source ? 'import' : 'export'
+  const found = (copy?.[direction] ?? [])
+    .map(rootId => ({ environmentId: 'local', rootId }))
+    .filter(local => paired(peerBinding, peerPair, local))
+    .map(endpointId)
+  if (source || copy?.remoteDestination !== false) {
+    for (const binding of remote) {
+      if (paired(binding, ownPair, peer) && paired(peerBinding, peerPair, binding)) found.push(endpointId(binding))
+    }
+  }
+  return found.sort().slice(0, CANDIDATE_LIMIT)
 }
 
+const endpointId = ({ environmentId, rootId }: RemoteEndpointRef): string => `${environmentId}:${rootId}`
+
 function paired(
-  binding: DeploymentManifest['bindings'][number],
+  binding: RemoteBinding,
   direction: 'import' | 'export',
   peer: RemoteEndpointRef,
 ): boolean {
   return binding.transfers?.some(transfer => transfer.direction === direction
     && transfer.peer.environmentId === peer.environmentId
     && transfer.peer.rootId === peer.rootId) === true
+}
+
+/** Advisory local endpoints, narrowed by the same mode and cap as admission. */
+export function copyCandidateScope(
+  registry: Pick<MultiRootRegistry, 'list' | 'remoteToolPolicy'>,
+  session: RemoteOperationSession,
+  toolName: string,
+): CopyCandidateScope | undefined {
+  try {
+    const policy = registry.remoteToolPolicy(session, toolName)
+    if (policy === undefined) return undefined
+    const writable = policy.effectiveMode === 'workspace-write'
+    const source: string[] = []
+    const destination: string[] = []
+    if (process.platform !== 'win32') {
+      source.push('primary')
+      if (writable) destination.push('primary')
+      for (const root of registry.list(session.header.cwd)) {
+        const aliasId = root.aliasId
+        if (root.state !== 'available' || typeof aliasId !== 'string' || aliasId === '') continue
+        source.push(aliasId)
+        if (!policy.capped && effectiveRootAccess(root.access, policy.effectiveMode) === 'read-write') destination.push(aliasId)
+      }
+    }
+    return { source, destination, remoteDestination: writable && !policy.capped }
+  } catch {
+    return undefined
+  }
 }
 
 /**
@@ -95,27 +148,21 @@ function paired(
  * @param registry - the Registry (or a structural test double).
  * @param primaryRoot - the session workspace root.
  * @param requests - one request per candidate list needed.
+ * @param copy - local endpoints and remote write capability for copy hints.
  * @returns one candidate list per request, or undefined when unavailable.
  */
 export async function currentEndpointCandidates(
   registry: RemoteCandidateRegistry,
   primaryRoot: string,
   requests: readonly CandidateRequest[],
+  copy?: CopyCandidateScope,
 ): Promise<readonly (readonly string[])[] | undefined> {
   if (typeof registry.remoteList !== 'function') return undefined
-  let manifest: DeploymentManifest | undefined
-  try {
-    manifest = registry.remoteManifest
-  } catch {
-    // The snapshot read is a correction aid; an unavailable projection keeps
-    // the original refusal and its generic hint.
-    return undefined
-  }
-  if (manifest === undefined) return undefined
   const snapshot = await snapshotWithinTimeout(registry, primaryRoot)
   if (snapshot === undefined) return undefined
   try {
-    return requests.map(request => endpointCandidates(manifest, snapshot.grants, primaryRoot, request))
+    const manifest = registry.remoteManifest
+    return manifest === undefined ? undefined : requests.map(request => endpointCandidates(manifest, snapshot.grants, primaryRoot, request, copy))
   } catch {
     // Filtering runs on the failure path: any unexpected projection error must
     // leave the original refusal and its generic hint intact.

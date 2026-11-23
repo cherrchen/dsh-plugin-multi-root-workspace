@@ -104,6 +104,22 @@ describe('endpoint candidates', () => {
     expect(endpointCandidates(manifest, states, '/work/app', { direction: 'destination' })).toEqual([])
   })
 
+  it('requires a reciprocal remote pairing and a registered peer', () => {
+    const oneWay = manifestOf([BINDINGS[0]!, { ...BINDINGS[1]!, transfers: [] }])
+    const source = { direction: 'source', peer: { environmentId: 'device', rootId: 'out' } } as const
+    const destination = { direction: 'destination', peer: { environmentId: 'build', rootId: 'app' } } as const
+    expect(endpointCandidates(oneWay, grants, '/work/app', source)).toEqual([])
+    expect(endpointCandidates(oneWay, grants, '/work/app', destination)).toEqual([])
+    expect(endpointCandidates(manifest, [grants[0]!], '/work/app', source)).toEqual([])
+  })
+
+  it('only offers local destinations writable under the current copy policy', () => {
+    const destination = { direction: 'destination', peer: { environmentId: 'build', rootId: 'app' } } as const
+    const scope = { source: ['primary'], destination: [], remoteDestination: false }
+    expect(endpointCandidates(manifest, grants, '/work/app', destination, scope)).toEqual([])
+    expect(endpointCandidates(manifest, grants, '/work/app', destination, { ...scope, destination: ['primary'] })).toEqual(['local:primary'])
+  })
+
   it('bounds and sorts the candidates', () => {
     const many = Array.from({ length: 9 }, (_, index) => ({
       primary: '/work/app', environmentId: 'build', rootId: `root-${index}`, path: `/srv/root-${index}`,
@@ -190,8 +206,7 @@ describe('copy failure guidance', () => {
     expect(text.hint).toContain('device:out')
     expect(text.hint.length).toBeLessThanOrEqual(560)
     const paired = copyFailureGuidance('transfer-pair-not-allowed', 'failed', { ...COPY_CONTEXT, sourceCandidates: [], destinationCandidates: [] })
-    expect(paired.hint).toContain('export')
-    expect(paired.hint).toContain('import')
+    expect(paired.hint).toContain('Each remote endpoint must authorize its peer')
   })
 
   it('preserves uncertainty instead of recommending a blind retry', () => {
@@ -243,9 +258,16 @@ describe('exec failure guidance', () => {
   })
 
   it('names each termination cause', () => {
-    expect(execTerminationGuidance('timeout').message).toContain('timeoutMs')
-    expect(execTerminationGuidance('cancelled').message).toContain('cancelled')
-    expect(execTerminationGuidance('revoked').message).toContain('grant')
+    expect(execTerminationGuidance('timeout', true).message).toContain('timeoutMs')
+    expect(execTerminationGuidance('cancelled', true).message).toContain('cancelled')
+    expect(execTerminationGuidance('revoked', true).message).toContain('grant')
+  })
+
+  it.each(['timeout', 'cancelled', 'revoked'] as const)('preserves an unconfirmed scope after %s', cause => {
+    const text = execTerminationGuidance(cause, false)
+    expect(text.message).toContain('scope is unconfirmed')
+    expect(text.hint).toContain('Descendants may still be running')
+    expect(text.hint).toContain('before starting another command')
   })
 })
 

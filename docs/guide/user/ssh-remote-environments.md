@@ -100,9 +100,9 @@ Profile 就绪后，连接和绑定在 GUI 中配置，无需 root 权限、独�
 
 复制只处理单个普通文件，且目标必须不存在：目标以 0600 创建，不保留源文件的 mtime 与可执行位，从不覆盖。需要搬运多个文件时，先在已授权的根内打成归档（例如 `tar -cf dist/app.tar -C dist .`），再把归档当单文件复制，最后在目标端自行解包。
 
-`remote_bash` 的 stdout 与 stderr 默认各只预览 64 KiB；需要更多时在调用里传 `maxOutputBytes`，但它不会超过该连接保存的单流上限。结果里的 `totalBytes` 是命令实际写出的原始字节数，`droppedBytes` 是没进入预览的字节数；两者为 `null` 表示当前后端无法证明精确总数。大输出不要直接回到模型上下文：把输出重定向到已授权远端根内的文件（例如让 `remote_bash` 执行 `command > /srv/work/build.log 2>&1`），再用 `remote_bash` 分段读取（`sed -n '1,200p' …`、`tail -n 200 …`）或把该文件复制回本地。自动落盘与结果引用尚未接入工具结果。
+`remote_bash` 默认给 stdout 和 stderr 各 64 KiB 预览预算，JSON 转义也计入。可传 `maxOutputBytes` 调高预览，受连接部署上限约束。结果里的 `totalBytes` 是原始字节总数，`droppedBytes` 是未进入预览的原始字节数，无法精确确定的计数为 `null`。大输出可以重定向到已授权远端根内，例如通过 `remote_bash` 执行 `command > /srv/work/build.log 2>&1`，再分段查看（如 `sed -n '1,200p' …` 或 `tail -n 200 …`）或复制该文件。
 
-失败时结果带稳定的 `code`、`message` 与 `hint`；`endpoint-not-registered` 等端点错误会附 `environmentId:rootId` 候选（每个方向最多 6 个），候选只用于修正参数，重试仍会重新准入。`unknown` 或 `admitted-may-start` 表示结果不确定：`unknown` 先按 `reconcileId` 在远端核对状态，`admitted-may-start` 先确认命令是否真的启动，都不要直接重跑。
+失败结果包含稳定的 `code`、简短的 `message` 和 `hint`。端点类错误可列出与对端匹配的候选，包含可用的本地根，每个方向最多 6 个。`unknown`、`admitted-may-start` 或 `scope: "unconfirmed"` 都需要先确认远端状态再决定是否重试。`unknown` 的 `reconcileId` 可用于核对本次操作。
 
 ## 停用 SSH 与故障排查
 

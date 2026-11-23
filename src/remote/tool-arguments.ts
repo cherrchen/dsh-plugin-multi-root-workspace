@@ -142,7 +142,7 @@ export const REMOTE_BASH_PARAMETERS = {
     maxOutputBytes: {
       type: 'integer',
       minimum: 1,
-      description: 'Per-stream preview cap in bytes. Defaults to 64 KiB and never exceeds the deployment limit; raise it explicitly to see more.',
+      description: 'Per-stream preview cap in bytes, including JSON escaping. Defaults to 64 KiB and is bounded by the deployment limit.',
     },
   },
   required: ['environmentId', 'rootId', 'command', 'timeoutMs'],

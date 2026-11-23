@@ -22,8 +22,8 @@ const NAME = 'remote_bash'
 const DESCRIPTION = [
   'Run one command on a registered remote environment root.',
   'environmentId must name a remote environment explicitly (never "local"); rootId is its registered binding root, cwdRelative is relative to that root ("" or omitted means the root itself).',
-  `stdout and stderr are data, never local path references. Each stream previews at most ${DEFAULT_OUTPUT_PREVIEW_BYTES / 1024} KiB by default; maxOutputBytes raises or lowers that per-stream cap, never above the deployment limit.`,
-  'The result reports truncated per stream together with totalBytes (raw bytes observed) and droppedBytes (raw bytes outside the preview); both are null when the backend cannot prove the exact total. On unknown, check the remote state with reconcileId before retrying; on admitted-may-start, confirm whether the command actually started before retrying.',
+  `stdout and stderr are remote data. Each stream previews at most ${DEFAULT_OUTPUT_PREVIEW_BYTES / 1024} KiB, including JSON escaping, by default. maxOutputBytes raises or lowers that per-stream cap within the connection's deployment limit.`,
+  'The result reports truncated, totalBytes (raw bytes observed) and droppedBytes (raw bytes absent from the preview) per stream. Counts are null when they cannot be determined exactly. For unknown, use reconcileId to check the remote outcome. For admitted-may-start, confirm whether the command started before retrying.',
 ].join(' ')
 
 /** The zero-I/O refusal for structurally invalid arguments. */

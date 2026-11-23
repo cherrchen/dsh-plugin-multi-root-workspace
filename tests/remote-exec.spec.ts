@@ -14,6 +14,7 @@ import { RemoteAdmissionError } from '../src/remote/contract.ts'
 import { handlePersonalEndpoint } from '../src/remote/personal-endpoints.ts'
 import { loadPersonalConfig, savePersonalConfig, type PersonalConfig } from '../src/remote/personal/config.ts'
 import { remoteBashTool } from '../src/remote/exec-tool.ts'
+import { EXEC_DEFAULTS } from '../src/client/ssh-draft.ts'
 import {
   RemoteConnectionLost,
   runRemoteCommand,
@@ -489,7 +490,7 @@ describe.skipIf(process.platform === 'win32')('the two-admission remote command 
       stdout: 'a'.repeat(63),
       truncated: { stdout: true, stderr: false },
       totalBytes: { stdout: 65, stderr: null },
-      droppedBytes: { stdout: 1, stderr: null },
+      droppedBytes: { stdout: 2, stderr: null },
     })
     expect('stdout' in result && result.stdout).not.toContain('\uFFFD')
   })
@@ -528,7 +529,7 @@ describe.skipIf(process.platform === 'win32')('the two-admission remote command 
 
   it('lets maxOutputBytes raise the preview up to the deployment limit and clamps beyond it', async () => {
     const stack = await mount()
-    const raised = fakeBackend({ deployment: { ...DEPLOYMENT, stdoutLimit: 1_048_576, stderrLimit: 1_048_576 } })
+    const raised = fakeBackend({ deployment: EXEC_DEFAULTS })
     const pending = run(stack, raised.backend, { maxOutputBytes: 131_072 })
     await waitHandles(raised.state)
     raised.state.handles[0]!.emit('w'.repeat(100_000), false, { offset: 0, totalBytes: 100_000, lossy: false })
@@ -616,10 +617,10 @@ describe.skipIf(process.platform === 'win32')('the two-admission remote command 
       status: 'scope-exited',
       termination: 'cancelled',
       message: expect.stringContaining('cancelled'),
-      hint: expect.stringContaining('remote process'),
+      hint: expect.stringContaining('effects of the interrupted command'),
     })
     expect(handle.terminateCalls).toBe(1)
-    const timed = fakeBackend()
+    const timed = fakeBackend({ deployment: { ...DEPLOYMENT, terminateGraceMs: 1_000 } })
     const waiting = run(stack, timed.backend, { timeoutMs: 20 })
     await waitHandles(timed.state)
     for (let i = 0; i < 400 && timed.state.handles[0]!.terminateCalls === 0; i++) await new Promise(resolve => setTimeout(resolve, 5))
@@ -630,7 +631,7 @@ describe.skipIf(process.platform === 'win32')('the two-admission remote command 
       scope: 'unconfirmed',
       termination: 'timeout',
       message: expect.stringContaining('timeoutMs'),
-      hint: expect.stringContaining('timeoutMs'),
+      hint: expect.stringContaining('Descendants may still be running'),
     })
     expect(timed.state.handles[0]!.terminateCalls).toBe(1)
   })
@@ -715,7 +716,7 @@ describe.skipIf(process.platform === 'win32')('remote_bash through the real tool
   }
   const call = (ctx: RegistryStack['ctx'], agent: Agent, args: object) => executeTool(ctx, {
     callId: 'g3-call', name: 'remote_bash', args, signal: new AbortController().signal, agent,
-  }) as Promise<{ isError?: boolean; error?: { message?: string }; value?: Record<string, unknown> }>
+  }) as Promise<{ isError?: boolean; error?: { message?: string }; value?: Record<string, unknown>; content?: { text: string }[] }>
 
   it('errors when the tool is not registered', async () => {
     const { stack, agent } = await toolWorld()
@@ -744,7 +745,7 @@ describe.skipIf(process.platform === 'win32')('remote_bash through the real tool
     expect(state.spawnCalls).toHaveLength(0)
   })
 
-  it('applies the 64 KiB preview default and maxOutputBytes through dispatch', async () => {
+  it('applies the 64 KiB preview default through dispatch', async () => {
     const { stack, agent } = await toolWorld()
     const deployment = { ...DEPLOYMENT, stdoutLimit: 1_048_576, stderrLimit: 1_048_576 }
     const { backend, state } = fakeBackend({ deployment })
@@ -763,6 +764,33 @@ describe.skipIf(process.platform === 'win32')('remote_bash through the real tool
       droppedBytes: { stdout: 100_000 - 65_536, stderr: null },
     })
     expect(String(outcome.value?.stdout)).toHaveLength(65_536)
+  })
+
+  it('bounds the JSON sent to the model when both streams need escaping', async () => {
+    const { stack, agent } = await toolWorld()
+    const { backend, state } = fakeBackend({ deployment: EXEC_DEFAULTS })
+    await stack.ctx.plugin({
+      name: 'g3-remote-tool', inject: ['tools'],
+      apply(fiber) { fiber.tools.register(remoteBashTool({ registry: stack.registry, backendFor: () => backend }) as never) },
+    })
+    const pending = call(stack.ctx, agent, { environmentId: 'build-01', rootId: 'app', command: 'test', timeoutMs: 5_000 })
+    await waitHandles(state)
+    const raw = '\0'.repeat(65_536)
+    const meta = { offset: 0, totalBytes: raw.length, lossy: false }
+    state.handles[0]!.emit(raw, false, meta)
+    state.handles[0]!.emit(raw, true, meta)
+    state.handles[0]!.finish()
+    const outcome = await pending
+    const previewBytes = Math.floor(65_536 / 6)
+    expect(outcome.value).toMatchObject({
+      stdout: raw.slice(0, previewBytes), stderr: raw.slice(0, previewBytes),
+      truncated: { stdout: true, stderr: true },
+      totalBytes: { stdout: raw.length, stderr: raw.length },
+      droppedBytes: { stdout: raw.length - previewBytes, stderr: raw.length - previewBytes },
+    })
+    const rendered = outcome.content![0]!.text
+    expect(JSON.parse(rendered)).toEqual(outcome.value)
+    expect(Buffer.byteLength(rendered)).toBeLessThan(132 * 1024)
   })
 
   it('uses the dispatch session and tool name for admission', async () => {

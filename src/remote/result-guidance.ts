@@ -175,9 +175,11 @@ export function copyFailureGuidance(
     case 'action-not-allowed':
       return guidance('A binding does not allow the action this copy direction needs.', `The source needs "read" and the destination needs "write". ${endpointHints(context)}`)
     case 'transfer-pair-not-allowed':
-      return guidance('The source binding does not pair with the destination for transfers.', `The source must export to the destination root and the destination must import from the source root. ${endpointHints(context)}`)
+      return guidance('The endpoints are not paired for transfers in this direction.', `Each remote endpoint must authorize its peer for this direction. ${endpointHints(context)}`)
     case 'local-root-unavailable':
-      return guidance('A local endpoint does not name an available registered root.', localRootHint(context))
+      return guidance('A local endpoint does not name an available registered root.', context.sourceCandidates?.length || context.destinationCandidates?.length
+        ? `${endpointHints(context)} ${localRootHint(context)}`
+        : localRootHint(context))
     case 'local-authority-unavailable':
       return guidance('A follower Host cannot read this local endpoint without an owner-admitted record.', 'Retry from the Host that owns the registry authority.')
     case 'admission-changed':
@@ -348,15 +350,28 @@ export function execScopeUnconfirmedGuidance(): Guidance {
 /**
  * Guidance for a command that ran and was then terminated.
  * @param termination - why the command was terminated.
+ * @param scopeConfirmed - whether all managed descendants are confirmed gone.
  * @returns the bounded message and hint.
  */
-export function execTerminationGuidance(termination: 'timeout' | 'cancelled' | 'revoked'): Guidance {
+export function execTerminationGuidance(termination: 'timeout' | 'cancelled' | 'revoked', scopeConfirmed: boolean): Guidance {
+  const reason = {
+    timeout: 'timeoutMs elapsed',
+    cancelled: 'the call was cancelled',
+    revoked: 'the remote grant changed',
+  }[termination]
+  if (!scopeConfirmed) {
+    return guidance(
+      `The direct process exited after termination was requested because ${reason}. Its process scope is unconfirmed.`,
+      'Descendants may still be running on the remote host. Confirm the process scope has exited before starting another command.',
+    )
+  }
+  const message = `The command exited after termination was requested because ${reason}.`
   switch (termination) {
     case 'timeout':
-      return guidance('The command was terminated because timeoutMs elapsed.', 'Increase timeoutMs for longer work, or run it as a background job outside remote_bash.')
+      return guidance(message, 'For longer work, use a timeoutMs within the deployment limit that allows the command to finish.')
     case 'cancelled':
-      return guidance('The command was terminated because the call was cancelled.', 'Confirm the remote process is gone before starting another command.')
+      return guidance(message, 'Check any effects of the interrupted command before repeating it.')
     case 'revoked':
-      return guidance('The command was terminated because its remote grant changed.', 'Re-register or re-admit the endpoint before starting another command.')
+      return guidance(message, 'Check the workspace grant and any effects of the interrupted command before repeating it.')
   }
 }

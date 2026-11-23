@@ -87,12 +87,12 @@ describe('collected output coordinates passed to the sink', () => {
     expect(adapter.chunks[0]!.meta).toEqual({ lossy: true, totalBytes: 6, offset: 3 })
   })
 
-  it('strips a boundary replacement and marks the window approximate', async () => {
-    const adapter = runAdapter({ text: '\uFFFDdef', nextOffset: 6, lossy: true })
+  it.each(['\uFFFDdef', 'def\uFFFD'])('preserves a lossy window with %s and marks its byte mapping approximate', async text => {
+    const adapter = runAdapter({ text, nextOffset: 20, lossy: true })
     await adapter.exited
-    expect(adapter.chunks[0]!.meta).toMatchObject({ lossy: true, totalBytes: 6, approximate: true })
+    expect(adapter.chunks[0]!.meta).toMatchObject({ lossy: true, totalBytes: 20, approximate: true })
     expect((adapter.chunks[0]!.meta as { offset?: number }).offset).toBeUndefined()
-    expect(Buffer.from(adapter.chunks[0]!.chunk).toString()).toBe('def')
+    expect(Buffer.from(adapter.chunks[0]!.chunk).toString()).toBe(text)
   })
 
   it('omits coordinates for an older collector that returns text only', async () => {

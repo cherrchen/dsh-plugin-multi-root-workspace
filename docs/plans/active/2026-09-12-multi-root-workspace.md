@@ -2297,7 +2297,7 @@ macOS arm64、DSH `0.2.2-rc.5` 验证：全量测试 2509 通过、133 跳过。
 
 ## 个人 SSH 工具硬化（2026-11-23）
 
-分支 `feat/harden-remote-tool`（基于 `v0.1.24-beta.4`，Draft PR [#78](https://github.com/cherrchen/dsh-plugin-multi-root-workspace/pull/78)）硬化个人 SSH 的 `remote_copy` 与 `remote_bash`：两个复制端点使用同一参数定义（只有省略 `environmentId` 才取 `local`，`null`/空串在 execute 边界报参数错误），广告 schema 与实际校验同源，结构错误以带字段位置的 `invalid-arguments` 在 Registry 准入与 SSH/SFTP I/O 之前结束；失败结果在保留既有 `status`/`code`/`stage`/`staging`/`operationId`/`reconcileId` 语义的同时补充由稳定错误码与安全字段生成的有界 `message`/`hint`，端点类错误附有界 `environmentId:rootId` 候选（读 Registry 快照、按登记状态/方向/动作/配对过滤，不建连，快照不可用时保留原错误与通用提示）；`remote_bash` 每流默认只预览 64 KiB，新增 `maxOutputBytes`（受部署上限夹取），结果逐流报告原始字节的 `totalBytes`/`droppedBytes`，总数或窗口不可证明时给出 `null`（SSH 适配器传递上游坐标，上游已截断的边界伪字符被去除并标记近似）。传输属性（单普通文件、0600 创建、不保留 mtime/执行位、目标存在即拒绝）与后续扩展（元数据保留、显式覆盖与 `expectSha256` 并发条件替换、目录递归/解包）已写入中英指南与技术参考。
+分支 `feat/harden-remote-tool` 基于 `v0.1.24-beta.4`，Draft PR [#78](https://github.com/cherrchen/dsh-plugin-multi-root-workspace/pull/78) 提供个人 SSH 的参数校验、端点纠错与命令输出预算。评审修复涵盖双端配对和本地候选、可调输出、JSON 转义预算、UTF-8 计数与原文保留，以及进程范围未确认提示。
 
 范围、设计、退出验收与本机证据见[计划](./2026-11-23-remote-tool-hardening.md)；语义见 [SSH 参考](../../reference/ssh-remote-environments.md#模型工具参数结果与输出预算) 与[控制面参考](../../reference/multi-environment-control-plane.md#sftp-传输g2三个方向单文件无用户入口)。
 

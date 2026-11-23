@@ -155,7 +155,7 @@ GUI 入口有两处：
 ```jsonc
 // exec（新草稿；已保存的连接保留它自己的上限）
 { "shell": ["/bin/sh", "-c"], "env": { "PATH": "/usr/local/bin:/usr/bin:/bin" },
-  "maxTimeoutMs": 600000, "stdoutLimit": 65536, "stderrLimit": 65536, "terminateGraceMs": 2000 }
+  "maxTimeoutMs": 600000, "stdoutLimit": 1048576, "stderrLimit": 262144, "terminateGraceMs": 2000 }
 // transfer
 { "maxBytes": 268435456, "timeoutMs": 600000 }
 ```
@@ -174,9 +174,11 @@ exec 与 transfer 独立授权：执行前用 helper 的只读受限 stat/realpa
 
 **结果文案。** 两个工具保留既有 `status`/`code`/`stage`/`staging`/`operationId`/`reconcileId` 语义，并为可诊断的失败增加有界 `message` 与 `hint`：文案只由稳定错误码与安全字段（环境/根 ID、相对路径、已准入的 displayPath、候选列表）生成，不包含捕获到的异常文本、SSH 诊断原文或凭据路径。`invalid-cwd` 的提示说明 `cwdRelative` 为空表示已准入根目录（附 displayPath），否则必须是规范化相对路径；`destination-parent-missing` 指明缺失的是目标父目录；`local-root-unavailable` 说明 `primary` 与 `aliasId` 的写法。
 
-**端点候选。** `endpoint-not-registered`、`endpoint-withheld`、`endpoint-revoked`、`action-not-allowed` 与 `transfer-pair-not-allowed` 的提示附候选（每个方向最多 6 个，一次提示最多 12 个 `environmentId:rootId`）。候选读取当前 Session 主根对应的 Registry 快照（`remoteList`）与当前清单，按实际登记状态、方向所需的 `read`/`write`/`exec` 动作以及已知对端配对筛选；读取不建立任何远端连接，也不消耗准入。快照不可用（控制面未就绪、读取超时或失败）时仍返回原错误码与通用提示。候选只用于纠错，每次重试仍走正式准入。`unknown` 与 `admitted-may-start` 不给出盲重试建议：前者的提示要求先按 `reconcileId` 核对远端状态，后者没有 `reconcileId`，提示先确认命令是否真的启动。
+**端点候选。** 端点类错误可以附上每个方向最多 6 个 `environmentId:rootId`。候选读取当前 Session 主根对应的 Registry 快照（`remoteList`）与当前清单，筛选已登记且允许所需动作的远端。复制候选还要符合会话模式、工具上限与对端配对。两个远端之间必须同时有源的 `export` 和目的的 `import`。本地端可以是 `local:primary` 或可用的本地附加根，须被对应远端绑定列为对端，本地目的端须可写。读取不建连，也不消耗准入。快照不可用时仍返回原错误码与通用提示，每次重试走正式准入。
 
-**输出预算。** `remote_bash` 的 stdout 与 stderr 默认各预览最多 64 KiB（`DEFAULT_OUTPUT_PREVIEW_BYTES`）。该默认在工具层应用，因此已保存 1 MiB `exec` 上限的旧连接也得到短结果；`maxOutputBytes` 可显式放大单流上限，但始终被该流的部署上限（`exec.stdoutLimit`/`exec.stderrLimit`）夹取。新 SSH 草稿把这两个部署上限也写为该默认值；已保存连接保持原配置。结果除 `stdout`/`stderr`/`truncated` 外还逐流报告：`totalBytes` 是后端观察到的原始字节数，无法证明精确总数（例如适配器未提供坐标）时为 `null`；`droppedBytes` 是未包含在预览中的原始字节数，`totalBytes` 未知时为 `null`。SSH 适配器把上游采集器的整体坐标（`nextOffset`）与 `lossy`（上游已丢弃开头）传入 sink；上游已截断时预览从保留窗口开始，`truncated` 为真，`droppedBytes` 含被上游丢弃的部分。窗口边界落在多字节字符中间时，适配器去掉该 U+FFFD 伪字符并标记窗口为近似：`totalBytes` 仍是精确总数，`droppedBytes` 为 `null`（该窗口不是原始字节的逐字节映射，不做猜测）。工具层自己的预览截断只发生在 UTF-8 边界之外，不产生替换字符；`droppedBytes` 按保留窗口的原始字节计，窗口末尾被文本省略的不完整字符仍计入窗口。大输出请重定向到已授权远端根内的文件再分段读取或复制，不要在结果里追逐完整输出；自动落盘与结果引用属于后续设计，需先定容量、清理与读取准入。
+**输出预算。** `remote_bash` 默认给 stdout 和 stderr 各 64 KiB 预览预算，原始窗口和 JSON 字符串内容分别受同一上限约束。默认最多传给模型 128 KiB 的两路 JSON 输出内容，另有结果字段开销。`maxOutputBytes` 可调节单流预算，受到该流的部署上限约束。新个人 SSH 连接保留 stdout 1 MiB、stderr 256 KiB 的部署上限，已保存连接沿用原配置。
+
+结果逐流报告 `truncated`、`totalBytes` 与 `droppedBytes`。`totalBytes` 是后端能证明的原始字节总数。`droppedBytes` 从该总数扣除实际进入预览的原始字节数，包含上游丢头、UTF-8 尾部舍弃及 JSON 预算裁剪。SSH 采集窗口含 U+FFFD 时，适配器保留上游文本，精确总数仍可返回，无法核实的丢弃量为 `null`。采集器未提供坐标时两项计数均为 `null`。大输出的处理示例见[用户指南](../guide/user/ssh-remote-environments.md#使用远端工具)。
 
 ## 在飞命令撤权与清理
 

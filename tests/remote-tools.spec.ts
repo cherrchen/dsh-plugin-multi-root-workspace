@@ -299,6 +299,25 @@ describe.skipIf(process.platform === 'win32')('remote tool arguments and endpoin
     expect(refused.hint).toContain('workspace topology')
   })
 
+  it('suggests the paired local alias when the requested local destination is wrong', async () => {
+    world = await mountRemoteTools(fixture, { localRootIds: ['docs'] })
+    await registerRemote(world, 'build', 'app')
+    await registerLocalPeer(world, fixture.outside, 'docs')
+    const remote = world.remotes.get('build')!
+    remote.seed('/srv/root/dist/down.bin', 'download-bytes')
+    const from = { environmentId: 'build', rootId: 'app', relativePath: 'dist/down.bin' }
+    const calls = remote.sftpCalls.length
+    const refused = copy(await world.call('remote_copy', { from, to: { rootId: 'primary', relativePath: 'down.bin' } }))
+    expect(refused).toMatchObject({ status: 'failed', code: 'transfer-pair-not-allowed' })
+    expect(refused.hint).toContain('destination direction: local:docs')
+    expect(refused.hint).not.toContain('local:primary')
+    expect(remote.sftpCalls).toHaveLength(calls)
+
+    const answer = copy(await world.call('remote_copy', { from, to: { rootId: 'docs', relativePath: 'down.bin' } }))
+    expect(answer).toMatchObject({ status: 'committed' })
+    expect(readFileSync(join(fixture.outside, 'down.bin'), 'utf8')).toBe('download-bytes')
+  })
+
   it('keeps the original refusal with a generic hint when the snapshot is unavailable', async () => {
     world = await mountRemoteTools(fixture)
     await registerRemote(world, 'build', 'app')

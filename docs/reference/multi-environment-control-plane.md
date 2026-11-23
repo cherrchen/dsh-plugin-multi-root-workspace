@@ -102,7 +102,7 @@ v1 线协议不变。远端请求走同一介质派生的**第二**监听端点 
 
 1. **准入 A**：`purpose: exec` 的远端准入；校验后端存在（`backend-unavailable`）、`cwdRelative`（空或相对 POSIX，无 `.`/`..`/空段/NUL/反斜杠，`invalid-cwd`）与时限（`invalid-timeout`）；后端 `verifyCwd` 以只读探针复核活动根身份，与准入携带的 `verifiedTarget` 不符即 `endpoint-redirected`；以 `workspace-write`、端点 displayPath 和真实 sessionId 调用 `confine`，非 `full` 为 `sandbox-unverified`。
 2. **准入 B**：启动前再次探测远端根，再以同一请求重新准入，比对 epoch、授权指纹、端点身份（displayPath、bindingDigest、verifiedTarget）、有效模式与后端代次，任一不同为 `admission-changed` 并丢弃 argv；`spawn` 只在 B 的回调内调用。A、B 之间的撤权使 B 拒绝且不调用 `spawn`。根身份确认变化时将该登记代次持久标记为 withheld，显式重新登记后才可使用。子目录重定向仅拒绝本次请求。
-3. **结果**：`not-started{code, message?, hint?}`；`admitted-may-start`（spawn 抛错或 `started` 失败，附不确定性提示）；`exited`（观察到直接退出、托管范围未确认）与 `scope-exited`（`waitForExit` 确认）；`unknown{reconcileId, message?, hint?}`（启动后断线）。超时与取消各只 `terminate()` 一次并标 `termination` 与有界文案；从不重连或重跑。输出按流预算截断并逐流报告 `truncated`、`totalBytes`（原始字节数，后端无法证明时为 `null`）与 `droppedBytes`（未进入预览的原始字节数，`totalBytes` 未知时为 `null`）。工具层默认每流预览 64 KiB，`maxOutputBytes` 可显式放大但被该流的部署上限夹取；新 SSH 草稿的部署上限也写为 64 KiB，已保存连接保留原配置。
+3. **结果**：`not-started{code, message?, hint?}` 表示命令未启动。`admitted-may-start` 表示启动未确认。`exited` 只确认直接进程退出，`scope-exited` 由 `waitForExit` 确认整个托管范围退出。`unknown{reconcileId, message?, hint?}` 表示远端结果未确认。超时、取消或撤权各只发起一次 `terminate()` 请求并标记 `termination`。直接进程退出后若托管范围仍未确认，提示会要求先核对后代进程状态。命令不会自动重连或重跑。输出字段见[个人 SSH 工具输出预算](ssh-remote-environments.md#模型工具参数结果与输出预算)。
 
 SSH 兼容门禁（`classifySshCapability`、`SUPPORTED_SSH_RELEASES`、宿主锚定的 `loadHostSshPackages`）的检查器落点见[基线参考](./multi-environment-baseline.md#ssh-兼容门禁落地清单)。
 

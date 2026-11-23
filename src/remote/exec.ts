@@ -115,7 +115,7 @@ export type RemoteCommandResult =
       truncated: { stdout: boolean; stderr: boolean }
       /** Raw bytes observed per stream; null when the backend cannot prove the total. */
       totalBytes: { stdout: number | null; stderr: number | null }
-      /** Raw bytes not included in the preview; null when totalBytes is unknown. */
+      /** Raw bytes absent from the preview; null when the byte mapping or total is unproven. */
       droppedBytes: { stdout: number | null; stderr: number | null }
       termination?: 'timeout' | 'cancelled' | 'revoked'
     })
@@ -370,17 +370,19 @@ export async function runRemoteCommand(
     }
     const exit = await Promise.race([exited, deadline.promise])
     const confirmed = await Promise.race([handle.waitForExit(prep.deployment.terminateGraceMs), deadline.promise])
+    const out = stdout.preview()
+    const err = stderr.preview()
     return {
       ...base, operationId, status: confirmed ? 'scope-exited' : 'exited',
       scope: confirmed ? 'confirmed' : 'unconfirmed',
       exitCode: exit.exitCode, signal: exit.signal,
-      stdout: stdout.text(), stderr: stderr.text(),
-      truncated: { stdout: stdout.truncated, stderr: stderr.truncated },
-      totalBytes: { stdout: stdout.totalBytes, stderr: stderr.totalBytes },
-      droppedBytes: { stdout: stdout.droppedBytes, stderr: stderr.droppedBytes },
+      stdout: out.text, stderr: err.text,
+      truncated: { stdout: out.truncated, stderr: err.truncated },
+      totalBytes: { stdout: out.totalBytes, stderr: err.totalBytes },
+      droppedBytes: { stdout: out.droppedBytes, stderr: err.droppedBytes },
       ...(termination === undefined
         ? confirmed ? {} : { ...execScopeUnconfirmedGuidance() }
-        : { termination, ...execTerminationGuidance(termination) }),
+        : { termination, ...execTerminationGuidance(termination, confirmed) }),
     }
   } catch (error) {
     if (error instanceof RemoteConnectionLost) {
@@ -402,52 +404,56 @@ export async function runRemoteCommand(
   }
 }
 
-interface Sink {
-  readonly append: (chunk: Uint8Array, meta?: OutputChunkMeta) => void
-  readonly text: () => string
+interface OutputPreview {
+  readonly text: string
   readonly truncated: boolean
-  /** Raw bytes observed on the stream; null when the backend could not prove them. */
   readonly totalBytes: number | null
-  /** Raw bytes outside the preview; null when the total is unknown. */
   readonly droppedBytes: number | null
 }
 
+interface Sink {
+  append(chunk: Uint8Array, meta?: OutputChunkMeta): void
+  preview(): OutputPreview
+}
+
+/** Keep complete code points within the byte budget of a JSON string's contents. */
+function clipJsonText(text: string, limit: number): string {
+  if (Buffer.byteLength(JSON.stringify(text)) - 2 <= limit) return text
+  let end = 0
+  let remaining = limit
+  for (const character of text) {
+    const point = character.codePointAt(0)!
+    let width = Buffer.byteLength(character)
+    if (point === 0x22 || point === 0x5c) width = 2
+    else if (point < 0x20) width = point >= 8 && point <= 13 && point !== 11 ? 2 : 6
+    if (width > remaining) break
+    remaining -= width
+    end += character.length
+  }
+  return text.slice(0, end)
+}
+
 /**
- * One bounded byte sink: appends until the limit while keeping whole-stream
- * coordinates. `totalBytes`/`droppedBytes` are defined on RAW bytes; a
- * backend that omits coordinates makes both explicitly null. A truncated
- * UTF-8 tail is withheld instead of decoded into a replacement character.
+ * Apply the same stream budget to the raw prefix and its JSON representation.
+ * Whole-stream coordinates let the final preview account for both cuts.
  */
 function createSink(limit: number): Sink {
   const chunks: Uint8Array[] = []
   let size = 0
   let over = false
   let headDropped = false
-  let total: number | undefined
-  let totalKnown = false
+  let total: number | null = null
   let exactWindow = true
   let first = true
-  const truncated = (): boolean => over || headDropped || (totalKnown && total !== undefined && total > size)
   return {
-    get truncated() { return truncated() },
-    get totalBytes() { return totalKnown ? total ?? null : null },
-    get droppedBytes() {
-      // Without a provable total or a byte-faithful window the dropped count is
-      // explicitly unknown; a boundary-cut preview must not guess it.
-      if (!totalKnown || !exactWindow || total === undefined) return null
-      return Math.max(0, total - size)
-    },
     append: (chunk, meta) => {
       if (meta === undefined) {
+        total = null
         exactWindow = false
       } else {
         if (first && (meta.lossy || (meta.offset !== undefined && meta.offset > 0))) headDropped = true
-        if (typeof meta.totalBytes === 'number' && Number.isInteger(meta.totalBytes) && meta.totalBytes >= 0) {
-          total = meta.totalBytes
-          totalKnown = true
-        } else {
-          totalKnown = false
-        }
+        total = typeof meta.totalBytes === 'number' && Number.isSafeInteger(meta.totalBytes) && meta.totalBytes >= 0
+          ? meta.totalBytes : null
         if (meta.approximate === true || meta.offset === undefined) exactWindow = false
       }
       first = false
@@ -456,12 +462,27 @@ function createSink(limit: number): Sink {
       const prefix = chunk.subarray(0, remaining)
       if (prefix.byteLength > 0) { chunks.push(prefix); size += prefix.byteLength }
     },
-    text: () => {
+    preview: () => {
       const whole = new Uint8Array(size)
       let offset = 0
       for (const chunk of chunks) { whole.set(chunk, offset); offset += chunk.byteLength }
       // Do not synthesize a replacement character for a truncated UTF-8 tail.
-      return new TextDecoder().decode(whole, { stream: truncated() })
+      // A lossy head alone says nothing about whether the end is incomplete.
+      let decoded: string
+      let byteFaithful = exactWindow
+      try {
+        decoded = new TextDecoder('utf-8', { fatal: true, ignoreBOM: true }).decode(whole, { stream: over })
+      } catch {
+        decoded = new TextDecoder('utf-8', { ignoreBOM: true }).decode(whole, { stream: over })
+        byteFaithful = false
+      }
+      const text = clipJsonText(decoded, limit)
+      return {
+        text,
+        truncated: over || headDropped || (total !== null && total > size) || text.length < decoded.length,
+        totalBytes: total,
+        droppedBytes: byteFaithful && total !== null ? Math.max(0, total - Buffer.byteLength(text)) : null,
+      }
     },
   }
 }

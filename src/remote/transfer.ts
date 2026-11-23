@@ -51,7 +51,7 @@ import {
   type CopyEndpointArguments,
 } from './tool-arguments.ts'
 import { argumentFailureGuidance, copyFailureGuidance, type CopyGuidanceContext } from './result-guidance.ts'
-import { currentEndpointCandidates, localRootCandidates } from './endpoint-candidates.ts'
+import { copyCandidateScope, currentEndpointCandidates, localRootCandidates } from './endpoint-candidates.ts'
 
 const NAME = 'remote_copy'
 const CHUNK = 64 * 1024
@@ -1028,6 +1028,7 @@ const ENDPOINT_FAILURE_CODES = new Set([
   'endpoint-revoked',
   'action-not-allowed',
   'transfer-pair-not-allowed',
+  'local-root-unavailable',
 ])
 
 const endpointLabel = (endpoint: CopyEndpointArguments): string => {
@@ -1072,14 +1073,17 @@ function invalidCopyArguments(args: unknown, issues: readonly ArgumentIssue[]): 
 async function enrichCopyCandidates(
   registry: MultiRootRegistry,
   request: RemoteCopyRequest,
+  toolName: string,
   guidance: CopyGuidanceContext,
   code: string,
 ): Promise<void> {
   if (!ENDPOINT_FAILURE_CODES.has(code)) return
+  const scope = copyCandidateScope(registry, request.session, toolName)
+  if (scope === undefined) return
   const lists = await currentEndpointCandidates(registry, request.session.header.cwd, [
     { direction: 'source', peer: { environmentId: request.to.environmentId, rootId: request.to.rootId } },
     { direction: 'destination', peer: { environmentId: request.from.environmentId, rootId: request.from.rootId } },
-  ])
+  ], scope)
   if (lists === undefined) return
   const [source, destination] = lists
   if (source !== undefined) guidance.sourceCandidates = source
@@ -1128,7 +1132,7 @@ export async function runRemoteCopy(
   try { prepared = await io.run(() => admit(registry, request, toolName)) }
   catch (error) {
     const code = codeOf(error)
-    await enrichCopyCandidates(registry, request, guidance, code)
+    await enrichCopyCandidates(registry, request, toolName, guidance, code)
     return fail(code, 'admission')
   }
   operationId = prepared.operationId

@@ -1,15 +1,13 @@
 /**
- * Remote command output budgets shared by the tool layer, the personal SSH
- * draft defaults and the unpublished broker adapter. One value caps one
- * stream's preview; it never splits a combined budget across stdout+stderr.
+ * Remote command preview budgets shared by the tool layer and the unpublished
+ * broker adapter's fallback.
  *
  * @module @dsh-electron/dsh-plugin-multi-root-workspace/remote-output-budget
  */
 
 /**
  * Default bytes of stdout and of stderr a `remote_bash` result previews.
- * New SSH connections use it as their declared per-stream limit; an existing
- * deployment limit above it still bounds an explicit `maxOutputBytes`.
+ * The connection's deployment limit also bounds an explicit `maxOutputBytes`.
  */
 export const DEFAULT_OUTPUT_PREVIEW_BYTES = 64 * 1024
 
