@@ -473,6 +473,8 @@ export const en = {
   'ssh.installPhase.installing': "Installing SSH dependencies…",
   'ssh.installPhase.restarting': "Restarting the DSH Host…",
   'ssh.installPhase.checking': "Rechecking dependencies…",
+  'ssh.installPhase.ready': "The launcher reports the dependencies are ready; rechecking…",
+  'ssh.installPhase.restart': "The packages are installed but the Host is not restarted. Restart the same profile, then recheck.",
   'ssh.installPhase.done': "Installed. The restarted Host is checking the four SSH packages.",
   'ssh.installPhase.failed': "Install failed: {message}",
   'ssh.copyInstallCommand': "Copy install command",

@@ -473,6 +473,8 @@ export const ru = {
   'ssh.installPhase.installing': "Установка зависимостей SSH…",
   'ssh.installPhase.restarting': "Перезапуск Host DSH…",
   'ssh.installPhase.checking': "Повторная проверка зависимостей…",
+  'ssh.installPhase.ready': "Запускатель сообщает, что зависимости готовы; повторная проверка…",
+  'ssh.installPhase.restart': "Пакеты установлены, но Host не перезапущен. Перезапустите тот же профиль и проверьте снова.",
   'ssh.installPhase.done': "Установлено. Перезапущенный Host проверяет четыре пакета SSH.",
   'ssh.installPhase.failed': "Не удалось установить: {message}",
   'ssh.copyInstallCommand': "Скопировать команду установки",

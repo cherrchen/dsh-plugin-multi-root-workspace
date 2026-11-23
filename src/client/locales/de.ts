@@ -473,6 +473,8 @@ export const de = {
   'ssh.installPhase.installing': "SSH-Abhängigkeiten werden installiert…",
   'ssh.installPhase.restarting': "DSH-Host wird neu gestartet…",
   'ssh.installPhase.checking': "Abhängigkeiten werden erneut geprüft…",
+  'ssh.installPhase.ready': "Der Launcher meldet, dass die Abhängigkeiten bereit sind; erneute Prüfung…",
+  'ssh.installPhase.restart': "Die Pakete sind installiert, aber der Host wurde nicht neu gestartet. Starten Sie dasselbe Profil neu und prüfen Sie erneut.",
   'ssh.installPhase.done': "Installiert. Der neu gestartete Host prüft die vier SSH-Pakete.",
   'ssh.installPhase.failed': "Installation fehlgeschlagen: {message}",
   'ssh.copyInstallCommand': "Installationsbefehl kopieren",

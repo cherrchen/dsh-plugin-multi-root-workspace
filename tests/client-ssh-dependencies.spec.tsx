@@ -53,6 +53,41 @@ describe('SshDependencyNotice Desktop install', () => {
     expect(unsubscribe).toHaveBeenCalled()
   })
 
+  it('does not stay busy after a ready result whose recheck is still missing', async () => {
+    const checked = Promise.withResolvers<void>()
+    ;(window as LauncherWindow).dshDesktop = {
+      sshDependencies: {
+        protocolVersion: 1,
+        install: async () => ({ status: 'ready', profile: 'web', release: '0.2.2-rc.5' }),
+        subscribe: () => () => {},
+      },
+    }
+    render(<SshDependencyNotice view={view('ssh-deps-missing', 'install command')} onCheck={() => checked.promise} t={t} />)
+    const button = screen.getByRole('button', { name: 'ssh.installAndRestart' }) as HTMLButtonElement
+    fireEvent.click(button)
+    expect(await screen.findByText('ssh.installPhase.ready')).toBeTruthy()
+    expect(button.getAttribute('aria-busy')).toBe('true')
+    checked.resolve()
+    await waitFor(() => expect(button.getAttribute('aria-busy')).not.toBe('true'))
+  })
+
+  it('shows restart-required instead of claiming the restarted Host is checking', async () => {
+    const checked = Promise.withResolvers<void>()
+    ;(window as LauncherWindow).dshDesktop = {
+      sshDependencies: {
+        protocolVersion: 1,
+        install: async () => ({ status: 'restart-required', profile: 'web', release: '0.2.2-rc.5' }),
+        subscribe: () => () => {},
+      },
+    }
+    render(<SshDependencyNotice view={view('ssh-deps-missing', 'install command')} onCheck={() => checked.promise} t={t} />)
+    fireEvent.click(screen.getByRole('button', { name: 'ssh.installAndRestart' }))
+    expect(await screen.findByText('ssh.installPhase.restart')).toBeTruthy()
+    expect(screen.queryByText('ssh.installPhase.done')).toBeNull()
+    checked.resolve()
+    await waitFor(() => expect(screen.getByRole('button', { name: 'ssh.installAndRestart' })).toBeTruthy())
+  })
+
   it('keeps the command and recheck when no launcher exists', () => {
     render(<SshDependencyNotice view={view('ssh-deps-missing', 'install command')} onCheck={() => {}} t={t} />)
     expect(screen.queryByRole('button', { name: 'ssh.installAndRestart' })).toBeNull()

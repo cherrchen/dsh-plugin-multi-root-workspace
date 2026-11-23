@@ -1,4 +1,4 @@
-import { mkdtempSync, rmSync, writeFileSync } from 'node:fs'
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { Context } from '@deepseek-ai/cordis'
@@ -90,6 +90,31 @@ describe.skipIf(process.platform !== 'darwin' && process.platform !== 'linux')('
     } finally {
       await ctx.fiber.dispose()
       rmSync(home, { recursive: true, force: true })
+    }
+  })
+
+  it('starts the Desktop executable in Node mode instead of the launcher-bound node script', async () => {
+    const home = mkdtempSync(join(tmpdir(), 'mrfw-profile-desktop-'))
+    const resources = mkdtempSync(join(tmpdir(), 'mrfw-resources-'))
+    const ctx = host()
+    const previous = Object.getOwnPropertyDescriptor(process, 'resourcesPath')
+    try {
+      mkdirSync(join(resources, 'runtime', 'cli', 'bin'), { recursive: true })
+      writeFileSync(join(resources, 'runtime', 'cli', 'bin', 'dsh'), '#!/bin/sh\n')
+      Object.defineProperty(process, 'resourcesPath', { configurable: true, value: resources })
+      provideSshProfile(ctx, home, 'desktop')
+      captureSshProfile(ctx)
+      const command = inspectSshProfile(ctx).view.command
+      expect(command).toContain('ELECTRON_RUN_AS_NODE=1')
+      expect(command).toContain(process.execPath)
+      expect(command).toContain(join(resources, 'runtime', 'cli', 'bin', 'dsh'))
+      expect(command).not.toContain(join(resources, 'runtime', 'bin', 'node'))
+    } finally {
+      if (previous === undefined) Reflect.deleteProperty(process, 'resourcesPath')
+      else Object.defineProperty(process, 'resourcesPath', previous)
+      await ctx.fiber.dispose()
+      rmSync(home, { recursive: true, force: true })
+      rmSync(resources, { recursive: true, force: true })
     }
   })
 

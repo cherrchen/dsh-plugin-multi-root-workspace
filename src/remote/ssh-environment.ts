@@ -184,8 +184,9 @@ export class SshEnvironmentManager {
   private readonly sftpOpenings = new Map<string, Promise<SftpEnvironment>>()
   private readonly sftpResolved = new Map<string, SftpEnvironment>()
   private readonly transferSessions = new Map<AbortController, { readonly environmentId: string; readonly settled: Promise<void> }>()
-  private readonly helperDisposals = new Map<string, Promise<void>>()
-  private readonly sftpDisposals = new Map<string, Promise<void>>()
+  private readonly helperDisposals = new Map<string, { readonly opening: Promise<SshEnvironment> | undefined; readonly disposal: Promise<void> }>()
+  private readonly sftpDisposals = new Map<string, { readonly opening: Promise<SftpEnvironment> | undefined; readonly disposal: Promise<void> }>()
+  private readonly cleanups = new Set<Promise<void>>()
   private closed = false
   private disposal: Promise<void> | undefined
 
@@ -304,12 +305,14 @@ export class SshEnvironmentManager {
   }
 
   private disposeHelper(key: string, allowRevocation = false): Promise<void> {
+    const opening = this.openings.get(key)
     const existing = this.helperDisposals.get(key)
-    if (existing !== undefined) return existing
+    // A new generation can take the same key while the previous cleanup is
+    // still running; compare the opening, not the key, so both are released.
+    if (existing !== undefined && existing.opening === opening) return existing.disposal
+    this.openings.delete(key)
+    this.resolved.delete(key)
     const disposal = (async () => {
-      const opening = this.openings.get(key)
-      this.openings.delete(key)
-      this.resolved.delete(key)
       if (opening === undefined) return
       const env = await opening.catch(() => undefined)
       if (env === undefined) return
@@ -317,11 +320,15 @@ export class SshEnvironmentManager {
       // the transport closes. A new call cannot obtain this generation.
       if (allowRevocation) await new Promise<void>(resolve => setTimeout(resolve, 1_000).unref())
       await env.dispose()
-    })()
-    this.helperDisposals.set(key, disposal)
-    void disposal.finally(() => {
-      if (this.helperDisposals.get(key) === disposal) this.helperDisposals.delete(key)
-    }).catch(() => {})
+    })().catch((error: unknown) => {
+      const detail = error instanceof Error ? error.message : String(error)
+      this.logger.warn(`multi-root remote: Helper ${key} cleanup failed: ${detail}`)
+      throw error
+    }).finally(() => { this.cleanups.delete(disposal) })
+    const record = { opening, disposal }
+    this.helperDisposals.set(key, record)
+    this.cleanups.add(disposal)
+    void disposal.catch(() => {})
     return disposal
   }
 
@@ -355,6 +362,16 @@ export class SshEnvironmentManager {
     await this.settleTransfers()
     await this.settleResources('SFTP session', [...new Set([...this.sftpOpenings.keys(), ...this.sftpResolved.keys()])],
       id => this.disposeSftp(id))
+    // A key can be reused by a new generation while the previous cleanup is
+    // still running; wait for every cleanup that was started, not only the
+    // generation currently registered under the key.
+    await this.settleCleanups()
+  }
+
+  private async settleCleanups(): Promise<void> {
+    while (this.cleanups.size > 0) {
+      await Promise.allSettled([...this.cleanups])
+    }
   }
 
   private async settleTransfers(): Promise<void> {
@@ -421,20 +438,26 @@ export class SshEnvironmentManager {
   }
 
   disposeSftp(environmentId: string): Promise<void> {
+    const opening = this.sftpOpenings.get(environmentId)
     const existing = this.sftpDisposals.get(environmentId)
-    if (existing !== undefined) return existing
+    // The same environment can open a new SFTP generation while the previous
+    // cleanup is in flight; both openings must be released.
+    if (existing !== undefined && existing.opening === opening) return existing.disposal
+    this.sftpOpenings.delete(environmentId)
+    this.sftpResolved.delete(environmentId)
     const disposal = (async () => {
-      const opening = this.sftpOpenings.get(environmentId)
-      this.sftpOpenings.delete(environmentId)
-      this.sftpResolved.delete(environmentId)
       if (opening === undefined) return
       const env = await opening.catch(() => undefined)
       await env?.dispose()
-    })()
-    this.sftpDisposals.set(environmentId, disposal)
-    void disposal.finally(() => {
-      if (this.sftpDisposals.get(environmentId) === disposal) this.sftpDisposals.delete(environmentId)
-    }).catch(() => {})
+    })().catch((error: unknown) => {
+      const detail = error instanceof Error ? error.message : String(error)
+      this.logger.warn(`multi-root remote: SFTP session ${environmentId} cleanup failed: ${detail}`)
+      throw error
+    }).finally(() => { this.cleanups.delete(disposal) })
+    const record = { opening, disposal }
+    this.sftpDisposals.set(environmentId, record)
+    this.cleanups.add(disposal)
+    void disposal.catch(() => {})
     return disposal
   }
 

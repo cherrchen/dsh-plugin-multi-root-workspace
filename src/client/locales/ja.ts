@@ -473,6 +473,8 @@ export const ja = {
   'ssh.installPhase.installing': "SSH 依存パッケージをインストールしています…",
   'ssh.installPhase.restarting': "DSH Host を再起動しています…",
   'ssh.installPhase.checking': "依存関係を再確認しています…",
+  'ssh.installPhase.ready': "起動ツールは依存関係が準備済みと報告しています。再確認しています…",
+  'ssh.installPhase.restart': "パッケージはインストールされましたが、Host は再起動されていません。同じプロファイルで再起動してから再確認してください。",
   'ssh.installPhase.done': "インストールが完了しました。再起動した Host が 4 つの SSH パッケージを確認しています。",
   'ssh.installPhase.failed': "インストールに失敗しました: {message}",
   'ssh.copyInstallCommand': "インストールコマンドをコピー",

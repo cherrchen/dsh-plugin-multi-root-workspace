@@ -164,14 +164,21 @@ function dshCommand(profile: ProfileContext): string | undefined {
   } catch { return undefined }
 }
 
-/** The exact Node runtime able to execute the installer script after the Host quits. */
+/**
+ * The exact Node runtime able to execute the installer script after the Host
+ * quits. Desktop's bundled `runtime/bin/node` is a launcher that requires the
+ * Desktop-injected `DSH_DESKTOP_NODE_EXECUTABLE`; a normal terminal does not
+ * have it, so the copyable command starts the Electron executable in Node mode
+ * instead.
+ */
 function nodeCommand(): string | undefined {
   const resources = resourcesPath()
   if (resources !== undefined) {
-    const desktop = join(resources, 'runtime', 'bin', 'node')
-    return existsSync(desktop) ? desktop : undefined
+    return isAbsolute(process.execPath) && existsSync(process.execPath)
+      ? `ELECTRON_RUN_AS_NODE=1 ${quoteProfileValue(process.execPath)}`
+      : undefined
   }
-  return isAbsolute(process.execPath) && existsSync(process.execPath) ? process.execPath : undefined
+  return isAbsolute(process.execPath) && existsSync(process.execPath) ? quoteProfileValue(process.execPath) : undefined
 }
 
 function commandFor(profile: ProfileContext | undefined, release: string): string | undefined {
@@ -186,7 +193,7 @@ function commandFor(profile: ProfileContext | undefined, release: string): strin
   if (dsh === undefined || node === undefined || script === undefined || !existsSync(script)) return undefined
   const selection = /^[a-zA-Z0-9_][a-zA-Z0-9_.-]*$/.test(profile.name)
     ? `--profile ${profile.name}` : `--profile=${quoteProfileValue(profile.name)}`
-  return [quoteProfileValue(node), quoteProfileValue(script), '--dsh', quoteProfileValue(dsh),
+  return [node, quoteProfileValue(script), '--dsh', quoteProfileValue(dsh),
     selection, '--home', quoteProfileValue(profile.home), '--release', release].join(' ')
 }
 

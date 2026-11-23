@@ -473,6 +473,8 @@ export const pt = {
   'ssh.installPhase.installing': "A instalar as dependências SSH…",
   'ssh.installPhase.restarting': "A reiniciar o Host do DSH…",
   'ssh.installPhase.checking': "A verificar novamente as dependências…",
+  'ssh.installPhase.ready': "O iniciador indica que as dependências estão prontas; a verificar novamente…",
+  'ssh.installPhase.restart': "Os pacotes estão instalados, mas o Host não foi reiniciado. Reinicie o mesmo perfil e verifique novamente.",
   'ssh.installPhase.done': "Instalado. O Host reiniciado está a verificar os quatro pacotes SSH.",
   'ssh.installPhase.failed': "A instalação falhou: {message}",
   'ssh.copyInstallCommand': "Copiar comando de instalação",

@@ -9,18 +9,18 @@ import { sshInstallLauncher, type SshInstallPhase } from './ssh-install-launcher
 
 interface DependencyNoticeProps {
   readonly view: SshDependencyView
-  readonly onCheck: () => void
+  readonly onCheck: () => void | Promise<void>
   readonly checking?: boolean
   readonly t: Translate
 }
 
 export function SshDependencyNotice({ view, onCheck, checking = false, t }: DependencyNoticeProps): ReactNode {
   const [copy, setCopy] = useState<{ command: string; ok: boolean }>()
-  const [install, setInstall] = useState<{ phase: SshInstallPhase | 'failed'; message?: string }>()
+  const [install, setInstall] = useState<{ phase: SshInstallPhase | 'ready' | 'restart' | 'failed'; message?: string }>()
   const launcher = useMemo(() => sshInstallLauncher(), [])
   const installable = launcher !== undefined && view.profile !== undefined && view.release !== undefined
     && (view.code === 'ssh-deps-missing' || view.code === 'ssh-deps-partial')
-  const installing = install !== undefined && install.phase !== 'done' && install.phase !== 'failed'
+  const installing = install !== undefined && install.phase !== 'failed'
   useEffect(() => {
     if (!installable) return undefined
     return launcher!.subscribe(phase => { setInstall({ phase }) })
@@ -47,8 +47,9 @@ export function SshDependencyNotice({ view, onCheck, checking = false, t }: Depe
           setInstall({ phase: 'stopping' })
           try {
             const result = await launcher!.install({ profile: view.profile!, release: view.release! })
-            setInstall({ phase: result.status === 'ready' ? 'checking' : 'done' })
-            onCheck()
+            setInstall({ phase: result.status === 'ready' ? 'ready' : result.status === 'restart-required' ? 'restart' : 'done' })
+            await onCheck()
+            setInstall(undefined)
           } catch (cause: unknown) {
             setInstall({ phase: 'failed', message: cause instanceof Error ? cause.message : String(cause) })
           }

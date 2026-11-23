@@ -10,6 +10,10 @@ const probe = vi.hoisted(() => ({
   ready: undefined as Promise<void> | undefined,
   failTeardown: false,
   failMount: undefined as string | undefined,
+  openCount: 0,
+  disposed: [] as number[],
+  firstDispose: undefined as Promise<void> | undefined,
+  firstDisposeEntered: undefined as (() => void) | undefined,
 }))
 
 vi.mock('@deepseek-ai/dsh-session-projection', () => ({
@@ -23,16 +27,23 @@ vi.mock('../src/compat/ssh-packages.ts', async () => {
   const { Service } = await import('@deepseek-ai/cordis')
   class SshConnection extends Service {
     readonly ready: Promise<Record<string, unknown>>
+    private readonly generation: number
     constructor(ctx: Context, config: Record<string, unknown>) {
       super(ctx, 'ssh')
+      this.generation = ++probe.openCount
       this.ready = (probe.ready ?? Promise.resolve()).then(() => ({
         platform: 'linux', workspace: config.workspace, executable: '/usr/bin/node', protocol: 3,
       }))
-      ctx.effect(() => () => { probe.events.push('ssh') })
+      ctx.effect(() => () => { probe.events.push('ssh'); return this.dispose() })
     }
     assertOpen(): void {}
     connectStream(): Promise<EventEmitter> { return Promise.resolve(new EventEmitter()) }
     override async dispose(): Promise<void> {
+      probe.disposed.push(this.generation)
+      if (this.generation === 1) {
+        probe.firstDisposeEntered?.()
+        await probe.firstDispose
+      }
       if (probe.failTeardown) throw new Error('ssh teardown failed')
     }
   }
@@ -81,6 +92,10 @@ beforeEach(() => {
   probe.ready = undefined
   probe.failTeardown = false
   probe.failMount = undefined
+  probe.openCount = 0
+  probe.disposed = []
+  probe.firstDispose = undefined
+  probe.firstDisposeEntered = undefined
   warnings.length = 0
 })
 
@@ -125,6 +140,24 @@ describe('SSH environment manager shutdown', () => {
     await expect(instance.open('vps-app')).rejects.toThrow('sandbox mount failed')
     expect(probe.events).toContain('sandbox')
     await instance.disposeAll()
+  })
+
+  it('releases a new generation that took the key while the old cleanup was in flight', async () => {
+    const hold = Promise.withResolvers<void>()
+    const entered = Promise.withResolvers<void>()
+    probe.firstDispose = hold.promise
+    probe.firstDisposeEntered = () => { entered.resolve() }
+    const instance = manager()
+    const first = await instance.open('vps-app')
+    instance.markStale('vps-app')
+    await entered.promise
+    const second = await instance.open('vps-app')
+    expect(second).not.toBe(first)
+    const disposal = instance.disposeAll()
+    hold.resolve()
+    await disposal
+    expect(probe.disposed).toEqual([1, 2])
+    expect(probe.events.filter(event => event === 'ssh')).toHaveLength(2)
   })
 
   it('rejects new work after close starts', async () => {

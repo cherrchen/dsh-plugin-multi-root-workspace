@@ -472,6 +472,8 @@ export const zh = {
   'ssh.installPhase.installing': "正在安装 SSH 依赖…",
   'ssh.installPhase.restarting': "正在重启 DSH Host…",
   'ssh.installPhase.checking': "正在重新检测依赖…",
+  'ssh.installPhase.ready': "启动器报告依赖已就绪，正在重新检测…",
+  'ssh.installPhase.restart': "依赖已写入，但 Host 尚未重启；请重启同一 Profile 后再检测。",
   'ssh.installPhase.done': "安装完成。重启后的 Host 正在检测四个 SSH 包。",
   'ssh.installPhase.failed': "安装未完成：{message}",
   'ssh.copyInstallCommand': "复制安装命令",

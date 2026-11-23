@@ -15,7 +15,8 @@
 
 import { spawn } from 'node:child_process'
 import { existsSync, readFileSync, realpathSync } from 'node:fs'
-import { isAbsolute, join, relative } from 'node:path'
+import { createRequire } from 'node:module'
+import { dirname, isAbsolute, join, relative, sep } from 'node:path'
 import { SSH_PEER_PACKAGES, SUPPORTED_SSH_RELEASES } from '../compat/dsh-version.ts'
 
 /** Everything the installer needs; all paths are absolute. */
@@ -61,7 +62,11 @@ export interface SshDependencyInstallOutcome {
   readonly message: string
 }
 
-const profilePattern = /^[a-zA-Z0-9_][a-zA-Z0-9_.-]*$/
+/** Same profile-name rules as the command generator: a path component, not an escape. */
+function validProfileName(name: string): boolean {
+  return name.length > 0 && name !== '.' && name !== '..' && name !== 'node_modules'
+    && !/[/\\\0\r\n]/.test(name)
+}
 
 function fail(code: string, message: string): never {
   throw new SshDependencyInstallError(code, message)
@@ -130,7 +135,7 @@ export function parseSshDependencyInstallArgs(argv: readonly string[]): SshDepen
   if (profile === undefined || home === undefined || release === undefined || dsh === undefined) {
     fail('invalid-arguments', 'usage: install-ssh-deps.mjs --profile <name> --home <path> --release <version> --dsh <path>')
   }
-  if (!profilePattern.test(profile) || profile === '.' || profile === '..') {
+  if (!validProfileName(profile)) {
     fail('invalid-profile', `invalid profile name: ${JSON.stringify(profile)}`)
   }
   if (!(SUPPORTED_SSH_RELEASES as readonly string[]).includes(release)) {
@@ -162,10 +167,16 @@ function alignedProfile(dir: string, release: string): readonly SshDependencyPac
     dependencies = manifest.dependencies ?? {}
   } catch { return undefined }
   const packages: SshDependencyPackage[] = []
+  const require = createRequire(join(dir, 'package.json'))
   for (const name of SSH_PEER_PACKAGES) {
     if (dependencies[name] !== release) return undefined
-    const installed = readVersion(join(dir, 'node_modules', ...name.split('/'), 'package.json'))
+    const manifestPath = join(dir, 'node_modules', ...name.split('/'), 'package.json')
+    const installed = readVersion(manifestPath)
     if (installed !== release) return undefined
+    let entry: string
+    try { entry = require.resolve(name) } catch { return undefined }
+    const root = dirname(manifestPath)
+    if (entry !== root && !entry.startsWith(root + sep)) return undefined
     packages.push({ name, version: installed })
   }
   return packages
