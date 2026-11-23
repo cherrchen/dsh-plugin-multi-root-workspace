@@ -38,7 +38,7 @@ writeFileSync(join(dir, 'package.json'), JSON.stringify({ dependencies }))
 if (log !== undefined) appendFileSync(log, 'add\\n')
 process.exit(${options.fail === true ? 1 : 0})
 `, { mode: 0o755 })
-  chmodSync(path, 0o755)
+  if (process.platform !== 'win32') chmodSync(path, 0o755)
   return path
 }
 
@@ -158,6 +158,10 @@ describe.skipIf(process.platform === 'win32')('runSshDependencyInstall', () => {
       expect(outcome.message).toContain(profile)
       expect(outcome.message).toContain('Restart')
       expect(existsSync(join(home, 'profiles', profile, 'node_modules', ...SSH_PEER_PACKAGES[0].split('/'), 'package.json'))).toBe(true)
+      const again = await main(['--dsh', dsh, '--profile', profile, '--home', home, '--release', release])
+      expect(again.code).toBe(0)
+      expect(again.message).toContain('already installed')
+      expect(again.message).toContain('No write')
     } finally {
       delete process.env.FAKE_LOG
       rmSync(root, { recursive: true, force: true })

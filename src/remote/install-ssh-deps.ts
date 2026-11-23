@@ -239,8 +239,10 @@ export async function main(argv: readonly string[]): Promise<SshDependencyInstal
     const result = await runSshDependencyInstall(request, {
       output: (text, stream) => { (stream === 'stdout' ? process.stdout : process.stderr).write(text + '\n') },
     })
-    const verb = result.status === 'ready' ? 'already installed' : 'installed'
-    return { code: 0, message: `SSH dependencies are ${verb} for profile "${result.profile}" at DSH ${result.release}. Restart the DSH Host with this profile so it loads the four packages.` }
+    const message = result.status === 'ready'
+      ? `SSH dependencies are already installed and resolvable for profile "${result.profile}" at DSH ${result.release}. No write was needed; restart the DSH Host only if it started before these packages were installed.`
+      : `SSH dependencies were installed for profile "${result.profile}" at DSH ${result.release}. Restart the DSH Host with this profile so it loads the four packages.`
+    return { code: 0, message }
   } catch (error) {
     if (error instanceof SshDependencyInstallError) return { code: 1, message: `install-ssh-deps: ${error.message}` }
     return { code: 1, message: `install-ssh-deps: ${error instanceof Error ? error.message : String(error)}` }
