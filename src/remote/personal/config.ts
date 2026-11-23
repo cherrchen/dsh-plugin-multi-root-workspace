@@ -27,11 +27,11 @@ const helperSchema = z.object({
   sha256: z.string().regex(/^[0-9a-f]{64}$/),
   protocol: z.number().int().min(1),
   /**
-   * The generated entry format: 1 verifies the installed file set at launch,
-   * 2 pins that entry by `treeSha256`, and 3 also widens the Helper's TLS
-   * server cipher list for a BoringSSL Host. Absent on legacy installs.
+   * 1 verifies the installed file set at launch; 2 pins that entry by
+   * `treeSha256`. The BoringSSL stream entry is an additive sibling and does
+   * not change this recorded identity. Absent on legacy installs.
    */
-  integrity: z.union([z.literal(1), z.literal(2), z.literal(3)]).optional(),
+  integrity: z.union([z.literal(1), z.literal(2)]).optional(),
   treeSha256: z.string().regex(/^[0-9a-f]{64}$/).optional(),
 }).strict()
 

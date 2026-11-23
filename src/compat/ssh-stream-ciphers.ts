@@ -3,26 +3,32 @@
  *
  * `@deepseek-ai/dsh-ssh` pins `PSK-AES256-GCM-SHA384` for every forwarded
  * stream. Electron is linked against BoringSSL, which implements the earlier
- * PSK family (`ECDHE-PSK-CHACHA20-POLY1305`, `PSK-AES256-CBC-SHA`) but not
- * the GCM suite: creating the local TLS context fails with
- * `ERR_SSL_NO_CIPHER_MATCH` before the remote Helper sees a handshake. The
- * Helper itself runs on plain Node/OpenSSL, which implements both.
+ * PSK family (`ECDHE-PSK-CHACHA20-POLY1305`) but not the GCM suite: creating
+ * the local TLS context fails with `ERR_SSL_NO_CIPHER_MATCH` before the
+ * remote Helper sees a handshake. The Helper itself runs on plain
+ * Node/OpenSSL, which implements both.
  *
  * The upstream constant cannot be edited out of tree, so this module makes
  * two structural adaptations:
  *
  * - before the Host evaluates `@deepseek-ai/dsh-ssh`,
- *   {@link installClientPskFallback} rewrites only `tls.connect` calls whose
- *   cipher list names the upstream suite, and only on a runtime that cannot
- *   create it. Every other TLS connection is untouched;
+ *   {@link installClientPskFallback} rewrites the one `tls.connect` call the
+ *   upstream stream layer makes (exact option shape), and only on a runtime
+ *   that cannot create the suite. Every other TLS connection is untouched;
  * - the generated remote Helper entry embeds {@link helperServerShimSource},
- *   which widens the Helper's TLS server list with the same fallbacks. A
- *   plain-Node Host keeps offering the upstream suite first, so the
+ *   which widens the Helper's TLS server list with the same fallback. A
+ *   plain-Node Host keeps offering the upstream suite, so the
  *   OpenSSL-to-OpenSSL path still negotiates the original suite.
  *
- * `TLS_ECDHE_PSK_WITH_CHACHA20_POLY1305_SHA256` is AEAD with forward secrecy
- * and the per-stream PSK remains mandatory: the fallback changes neither the
- * authentication story nor admits a certificate suite. See ADR-0051.
+ * The fallback is `TLS_ECDHE_PSK_WITH_CHACHA20_POLY1305_SHA256`: AEAD with
+ * forward secrecy. The per-stream PSK remains mandatory and no certificate
+ * suite is admitted; a runtime without this suite gets an explicit refusal
+ * rather than a weaker CBC cipher.
+ *
+ * The server shim is a fixed JavaScript template, never
+ * `Function.prototype.toString()`: the entry bytes are verified against a
+ * Host-computed digest, so they must not depend on the bundler's output.
+ * See ADR-0051.
  *
  * @module @dsh-electron/dsh-plugin-multi-root-workspace/compat/ssh-stream-ciphers
  */
@@ -33,11 +39,14 @@ import { createRequire, syncBuiltinESMExports } from 'node:module'
 export const UPSTREAM_PSK_CIPHER = 'PSK-AES256-GCM-SHA384'
 
 /**
- * PSK suites BoringSSL implements, strongest first.
- * `ECDHE-PSK-CHACHA20-POLY1305` is AEAD and gives forward secrecy;
- * `PSK-AES256-CBC-SHA` is the last resort for a runtime that omits ChaCha.
+ * The only fallback: AEAD and forward secrecy, so the upstream security
+ * properties survive the runtime substitution. CBC PSK suites are
+ * deliberately not considered.
  */
-export const PSK_FALLBACK_CIPHERS = ['ECDHE-PSK-CHACHA20-POLY1305', 'PSK-AES256-CBC-SHA'] as const
+export const PSK_FALLBACK_CIPHER = 'ECDHE-PSK-CHACHA20-POLY1305'
+
+/** The fallback list in preference order (one entry today). */
+export const PSK_FALLBACK_CIPHERS = [PSK_FALLBACK_CIPHER] as const
 
 /** The cipher decision for one Host runtime. */
 export type ClientPskPlan =
@@ -72,8 +81,8 @@ function hostTls(): PskTlsModule {
  * Pick the client cipher list for the current runtime.
  *
  * A runtime that implements the upstream suite keeps it unchanged. A runtime
- * that does not gets the first supported fallback list; an `unsupported`
- * verdict means neither the upstream suite nor a fallback exists, and SSH must
+ * that does not gets the supported fallback list; an `unsupported` verdict
+ * means neither the upstream suite nor the AEAD fallback exists, and SSH must
  * refuse before opening a stream.
  * @param getCiphers - the runtime's cipher report; injectable for tests.
  * @returns the client plan.
@@ -88,8 +97,28 @@ export function clientPskPlan(getCiphers: () => readonly string[] = () => hostTl
 }
 
 /**
- * Rewrite a `tls.connect` options object only when it names the upstream
- * suite. The object is returned unchanged (same identity) otherwise, so the
+ * Whether these options are exactly the upstream stream layer's
+ * `tls.connect` call: the pinned suite, TLS 1.2 only, a connected socket,
+ * PSK, and the upstream's certificate-free identity check. Matching the
+ * whole shape keeps a caller's own cipher exclusions or unrelated TLS
+ * options out of the rewrite.
+ * @param options - the first argument of a `tls.connect` call.
+ * @returns true only for the upstream forwarded-stream call.
+ */
+export function isUpstreamStreamConnectOptions(options: object): boolean {
+  const candidate = options as Record<string, unknown>
+  return candidate.ciphers === UPSTREAM_PSK_CIPHER
+    && candidate.minVersion === 'TLSv1.2'
+    && candidate.maxVersion === 'TLSv1.2'
+    && candidate.rejectUnauthorized === true
+    && typeof candidate.pskCallback === 'function'
+    && typeof candidate.checkServerIdentity === 'function'
+    && 'socket' in candidate
+}
+
+/**
+ * Rewrite the upstream stream options only when they match that exact shape.
+ * The object is returned unchanged (same identity) otherwise, so the
  * wrapper can forward it untouched.
  * @param options - the first argument of a `tls.connect` call.
  * @param plan - a `fallback` decision for this runtime.
@@ -99,11 +128,7 @@ export function rewritePskConnectOptions<T extends object>(
   options: T,
   plan: Extract<ClientPskPlan, { kind: 'fallback' }>,
 ): T {
-  const ciphers = (options as { ciphers?: unknown }).ciphers
-  if (typeof ciphers !== 'string') return options
-  const requested = ciphers.split(':').map(name => name.trim().toUpperCase())
-  if (!requested.includes(UPSTREAM_PSK_CIPHER)) return options
-  return { ...options, ciphers: plan.ciphers }
+  return isUpstreamStreamConnectOptions(options) ? { ...options, ciphers: plan.ciphers } : options
 }
 
 /**
@@ -150,38 +175,33 @@ export function installClientPskFallback(options: {
 }
 
 /**
- * The Helper-side cipher widening.
+ * The Helper-side cipher widening, as fixed JavaScript source.
  *
- * Self-contained on purpose: {@link helperServerShimSource} embeds its source
- * text into the generated remote entry, so it must not reference module
- * scope. The upstream server list stays first, preserving the original suite
- * for plain-Node Hosts; fallbacks are appended only when the remote Node
- * reports them.
- * @param ciphers - the server's configured cipher list.
- * @param getCiphers - the remote Node's cipher report.
- * @returns the original list or one widened with supported fallbacks.
+ * Embedded verbatim into the generated remote entry: the entry's digest is
+ * verified against Host-computed bytes, so it must not vary with the
+ * bundler or with a function's `toString()` output. The upstream server list
+ * stays first, preserving the original suite for plain-Node Hosts; the
+ * fallback is appended only when the remote Node reports it.
  */
-export function serverPskCiphers(ciphers: string, getCiphers: () => readonly string[]): string {
-  const upstream = 'PSK-AES256-GCM-SHA384'
-  const fallbacks = ['ECDHE-PSK-CHACHA20-POLY1305', 'PSK-AES256-CBC-SHA']
-  const requested = ciphers.split(':').map(name => name.trim().toUpperCase())
-  if (!requested.includes(upstream)) return ciphers
-  const available = new Set(getCiphers().map(name => name.toLowerCase()))
-  const added = fallbacks.filter(name => available.has(name.toLowerCase()) && !requested.includes(name.toUpperCase()))
-  return added.length === 0 ? ciphers : `${ciphers}:${added.join(':')}`
-}
+export const SERVER_PSK_FUNCTION_SOURCE = `function serverPskCiphers(ciphers, getCiphers) {
+  const upstream = ${JSON.stringify(UPSTREAM_PSK_CIPHER)}
+  const fallback = ${JSON.stringify(PSK_FALLBACK_CIPHER)}
+  if (ciphers !== upstream) return ciphers
+  const available = new Set(getCiphers().map((name) => name.toLowerCase()))
+  return available.has(fallback.toLowerCase()) ? upstream + ":" + fallback : ciphers
+}`
 
 /**
  * The executable preamble for the generated Helper entry: widen
  * `tls.createServer` cipher lists, then re-sync the core-module ESM bindings
- * so the Helper's own `import { createServer } from 'node:tls'` resolves to
+ * so the Helper's own `import { createServer } from "node:tls"` resolves to
  * the wrapper. The entry evaluates this before importing the upstream Helper.
  * @returns JavaScript source for the remote entry.
  */
 export function helperServerShimSource(): string {
   return `const { syncBuiltinESMExports: syncTlsExports } = require("node:module")
 const tls = require("node:tls")
-const serverPskCiphers = ${serverPskCiphers.toString()}
+${SERVER_PSK_FUNCTION_SOURCE}
 const createTlsServer = tls.createServer
 tls.createServer = function (...args) {
   const options = args[0]

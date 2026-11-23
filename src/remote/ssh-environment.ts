@@ -15,6 +15,7 @@ import { classifyInstallation, classifySshCapability, sshPackageVersion, sshPriv
 import { loadHostSshPackages } from '../compat/ssh-packages.ts'
 import { SftpClient, type SftpVersion } from './sftp.ts'
 import { verifyHelperEntry } from './personal/operations.ts'
+import { clientPskPlan } from '../compat/ssh-stream-ciphers.ts'
 import { environmentDigest, type DeploymentManifest, type RemoteEnvironment } from './manifest.ts'
 
 export class SshEnvironmentError extends Error {
@@ -429,10 +430,10 @@ export class SshEnvironmentManager {
     if (environment === undefined) throw new SshEnvironmentError('unknown-environment', `no manifest environment "${environmentId}"`)
     this.requireGate()
     if (environment.transport !== 'helper') throw new SshEnvironmentError('transport-not-helper', `environment "${environmentId}" uses transport "${environment.transport}"`)
-    // A helper installed before the stream-TLS entry format has no entry point
-    // that can widen the server cipher list for a BoringSSL Host.
-    if (this.personalCustody && (environment.helper!.integrity !== 3 || environment.helper!.treeSha256 === undefined)) {
-      throw new SshEnvironmentError('helper-outdated', 'the recorded Helper predates the stream-TLS entry format; reinstall the Helper')
+    // A helper installed before full-artifact integrity has no entry point to
+    // verify its file set: refuse rather than trust the single-file digest.
+    if (this.personalCustody && (environment.helper!.integrity !== 2 || environment.helper!.treeSha256 === undefined)) {
+      throw new SshEnvironmentError('helper-outdated', 'the recorded Helper predates Host-pinned integrity; reinstall the Helper')
     }
     if (environment.credentialIsolation !== 'attested' && !this.allowUnattested && !this.brokerCustody) {
       throw new SshEnvironmentError('credential-isolation-unattested', `environment "${environmentId}" is declared unattested; connections require an attested deployment`)
@@ -444,8 +445,16 @@ export class SshEnvironmentManager {
     }
     const identity = await this.verifyHostIdentity(environment)
     const connection = environment.connection
+    let launchEntry = connection.helperPath!
     if (this.personalCustody) {
-      await verifyHelperEntry(this.exec, connection.host, connection.nodePath!, connection.helperPath!, environment.helper!.treeSha256!)
+      const verified = await verifyHelperEntry(this.exec, connection.host, connection.nodePath!, connection.helperPath!, environment.helper!.treeSha256!)
+      const psk = clientPskPlan()
+      if (psk.kind === 'fallback' && !verified.current) {
+        throw new SshEnvironmentError('helper-outdated', 'the recorded Helper has no BoringSSL stream entry; reinstall the Helper')
+      }
+      // BoringSSL needs the additive stream-TLS entry; a plain-Node Host keeps
+      // the recorded entry so the OpenSSL-to-OpenSSL path is byte-identical.
+      if (psk.kind === 'fallback') launchEntry = verified.currentPath
     }
     const modules = await loadHostSshPackages(this.requireGate()) as Record<string, Record<string, unknown> & { default?: Record<string, unknown> }>
     const exported = (pkg: string, name: string) => modules[pkg]![name] ?? modules[pkg]!.default?.[name]
@@ -457,7 +466,7 @@ export class SshEnvironmentManager {
       mount(exported('@deepseek-ai/dsh-ssh', 'SshConnection'), {
         host: connection.host,
         launch: { kind: 'node-script', node: connection.nodePath! },
-        helper: connection.helperPath!, helperHash: environment.helper!.sha256,
+        helper: launchEntry, helperHash: environment.helper!.sha256,
         workspace,
       }),
       mount(exported('@deepseek-ai/dsh-fs-ssh', 'SshFileSystem')),

@@ -12,7 +12,7 @@ English: [CHANGELOG.en.md](./CHANGELOG.en.md)
 
 ### Fixed
 
-- **DSH Desktop 登记远端目录时报 `NO_CIPHER_MATCH`**：Electron 的 BoringSSL 不实现上游 `@deepseek-ai/dsh-ssh` 为转发流固定的 `PSK-AES256-GCM-SHA384`，Host 在本地创建 TLS 上下文时就失败，目录核验与登记授权因此中断。插件现在在 BoringSSL 运行时把该套件替换为 `ECDHE-PSK-CHACHA20-POLY1305`（AEAD 且带前向保密；不支持时退到 `PSK-AES256-CBC-SHA`），并在插件生成的 Helper 入口加载上游 Helper 前给服务端 cipher 列表追加同一组 fallback；仍然只提供 PSK、不加入证书回退，plain Node 的 Host 继续协商原套件。Helper 入口格式随之升级为 `integrity: 3`，已安装的旧 Helper 需要在连接卡片重新安装一次。实现与备选方案见 [ADR-0051](./docs/decisions/ADR-0051-ssh-stream-psk-boringssl-fallback.md)。
+- **DSH Desktop 登记远端目录时报 `NO_CIPHER_MATCH`**：Electron 的 BoringSSL 不实现上游 `@deepseek-ai/dsh-ssh` 为转发流固定的 `PSK-AES256-GCM-SHA384`，Host 在本地创建 TLS 上下文时就失败，目录核验与登记授权因此中断。插件现在在 BoringSSL 运行时把上游 `authenticateStream` 的那一次调用替换为 `ECDHE-PSK-CHACHA20-POLY1305`（AEAD 且带前向保密；只匹配精确参数形状，调用方自己的 cipher 排除项保持原样），并额外生成 `helper-entry-v3.mjs`，在加载上游 Helper 前给服务端 cipher 列表追加同一套件；`helper-entry.mjs` 保持 beta.2 的逐字节模板，记录的 `integrity`、`helperPath` 与 `bindingDigest` 都不变，plain Node Host 继续协商原套件，beta.2 回退仍可校验并启动。桌面端旧 Helper 缺 v3 入口时以 `helper-outdated` 提示重装，已登记 Root 无需重新登记；面板会原样透传该错误码。实现与备选方案见 [ADR-0051](./docs/decisions/ADR-0051-ssh-stream-psk-boringssl-fallback.md)。
 
 ## [0.1.24-beta.2] - 2026-11-23
 

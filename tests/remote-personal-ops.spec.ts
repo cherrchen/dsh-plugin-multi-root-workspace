@@ -21,11 +21,11 @@ import { mountRemoteTools, type RemoteToolsWorld } from './support/remote-tools.
 import { mountRegistryStack, type RegistryStack } from './support/registry-stack.ts'
 import { handlePersonalEndpoint } from '../src/remote/personal-endpoints.ts'
 import { parseSshCall, type SshCall, type SshStateView } from '../src/remote/personal-contract.ts'
-import { loadPersonalConfig, savePersonalConfig, type PersonalConfig, type PersonalEnvironment } from '../src/remote/personal/config.ts'
+import { loadPersonalConfig, savePersonalConfig, toDeploymentManifest, type PersonalConfig, type PersonalEnvironment } from '../src/remote/personal/config.ts'
 import { CommandExecutionError, defaultExec, type ExecFile } from '../src/remote/personal/credentials.ts'
-import { installAccessKey, installHelper } from '../src/remote/personal/operations.ts'
+import { helperEntryCurrentPath, installAccessKey, installHelper } from '../src/remote/personal/operations.ts'
 import { attestBroker, assertBrokerDestinations } from '../src/remote/broker/attest.ts'
-import type { DeploymentManifest } from '../src/remote/manifest.ts'
+import { bindingDigest, type DeploymentManifest } from '../src/remote/manifest.ts'
 import type { MultiRootRegistry } from '../src/registry.ts'
 import { Context } from '@deepseek-ai/cordis'
 import { provideReadySshProfile, provideSshProfile } from './support/ssh-profile.ts'
@@ -524,18 +524,34 @@ describe.skipIf(process.platform === 'win32')('operations argv/env and hash chec
     expect(result).toEqual({
       nodePath: '/usr/bin/node',
       helperPath: '/home/builder/.dsh-helper/0.2.2-rc.2/helper-entry.mjs',
-      sha256: helperHash, integrity: 3, treeSha256: 'd'.repeat(64),
+      sha256: helperHash, integrity: 2, treeSha256: 'd'.repeat(64),
     })
     expect(exec.mock.calls.map(([, args]) => stageOf(args.at(-1)!))).toEqual([
       'ssh-connect', 'remote-prerequisites', 'remote-install', 'artifact-verification', 'entry-generation',
     ])
-    const entry = exec.mock.calls[4]![2]?.input
-    expect(entry).toContain('integrity check failed')
-    expect(entry).toContain('ECDHE-PSK-CHACHA20-POLY1305')
-    expect(entry).toContain('syncTlsExports()')
-    expect(entry).toContain('import("./node_modules/@deepseek-ai/dsh-ssh/lib/helper.js")')
-    expect(entry).toContain('d'.repeat(64))
+    const entries = JSON.parse(exec.mock.calls[4]![2]?.input ?? '{}') as { legacy?: string; current?: string }
+    expect(entries.legacy).toContain('integrity check failed')
+    expect(entries.legacy).not.toContain('ECDHE-PSK-CHACHA20-POLY1305')
+    expect(entries.legacy).toContain('import("./node_modules/@deepseek-ai/dsh-ssh/lib/helper.js")')
+    expect(entries.legacy).toContain('d'.repeat(64))
+    expect(entries.current).toContain('ECDHE-PSK-CHACHA20-POLY1305')
+    expect(entries.current).toContain('syncTlsExports()')
     expect(exec.mock.calls.every(([, args]) => args.includes('BatchMode=yes'))).toBe(true)
+  })
+
+  it('keeps a registered binding digest stable when the additive stream entry is installed', async () => {
+    const { options, helperHash, credentialRoot } = helperFixture()
+    const exec = fakeHelper(helperHash)
+    const first = await installHelper(exec, MANAGED, credentialRoot, options)
+    const environment: PersonalEnvironment = { ...MANAGED, helper: { ...first, protocol: 3 } }
+    const binding = { primary: '/w', environmentId: 'dev-box', rootId: 'app', path: '/srv/app', actions: ['read'] as ['read'] }
+    const before = toDeploymentManifest({ ...CONFIG([environment]), bindings: [binding] }, '/tmp/remote-personal.json')
+    const digest = bindingDigest(before.manifest.environments[0]!, before.manifest.bindings[0]!)
+
+    const again = await installHelper(exec, MANAGED, credentialRoot, options)
+    const after = toDeploymentManifest({ ...CONFIG([{ ...MANAGED, helper: { ...again, protocol: 3 } }]), bindings: [binding] }, '/tmp/remote-personal.json')
+    expect(again).toEqual(first)
+    expect(bindingDigest(after.manifest.environments[0]!, after.manifest.bindings[0]!)).toBe(digest)
   })
 
   it.skipIf(remoteNodeVersionStatus(process.version) !== 'ok')('runs the real preflight, npm wrapper, digest and atomic entry scripts in a temporary server home', async () => {
@@ -557,6 +573,7 @@ printf %s HELPER-BYTES > "$lib/helper.js"
     const result = await installHelper(exec, MANAGED, credentialRoot, { ...options, nodePath })
     expect(result.sha256).toBe(helperHash)
     expect(readFileSync(result.helperPath, 'utf8')).toContain(result.treeSha256)
+    expect(readFileSync(helperEntryCurrentPath(result.helperPath), 'utf8')).toContain('ECDHE-PSK-CHACHA20-POLY1305')
   })
 
   it.each([
@@ -634,7 +651,7 @@ printf %s HELPER-BYTES > "$lib/helper.js"
     const result = handlePersonalEndpoint(ctx, registry, '/w',
       { endpoint: 'sshHelperInstall', sessionId: 's', revision: 0, environmentId: 'dev-box' }, { exec })
     if (outcome === 'saved') {
-      await expect(result).resolves.toMatchObject({ revision: 1, environments: [{ helper: { sha256: helperHash, protocol: 3, integrity: 3 } }] })
+      await expect(result).resolves.toMatchObject({ revision: 1, environments: [{ helper: { sha256: helperHash, protocol: 3, integrity: 2 } }] })
     } else {
       const failure = await result.catch((error: unknown) => error)
       expect(failure).toMatchObject({
