@@ -753,6 +753,8 @@ describe.skipIf(process.platform === 'win32')('personal RPC refusals through the
       beforePanel: ctx => { provideSshProfile(ctx, fixture.base) },
       remote: { enabled: false, personalPath, credentialRoot: join(fixture.base, 'cred') },
     })
+    const initial = await world.panel('status', {}, SSH_SETTINGS_CHANNEL)
+    expect(initial).toMatchObject({ ok: true, value: { status: { state: 'disabled' }, dependencies: { packages: expect.any(Array) } } })
     await world.stack.registry.configureRemote({ enabled: true, mode: 'personal' })
     const result = await world.panel('status', {}, SSH_SETTINGS_CHANNEL)
     const dependencies = (result.value as { dependencies: { code: string; command?: string; packages: unknown[] } }).dependencies

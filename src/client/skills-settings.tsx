@@ -12,6 +12,7 @@ import type { Key } from './locales.ts'
 import type { Translate } from './WorkspaceFoldersAction.tsx'
 import { errorKeyOf, PanelError } from './panel-client.ts'
 import { SshManagementDialog } from './ssh-panel.tsx'
+import { SshDependencyDialog } from './ssh-dependencies.tsx'
 import type { SshSettingsClient, SshSettingsView } from './ssh-client.ts'
 
 const BUNDLE_KEY = '@dsh-electron/dsh-plugin-multi-root-workspace'
@@ -93,7 +94,7 @@ function WorktreeSwitchRow({ form, t }: { form: SkillsForm; t: Translate }) {
  * mode, team block, and downgrade confirmation now live in the Workspace
  * Folders panel's SSH area (ADR-0049) and share this form.
  */
-export function RemoteSwitchRow({ form, t }: { form: SkillsForm; t: Translate }) {
+export function RemoteSwitchRow({ form, t, onEnabled }: { form: SkillsForm; t: Translate; onEnabled?: () => void }) {
   const snapshot = useSyncExternalStore(listener => form.subscribe(listener), () => form.getSnapshot())
   const [busy, setBusy] = useState(false), [error, setError] = useState<string>()
   const [confirmation, setConfirmation] = useState<{ revision: number | undefined }>()
@@ -119,7 +120,10 @@ export function RemoteSwitchRow({ form, t }: { form: SkillsForm; t: Translate })
     setBusy(true); setError(undefined)
     try {
       const ok = await form.mutate([{ op: 'set', path: ['enabled'], value }], revision)
-      if (mounted.current && !ok) setError(t('remote.settingsFailed'))
+      if (mounted.current) {
+        if (!ok) setError(t('remote.settingsFailed'))
+        else if (value) onEnabled?.()
+      }
     } catch {
       if (mounted.current) setError(t('remote.settingsFailed'))
     } finally {
@@ -165,45 +169,71 @@ export function RemoteSwitchRow({ form, t }: { form: SkillsForm; t: Translate })
   </div>
 }
 
-function SshManagementSetting({ form, client, t }: { form: SkillsForm; client: SshSettingsClient; t: Translate }) {
-  const snapshot = useSyncExternalStore(listener => form.subscribe(listener), () => form.getSnapshot())
-  if (snapshot.status !== 'ready' || snapshot.value?.enabled !== true) return null
-  return <EnabledSshManagementSetting client={client} revision={snapshot.revision} t={t} />
-}
-
-function EnabledSshManagementSetting({ client, revision, t }: {
+function SshManagementSetting({ form, client, enableRequest, t }: {
+  form: SkillsForm
   client: SshSettingsClient
-  revision: number | undefined
+  enableRequest: number
   t: Translate
 }) {
-  const [open, setOpen] = useState(false)
+  const snapshot = useSyncExternalStore(listener => form.subscribe(listener), () => form.getSnapshot())
+  const handledEnable = useRef(enableRequest)
+  const takeEnableRequest = useCallback(() => {
+    if (handledEnable.current === enableRequest) return false
+    handledEnable.current = enableRequest
+    return true
+  }, [enableRequest])
+  if (snapshot.status !== 'ready' || snapshot.value?.enabled !== true) return null
+  return <EnabledSshManagementSetting client={client} revision={snapshot.revision} takeEnableRequest={takeEnableRequest} t={t} />
+}
+
+function EnabledSshManagementSetting({ client, revision, takeEnableRequest, t }: {
+  client: SshSettingsClient
+  revision: number | undefined
+  takeEnableRequest: () => boolean
+  t: Translate
+}) {
+  const [dialog, setDialog] = useState<'management' | 'repair'>()
   const [view, setView] = useState<SshSettingsView>()
   const [error, setError] = useState<PanelError>()
   const [refresh, setRefresh] = useState(0)
+  const [checking, setChecking] = useState(false)
+  const recheck = useCallback(() => setRefresh(value => value + 1), [])
+  const close = useCallback(() => setDialog(undefined), [])
 
   useEffect(() => {
     const controller = new AbortController()
+    setChecking(true)
     client.status(controller.signal).then(next => {
       if (controller.signal.aborted) return
       setView(next)
       setError(undefined)
+      const justEnabled = takeEnableRequest()
+      const blocked = next.dependencies !== undefined && next.dependencies.code !== 'ready'
+      if (justEnabled && blocked) setDialog('repair')
+      if (!blocked) setDialog(current => current === 'repair' ? undefined : current)
     }).catch((cause: unknown) => {
-      if (!controller.signal.aborted) setError(cause instanceof PanelError ? cause : new PanelError('unavailable', String(cause)))
-    })
+      if (controller.signal.aborted) return
+      takeEnableRequest()
+      setError(cause instanceof PanelError ? cause : new PanelError('unavailable', String(cause)))
+    }).finally(() => { if (!controller.signal.aborted) setChecking(false) })
     return () => controller.abort()
-  }, [client, revision, refresh])
+  }, [client, revision, refresh, takeEnableRequest])
+
+  const dependencies = view?.dependencies
+  const blocked = dependencies !== undefined && dependencies.code !== 'ready'
   return <>
     <div className="mrfw-skillsSettings">
       <div className="mrfw-skillsSettingsText">
         <div className="mrfw-skillsSettingsTitle">{t('ssh.settings.title')}</div>
-        {view?.dependencies === undefined || view.dependencies.code === 'ready' ? null
-          : <div className="mrfw-skillsSettingsDescription">{t(errorKeyOf(view.dependencies.code))}</div>}
+        {blocked ? <div className="mrfw-skillsSettingsDescription">{t(errorKeyOf(dependencies.code))}</div> : null}
       </div>
-      <Button variant="outline" size="sm" onClick={() => { setRefresh(value => value + 1); setOpen(true) }}>{t('ssh.settings.manage')}</Button>
+      <Button variant="outline" size="sm" onClick={() => { recheck(); setDialog('management') }}>{t('ssh.settings.manage')}</Button>
     </div>
-    {open ? <SshManagementDialog initialTab="connections" fromSettings sessionId={undefined} ssh={client.management}
-      custodyMode={view?.custodyMode} status={view?.status} dependencies={view?.dependencies}
-      overviewError={error} onClose={() => setOpen(false)} onChanged={() => setRefresh(value => value + 1)} t={t} /> : null}
+    {dialog === 'repair' && blocked ? <SshDependencyDialog view={dependencies} checking={checking}
+      error={error} onClose={close} onCheck={recheck} t={t} /> : null}
+    {dialog === 'management' ? <SshManagementDialog initialTab="connections" fromSettings sessionId={undefined} ssh={client.management}
+      custodyMode={view?.custodyMode} status={view?.status} dependencies={dependencies}
+      overviewError={error} onClose={close} onChanged={recheck} t={t} /> : null}
   </>
 }
 
@@ -233,15 +263,17 @@ export function BundleSettingsCard({ form, worktreeForm, autoReviewForm, opsForm
   sshSettings?: SshSettingsClient | undefined
   t: Translate
 }) {
+  const [enableRequest, setEnableRequest] = useState(0)
   return <>
-    {remoteForm === undefined || sshSettings === undefined ? null : <SshManagementSetting form={remoteForm} client={sshSettings} t={t} />}
+    {remoteForm === undefined || sshSettings === undefined ? null
+      : <SshManagementSetting form={remoteForm} client={sshSettings} enableRequest={enableRequest} t={t} />}
     {form === undefined
       ? null
       : <SkillsSettingsCard form={form} worktreeForm={worktreeForm} t={t} />}
     {form === undefined && worktreeForm !== undefined ? <WorktreeSwitchRow form={worktreeForm} t={t} /> : null}
     {autoReviewForm !== undefined ? <AutoReviewSettingsCard form={autoReviewForm} t={t} /> : null}
     {opsForm !== undefined ? <OpsCompatibilitySettingsCard form={opsForm} t={t} /> : null}
-    {remoteForm !== undefined ? <RemoteSwitchRow form={remoteForm} t={t} /> : null}
+    {remoteForm !== undefined ? <RemoteSwitchRow form={remoteForm} t={t} onEnabled={() => setEnableRequest(value => value + 1)} /> : null}
   </>
 }
 

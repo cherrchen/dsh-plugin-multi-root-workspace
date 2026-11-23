@@ -283,6 +283,70 @@ describe('personal SSH remote-environments settings', () => {
     expect(screen.queryByRole('dialog', { name: 'ssh.dialog.title' })).toBeNull()
   })
 
+  it.each(['ssh-deps-missing', 'ready', 'write-failed'] as const)('handles %s after explicit SSH enablement', async outcome => {
+    let snapshot = { value: { enabled: false }, status: 'ready', writable: true, revision: 1 }
+    const { listeners, ...remoteForm } = opsForm(snapshot)
+    const write = Promise.withResolvers<boolean>()
+    remoteForm.getSnapshot = () => snapshot
+    remoteForm.mutate = async () => {
+      if (!await write.promise) return false
+      snapshot = { ...snapshot, value: { enabled: true }, revision: 2 }
+      listeners.forEach(listener => listener())
+      return true
+    }
+    const command = 'dsh plugin --profile web add --save-exact @deepseek-ai/dsh-ssh@0.2.2-rc.5'
+    let installed = false
+    const call = vi.fn(async () => ({
+      ok: true,
+      value: {
+        custodyMode: 'personal', status: { state: 'disabled' }, connections: [],
+        dependencies: {
+          code: outcome === 'ready' ? 'ready' : installed ? 'ssh-deps-restart' : 'ssh-deps-missing',
+          command: installed ? undefined : command,
+          packages: [],
+        },
+      },
+    }))
+    render(<BundleSettingsCard remoteForm={remoteForm} sshSettings={createSshSettingsClient({ rpc: { call } })} t={t} />)
+    fireEvent.click(screen.getByRole('switch', { name: 'remote.settingsEnable' }))
+    const warning = screen.getByRole('dialog', { name: 'remote.confirmTitle' })
+    const confirm = within(warning).getByRole('button', { name: 'remote.confirmEnable' })
+    expect((confirm as HTMLButtonElement).disabled).toBe(true)
+    expect(call).not.toHaveBeenCalled()
+    fireEvent.click(within(warning).getByRole('checkbox'))
+    fireEvent.click(confirm)
+    expect(screen.queryByRole('dialog', { name: 'ssh.dependenciesTitle' })).toBeNull()
+    expect(call).not.toHaveBeenCalled()
+
+    await act(async () => { write.resolve(outcome !== 'write-failed') })
+    expect(screen.queryByRole('dialog', { name: 'remote.confirmTitle' })).toBeNull()
+    if (outcome === 'write-failed') {
+      expect(call).not.toHaveBeenCalled()
+      expect(screen.queryByRole('dialog')).toBeNull()
+      return
+    }
+
+    await waitFor(() => expect(call).toHaveBeenCalled())
+    if (outcome === 'ready') {
+      expect(screen.queryByRole('dialog')).toBeNull()
+      return
+    }
+
+    const repair = await screen.findByRole('dialog', { name: 'ssh.dependenciesTitle' })
+    expect(within(repair).getByText(command)).toBeTruthy()
+    expect(within(repair).getByRole('button', { name: 'ssh.copyInstallCommand' })).toBeTruthy()
+    installed = true
+    fireEvent.click(within(repair).getByRole('button', { name: 'ssh.recheckDependencies' }))
+    expect(await within(repair).findByText('error.ssh-deps-restart')).toBeTruthy()
+    fireEvent.click(within(repair).getByRole('button', { name: 'panel.close' }))
+    expect(screen.queryByRole('dialog', { name: 'ssh.dependenciesTitle' })).toBeNull()
+    await act(async () => {
+      snapshot = { ...snapshot, revision: 3 }
+      listeners.forEach(listener => listener())
+    })
+    expect(screen.queryByRole('dialog', { name: 'ssh.dependenciesTitle' })).toBeNull()
+  })
+
   it('copies the exact dependency repair command and rechecks without opening management before restart', async () => {
     const remoteForm = opsForm({ value: { enabled: true }, status: 'ready', writable: true, revision: 1 })
     const command = "DSH_HOME='/test' dsh plugin --profile web add --save-exact @deepseek-ai/dsh-ssh@0.2.2-rc.5"
@@ -306,6 +370,7 @@ describe('personal SSH remote-environments settings', () => {
     try {
       render(<BundleSettingsCard remoteForm={remoteForm} sshSettings={createSshSettingsClient({ rpc: { call } })} t={t} />)
       await screen.findByText('error.ssh-deps-missing')
+      expect(screen.queryByRole('dialog', { name: 'ssh.dependenciesTitle' })).toBeNull()
       fireEvent.click(screen.getByRole('button', { name: 'ssh.settings.manage' }))
       const dialog = await screen.findByRole('dialog', { name: 'ssh.dialog.title' })
       expect(await within(dialog).findByText(command)).toBeTruthy()

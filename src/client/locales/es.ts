@@ -464,6 +464,7 @@ export const es = {
   'ssh.diagnosticDetails': "Detalles técnicos",
   'ssh.diagnosticVersion': "Se necesita {expected}, se encontró {actual}",
   'ssh.diagnosticExit': "Código de salida {exit}",
+  'ssh.dependenciesTitle': "Instalar dependencias de SSH",
   'ssh.dependenciesProfile': "Perfil {profile} con DSH {version}",
   'ssh.dependenciesInstall': "Cierra por completo este Host DSH. Ejecuta el comando en su equipo con una CLI dsh de la misma versión y reinicia el Host.",
   'ssh.dependenciesNoCommand': "No se pudo identificar un perfil de CLI. Repara las dependencias con las herramientas de perfiles admitidas por la aplicación.",

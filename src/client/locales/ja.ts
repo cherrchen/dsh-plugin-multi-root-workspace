@@ -464,6 +464,7 @@ export const ja = {
   'ssh.diagnosticDetails': "技術詳細",
   'ssh.diagnosticVersion': "必要 {expected}、検出 {actual}",
   'ssh.diagnosticExit': "終了コード {exit}",
+  'ssh.dependenciesTitle': "SSH の依存関係をインストール",
   'ssh.dependenciesProfile': "プロファイル {profile} · DSH {version}",
   'ssh.dependenciesInstall': "現在の DSH Host を完全に終了してください。同じバージョンの dsh CLI で Host のマシン上でコマンドを実行し、Host を再起動してください。",
   'ssh.dependenciesNoCommand': "対応する CLI プロファイルを特定できませんでした。現在のアプリが対応するプロファイル管理方法で依存関係を修復してください。",

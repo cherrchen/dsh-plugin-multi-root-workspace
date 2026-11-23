@@ -2520,9 +2520,46 @@ button.mrfw-choice:hover:not(:disabled) {
   padding: 0 24px 24px;
 }
 
+.mrfw-sshDependencyDialog {
+  width: min(600px, 100%);
+}
+
+.mrfw-sshDependencySummary {
+  margin: 0;
+  color: var(--dsw-alias-label-primary);
+  font-size: 14px;
+  line-height: 22px;
+  font-weight: 500;
+}
+
+.mrfw-sshDependencyDialog .mrfw-note,
+.mrfw-sshDependencyPackages {
+  color: var(--dsw-alias-label-secondary);
+  font-size: 13px;
+  line-height: 20px;
+}
+
+.mrfw-sshDependencyPackages {
+  display: grid;
+  gap: 4px;
+  margin: 0;
+  padding-inline-start: 20px;
+  overflow-wrap: anywhere;
+}
+
 .mrfw-sshDependencyCommand {
+  padding: 10px 12px;
+  border: 1px solid var(--dsw-alias-border-l3);
+  border-radius: 8px;
+  background: var(--dsw-alias-settings-card-fill);
   overflow-wrap: anywhere;
   user-select: text;
+}
+
+.mrfw-sshDependencyActions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
 }
 
 .mrfw-sshSettingsHeading {

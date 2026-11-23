@@ -27,7 +27,7 @@ English: [ssh-remote-environments.en.md](./ssh-remote-environments.en.md)
 
 ## 安装当前 Profile 的 SSH 依赖
 
-安装 Multi-root Workspace 后即可使用本地工作区功能。开启个人 SSH 后，进入「管理 SSH 远端」查看当前 Profile 的四包状态。依赖已就绪时可直接配置连接。
+安装 Multi-root Workspace 后即可使用本地工作区功能。确认开启个人 SSH 后，若当前 Profile 的依赖未就绪，界面会自动打开「安装 SSH 依赖」对话框。关闭后可从「管理 SSH 远端」再次查看四包状态。依赖已就绪时可直接配置连接。
 
 1. 如果界面提示缺失、只安装了一部分或版本不符，点击 **复制安装命令**。
 2. 完全退出相应的 DSH Host。在运行 DSH 的机器上，使用与界面显示的 Host **完全同版**的 `dsh` CLI 执行命令。Web 使用运行 Web Host 的机器，Desktop 先退出应用再执行 `desktop` Profile 的命令。命令包含当前 Profile、DSH Home 和四个精确版本。

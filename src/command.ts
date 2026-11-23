@@ -866,7 +866,9 @@ async function dispatchPanelRequest(
         const value: SshSettingsView = {
           custodyMode: registry.remoteMode,
           status: registry.remoteStatus,
-          ...(registry.remoteEnabled && registry.remoteMode === 'personal' ? { dependencies: inspectSshProfile(ctx).view } : {}),
+          // The settings write may settle before the remote plane applies its
+          // switch. Dependency inspection is read-only and independent of it.
+          ...(registry.remoteMode === 'personal' ? { dependencies: inspectSshProfile(ctx).view } : {}),
           // The legacy wire field remains for older clients. Personal
           // connections are returned by sshState.
           connections: [],

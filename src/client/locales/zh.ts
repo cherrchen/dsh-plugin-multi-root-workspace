@@ -463,6 +463,7 @@ export const zh = {
   'ssh.diagnosticDetails': "技术详情",
   'ssh.diagnosticVersion': "要求 {expected}，实际 {actual}",
   'ssh.diagnosticExit': "退出码 {exit}",
+  'ssh.dependenciesTitle': "安装 SSH 依赖",
   'ssh.dependenciesProfile': "配置档 {profile} · DSH {version}",
   'ssh.dependenciesInstall': "完全退出当前 DSH Host。在运行 DSH 的机器上，用相同版本的 dsh CLI 执行命令，然后重新启动 Host。",
   'ssh.dependenciesNoCommand': "无法确定适用的 CLI Profile。请使用当前应用支持的 Profile 管理方式修复依赖。",

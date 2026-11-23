@@ -464,6 +464,7 @@ export const ru = {
   'ssh.diagnosticDetails': "Технические сведения",
   'ssh.diagnosticVersion': "Требуется {expected}, обнаружено {actual}",
   'ssh.diagnosticExit': "Код выхода {exit}",
+  'ssh.dependenciesTitle': "Установка зависимостей SSH",
   'ssh.dependenciesProfile': "Профиль {profile} · DSH {version}",
   'ssh.dependenciesInstall': "Полностью закройте этот хост DSH. Выполните команду на его машине с той же версией CLI dsh, затем запустите хост снова.",
   'ssh.dependenciesNoCommand': "Не удалось определить профиль CLI. Исправьте зависимости средствами управления профилями текущего приложения.",

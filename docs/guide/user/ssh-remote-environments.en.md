@@ -27,7 +27,7 @@ Personal SSH is experimental and off by default. Once enabled, the Agent can use
 
 ## Install the SSH dependencies for the current profile
 
-Installing Multi-root Workspace makes the local workspace features available. After enabling personal SSH, open **Manage SSH environments** to see the four packages for the active profile. If they are ready, proceed to connection setup.
+Installing Multi-root Workspace makes the local workspace features available. After you confirm that you want to enable personal SSH, **Install SSH dependencies** opens automatically if the active profile needs attention. You can close it and check the four packages later in **Manage SSH environments**. If the dependencies are ready, proceed to connection setup.
 
 1. If a package is missing, only part of the set is installed, or a version differs, click **Copy install command**.
 2. Fully quit the affected DSH Host. Run the command on the machine hosting DSH using the `dsh` CLI at the **exact** release shown in the dialog. For Web, use the machine running the Web Host. For Desktop, quit the app before running the command for the `desktop` profile. The command includes the active profile, DSH Home, and four exact package versions.
