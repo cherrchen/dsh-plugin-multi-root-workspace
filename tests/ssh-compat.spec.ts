@@ -61,14 +61,15 @@ describe('classifySshCapability', () => {
   })
 
   it('reports each SSH package and absents on missing, mixed, or private copies', () => {
+    expect(gate({ readVersion: readers(undefined) })).toMatchObject({ status: 'absent', reason: 'missing-optional-package' })
     const missing = gate({ readVersion: readers('0.2.2-rc.1', { '@deepseek-ai/dsh-ssh': undefined }) })
-    expect(missing).toMatchObject({ status: 'absent', reason: 'missing-optional-package' })
+    expect(missing).toMatchObject({ status: 'absent', reason: 'partial-optional-packages' })
     expect(missing.status === 'absent' && missing.detail).toContain('@deepseek-ai/dsh-ssh')
     expect(missing.status === 'absent' && missing.packages.length).toBe(4)
     expect(gate({ readVersion: readers('0.2.2-rc.1', { '@deepseek-ai/dsh-fs-ssh': '0.2.1-rc.5' }) }))
-      .toMatchObject({ status: 'absent', reason: 'identity-mismatch' })
+      .toMatchObject({ status: 'absent', reason: 'version-mismatch' })
     expect(gate({ privateCopy: name => name === '@deepseek-ai/dsh-subprocess-ssh' }))
-      .toMatchObject({ status: 'absent', reason: 'identity-mismatch' })
+      .toMatchObject({ status: 'absent', reason: 'private-copy' })
     expect(gate({ privateCopy: name => name === 'unrelated' })).toMatchObject({ status: 'eligible', release: '0.2.2-rc.1' })
   })
 

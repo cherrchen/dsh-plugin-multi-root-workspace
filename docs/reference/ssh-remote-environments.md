@@ -6,6 +6,13 @@
 
 当前公开构建只提供个人 SSH。默认组合通过 `multi-root-remote-tools.enabled` 开关启用，默认关闭。启用后，Host 从 `remoteEnvironments.personalPath` 读取连接，从 `remoteEnvironments.credentialRoot` 读取插件托管的凭据；也可引用本机 `~/.ssh/config` 中的别名。个人模式下，本机 DSH Host 持有凭据，同一操作系统账号下的进程可能访问这些凭据。
 
+### Host Profile 依赖
+
+- `SUPPORTED_SSH_RELEASES` 是 SSH 支持的精确版本真源。四个官方包分别为 `@deepseek-ai/dsh-ssh`、`@deepseek-ai/dsh-fs-ssh`、`@deepseek-ai/dsh-subprocess-ssh` 和 `@deepseek-ai/dsh-sandbox-ssh`，都须与当前 Host 同版。它们在插件 manifest 中仍是 optional peers，局部安装故障只阻断 SSH。
+- 上游 Profile 使用 `nodeLinker: hoisted`、`autoInstallPeers: false`。CLI 的 `dsh plugin --profile <name> add` 支持普通 npm 依赖，并将它们写入该 Profile 的 `package.json` 与锁文件，安装到该 Profile 的 `node_modules`。Bundle 选择保持原样。官方安装闭包为共用包提供回退。运行中 Plugin Manager 的 Bundle 安装接口拒绝普通包。决策依据见 [ADR-0049](../decisions/ADR-0049-ssh-custody-modes.md)。
+- 插件优先使用上游发布的安装闭包中的 SSH 包，否则从当前 Profile 的直接依赖中解析。Profile 副本的模块入口必须位于对应包目录，DSH/Cordis peers 必须指向当前安装闭包，SSH 包间的 peer 必须指向同一组副本。插件私有副本只用于诊断。启动时记录的包位置和身份与现状不同则要求重启。重新检测只读取状态，开关、工具启动及 RPC 均不会运行本地包管理器。
+- Settings 的 `status` 和工作区的 `remotes` 可返回 `dependencies`，含 Host 版本、可用的 Profile 名称、每包状态和可选的精确安装命令。仅在启动器目录对应 CLI 管理的 Profile 时生成命令。用户步骤见[个人 SSH 指南](../guide/user/ssh-remote-environments.md#安装当前-profile-的-ssh-依赖)。
+
 ### 停用的旧配置
 
 Host 将显式的 `team`、`hardened` 或其他不支持的模式视为停用。旧版配置了部署清单且未显式指定个人模式的 Registry 行、以及仅配置 broker 或 team 参数而未指定模式的工具行，同样保持停用。发布包移除了 SSH broker 入口和安装脚本。Broker 设计留作研发记录，见 [ADR-0049](../decisions/ADR-0049-ssh-custody-modes.md) 和[控制面参考](./multi-environment-control-plane.md)。
@@ -67,6 +74,8 @@ SFTP 使用独立的 SSH 子进程，同样在命令行强制 `StrictHostKeyChec
 ## Helper 安装与密码访问密钥引导
 
 - Helper 安装使用与 Host 同版的 `@deepseek-ai/dsh-ssh`。Host 逐个比对包内 `lib/*`，并记录安装后 `node_modules` 文件集摘要 `treeSha256`。打开新连接前，Host 先验证远端入口脚本与由该摘要重建的脚本一致。入口脚本启动时重新验证文件集，再加载 Helper。上游 hello 仍以 `helper.sha256` 校验 `helper.js`。早于 `integrity: 2` 的 personal Helper 需要重新安装。该检查信任 SSH 对端和首次 npm 安装，后续校验由 Helper 入口执行。
+- Helper 需要远端 Linux 或 macOS、Node.js ≥ 24.9.0、npm 和可写的 `~/.dsh-helper/<version>`。Host 首先检查依赖、已有 revision 和已保存别名身份。远端预检查确认平台、规范化绝对路径、Node 版本、npm 及目标或最近现存父目录权限，然后执行一次 npm 安装。安装验证通过后以原子替换部署入口，最后按原 revision CAS 登记 Helper。收到不确定结果时不重发写操作。
+- RPC 在既有 `{ code, message, details }` 的 `details` 中附带 `stage`、`retryable`、`remediation`、可选退出码、版本和远端完成/登记状态。错误阶段为 `host-preflight`、`ssh-connect`、`remote-prerequisites`、`remote-install`、`artifact-verification`、`entry-generation`、`config-commit`。npm 诊断使用结构化结果。OpenSSH 退出 255 时仅识别明确的标准诊断，详情仅包含安全摘录。未识别的退出归到独立的未知错误。远端已安装或已校验与 Host 已登记分别记录。
 - 编辑连接：派生的 `accessKeyId` 由 Host 从已保存记录保留，前端无需回传；仅 environmentId、hostname/port/user、credentialId 与已确认主机指纹均未变化时继承。改变身份后必须重新安装访问密钥，不能通过保存请求移植旧密钥。
 - 密码引导先做 revision 预检，然后固定已确认的主机公钥、账号及一次性密码副本。远端按公钥精确、串行地更新 `authorized_keys`。保存冲突时，目标身份和访问密钥引用均未变化才允许复用密钥重试一次。仍失败则用同一目标回滚远端条目，再删除本地密钥。如果远端无法确认回滚或读不出持久状态，返回 `access-key-reconcile-required`，保留该密钥记录及核对编号。
 - 私钥导入：带口令的私钥经 `SSH_ASKPASS`/`SSH_ASKPASS_REQUIRE=force`（凭据根内私有临时目录中的 0600 口令文件 + 0700 脚本，用完即删）把旧口令交给 `ssh-keygen -p` 解密后重新保存，口令不进入命令行参数；材料或口令被拒报 `credential-import-failed` 并清除半成品密钥文件。

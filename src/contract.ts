@@ -30,6 +30,7 @@
  */
 
 import { z } from 'zod'
+import { sshFailureDetailsSchema, type SshFailureDetails } from './remote/ssh-diagnostics.ts'
 import type { SkillsResponseMap } from './skills-contract.ts'
 import type { WorktreePromptAnswerView, WorktreePromptWaitView, WorktreeResetAnswerView, WorktreeResolveAnswerView, WorktreeSeenAnswerView } from './worktrees-contract.ts'
 export { SKILLS_ENDPOINTS, skillsRequestSchema, skillsCatalogSchema, skillsPreviewSchema, skillsStatusSchema } from './skills-contract.ts'
@@ -292,6 +293,7 @@ export interface PanelFailure {
   readonly code: string
   /** Human-readable fallback text. */
   readonly message: string
+  readonly ssh?: SshFailureDetails
 }
 
 /** One parse result: the value, or one sentence naming what was wrong. */
@@ -500,7 +502,8 @@ export function parseSearchView(value: unknown): Parsed<SearchView> {
 export function parseErrorView(value: unknown): PanelFailure | undefined {
   const parsed = errorViewSchema.safeParse(value)
   if (!parsed.success) return undefined
-  return { code: parsed.data.code, message: parsed.data.message }
+  const ssh = sshFailureDetailsSchema.safeParse(parsed.data.details)
+  return { code: parsed.data.code, message: parsed.data.message, ...(ssh.success ? { ssh: ssh.data } : {}) }
 }
 
 /**

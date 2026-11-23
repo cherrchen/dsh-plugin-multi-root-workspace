@@ -450,17 +450,25 @@ export type SshAbsentReason =
   | 'local-compat-not-supported'
   | 'host-below-floor'
   | 'missing-optional-package'
+  | 'partial-optional-packages'
+  | 'version-mismatch'
+  | 'private-copy'
   | 'identity-mismatch'
 
 /** The SSH gate's verdict: loadable, or absent with exactly one reason. */
 export type SshCapability =
-  | { readonly status: 'eligible'; readonly release: string }
+  | { readonly status: 'eligible'; readonly release: string; readonly locations?: Readonly<Record<string, SshPackageLocation>> }
   | {
       readonly status: 'absent'
       readonly reason: SshAbsentReason
       readonly detail: string
       readonly packages: readonly InspectedPackage[]
     }
+
+export interface SshPackageLocation {
+  readonly root: string
+  readonly entry: string
+}
 
 export interface SshCapabilityInput {
   readonly platform: NodeJS.Platform
@@ -496,13 +504,18 @@ export function classifySshCapability(input: SshCapabilityInput): SshCapability 
   if (!(SUPPORTED_SSH_RELEASES as readonly string[]).includes(release)) {
     return sshAbsent('host-below-floor', `DSH ${release} is below the SSH support floor (${SUPPORTED_SSH_RELEASES.join(', ')})`, packages)
   }
+  const privatePackages = packages.filter(entry => input.privateCopy?.(entry.name) === true)
+  if (privatePackages.length > 0) {
+    return sshAbsent('private-copy', `SSH packages resolve privately: ${privatePackages.map(entry => entry.name).join(', ')}`, packages)
+  }
   const missing = packages.filter(entry => entry.version === undefined)
   if (missing.length > 0) {
-    return sshAbsent('missing-optional-package', `SSH packages are not installed: ${missing.map(entry => entry.name).join(', ')}`, packages)
+    return sshAbsent(missing.length === packages.length ? 'missing-optional-package' : 'partial-optional-packages',
+      `SSH packages are not installed: ${missing.map(entry => entry.name).join(', ')}`, packages)
   }
-  const off = packages.filter(entry => entry.version !== release || input.privateCopy?.(entry.name) === true)
+  const off = packages.filter(entry => entry.version !== release)
   if (off.length > 0) {
-    return sshAbsent('identity-mismatch', `SSH packages do not match the host release or resolve privately: ${off.map(entry => entry.name).join(', ')}`, packages)
+    return sshAbsent('version-mismatch', `SSH packages do not match the host release: ${off.map(entry => entry.name).join(', ')}`, packages)
   }
   return { status: 'eligible', release }
 }

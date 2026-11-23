@@ -25,9 +25,19 @@ Personal SSH is experimental and off by default. Once enabled, the Agent can use
    - **Plugin detail page**: once enabled, a **Remote SSH → Manage** button appears at the top of the card (manages global connections without an active session).
    - **Workspace Folders dialog**: click **Folders** at the bottom of the sidebar (or the New Session hero entry) → under **Remote working directories**, click **Manage SSH remotes…**.
 
-## Setting up connections and bindings
+## Install the SSH dependencies for the current profile
 
-Personal mode is configured entirely in the GUI and requires no root privileges, dedicated OS account, or deployment manifest.
+Installing Multi-root Workspace makes the local workspace features available. After you confirm that you want to enable personal SSH, **Install SSH dependencies** opens automatically if the active profile needs attention. You can close it and check the four packages later in **Manage SSH environments**. If the dependencies are ready, proceed to connection setup.
+
+1. If a package is missing, only part of the set is installed, or a version differs, click **Copy install command**.
+2. Fully quit the affected DSH Host. Run the command on the machine hosting DSH using the `dsh` CLI at the **exact** release shown in the dialog. For Web, use the machine running the Web Host. For Desktop, quit the app before running the command for the `desktop` profile. The command includes the active profile, DSH Home, and four exact package versions.
+3. Restart the Host with the same profile and reopen **Manage SSH environments**. If a dependency message remains, click **Recheck dependencies** and review the state of each package. The check only reads state. When the running Host detects repaired files, it still requires a restart.
+
+After changing DSH versions, run the command shown by the new Host to align all four packages. See the [SSH technical reference](../../reference/ssh-remote-environments.md#host-profile-依赖) for version and deployment details.
+
+## Set up connections and directory bindings
+
+With the profile ready, configure connections and bindings in the GUI. No root access, separate system account, or deployment manifest is required.
 
 ### Step 1: Prepare credentials (pick one)
 
@@ -49,7 +59,7 @@ Personal mode is configured entirely in the GUI and requires no root privileges,
 3. **Step 2 (Connection setup)**:
    - **Password credentials**: click **Install access key** first so the plugin logs in once with the saved password and installs the access key.
    - **Linking managed config**: if prompted that the config is not linked, click **Link ~/.ssh/config**. The plugin backs up your existing `~/.ssh/config` and prepends a single `Include` line so the managed host alias resolves (required before connecting). If `~/.ssh/config` is a symlink, the change lands on the link target and the symlink itself is preserved.
-   - **Install helper** (recommended; required for command execution and object-identity verification): optionally click **Detect Node**, then click **Install helper**. The plugin installs the exact host-matching `@deepseek-ai/dsh-ssh` version under `~/.dsh-helper/<version>` and writes an entry script that re-verifies the whole installed dependency file set on every launch (requires Node.js on the remote host with `command -v node` resolving to an absolute path).
+   - **Install helper** (recommended; required for command execution and object-identity verification): optionally click **Detect Node**, then click **Install helper**. The plugin installs the exact host-matching `@deepseek-ai/dsh-ssh` version under `~/.dsh-helper/<version>` and writes an entry script that re-verifies the whole installed dependency file set on every launch (requires remote Node.js 24.9.0 or later at a normalized absolute path, a working npm, and a writable installation directory). If the remote PATH selects an older version, enter the absolute path to the newer Node executable in the connection card’s installation form.
    - Check **Allow command execution** (requires the helper) and/or **Allow file transfer**, then click **Finish**.
 
 ### Step 3: Bind a directory to the workspace and register
@@ -74,6 +84,7 @@ Turn off **SSH remote environments** in the plugin settings to shut down the rem
 - **`endpoint-unverifiable`** — Check that the Host uses a supported DSH release and has all four matching SSH packages installed.
 - **`ssh-config-not-linked`** (Personal mode): a managed credential environment exists, but the generated config is not yet linked into `~/.ssh/config`. Click **Link ~/.ssh/config** under **Remote connections**.
 - **`access-key-reconcile-required`**: installation or rollback could not be confirmed. Use the key ID in the error message to check `authorized_keys` on the original SSH host before retrying.
+- **Helper installation failed**. The connection screen shows the stage, what to do next, and expandable technical details. If remote files may have changed, check the server’s installation directory and npm logs first. If the remote Helper was verified and Host registration is unconfirmed, reload the connection state before deciding whether to reinstall. See [SSH troubleshooting](../../troubleshooting/ssh-panel-operation-failed.md#helper-安装诊断).
 - **`helper-outdated`**: the recorded helper predates host-side entry verification; click **Install helper** again on that connection card.
 - **`unknown` result with `reconcileId`**: connection dropped after a remote command started or after sending a file publish request. Tools never auto-retry to avoid duplicate execution or overwrites; reconcile on the remote host or in the Broker audit log using `reconcileId`.
 

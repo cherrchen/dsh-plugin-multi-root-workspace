@@ -29,6 +29,7 @@ import {
   type PanelRequest,
   type PanelResponseMap,
 } from '../contract.ts'
+import type { SshFailureDetails } from '../remote/ssh-diagnostics.ts'
 import { zh, type Key } from './locales.ts'
 
 /**
@@ -47,7 +48,7 @@ export class PanelError extends Error {
    * @param code - stable code from the root vocabulary, or a transport code.
    * @param message - the host's fallback text.
    */
-  constructor(readonly code: string, message: string) {
+  constructor(readonly code: string, message: string, readonly ssh?: SshFailureDetails) {
     super(message)
     this.name = 'PanelError'
   }
@@ -96,7 +97,8 @@ const DETAIL_CODES = new Set([
   'remote-path-listing-failed',
 ])
 
-export function errorHasDetail(code: string): boolean {
+export function errorHasDetail(code: string, ssh?: SshFailureDetails): boolean {
+  if (ssh !== undefined) return true
   // A code with no exact key (transport, suffixed, or unknown) means the
   // localized text cannot name the failure; the host message must show.
   return code === 'unavailable' || code.startsWith('panel/') || DETAIL_CODES.has(code) || !(`error.${code}` in zh)
@@ -137,7 +139,7 @@ export function createPanelClient(connection: ConnectionHandle): PanelClient {
         const failure = parseErrorView(result.error)
         throw failure === undefined
           ? new PanelError('unavailable', 'the host answered with an unreadable failure')
-          : new PanelError(failure.code, failure.message)
+          : new PanelError(failure.code, failure.message, failure.ssh)
       }
       return expectShape(endpoint, result.value)
     },

@@ -17,7 +17,7 @@ import { IconCheck, IconLink } from '../../compat/client-icons.ts'
 import { SshButton as Button } from '../panel-buttons.tsx'
 import { CredentialsPanel, platformLabel, type CredentialCreateKind } from '../ssh-panel.tsx'
 import { PanelError } from '../panel-client.ts'
-import { PanelErrorToast } from '../error-toast.tsx'
+import { PanelErrorToast, SshErrorDetail } from '../error-toast.tsx'
 import { StatusLine } from '../pending.tsx'
 import { ChoiceCard, WizardActions, WizardShell } from './kit.tsx'
 import { ConnectForm, EnvironmentSetup, HostKeyPick, nodeCheckOf, type NodeCheck } from './env-parts.tsx'
@@ -227,7 +227,6 @@ export function AddConnectionWizard(props: AddConnectionWizardProps): ReactNode 
       setTestResult(result.nodePath ?? 'ok')
       const check = nodeCheckOf(result)
       setNodeCheck(check)
-      if (check.kind === 'old') setError(new PanelError('node-too-old', check.version ?? ''))
     } catch (cause) {
       if (!signal.aborted) {
         setTestResult(undefined)
@@ -337,6 +336,7 @@ export function AddConnectionWizard(props: AddConnectionWizardProps): ReactNode 
           subtitle={sshTarget(created.endpoint.user, created.endpoint.hostname, created.endpoint.port)}
           icon={<IconLink size={16} />}
           trailing={<Tag tone="info" className="mrfw-sshTag">{platformLabel(created.platform, t)}</Tag>} />
+        <SshErrorDetail error={error} t={t} />
         <EnvironmentSetup
           environment={created}
           needsAccessKey={needsAccessKey === true}
@@ -390,7 +390,7 @@ export function AddConnectionWizard(props: AddConnectionWizardProps): ReactNode 
       complete={done}
       footer={footer}
     >
-      <PanelErrorToast error={error} t={t} />
+      <PanelErrorToast error={error?.ssh === undefined ? error : undefined} t={t} />
       {body}
     </WizardShell>
     {credsOpen && view !== undefined ? (

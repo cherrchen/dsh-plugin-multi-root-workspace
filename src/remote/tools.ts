@@ -9,7 +9,7 @@ import z from '@deepseek-ai/schemastery'
 import type {} from '../compat.ts'
 import type {} from '../providers.ts'
 import { configValue, volatileField } from '../compat/skills.ts'
-import { classifySshCapability, sshPackageVersion, sshPrivateCopy } from '../compat/dsh-version.ts'
+import { captureSshProfile, inspectSshProfile } from '../compat/ssh-profile.ts'
 import { installRemoteSettings, readRemoteSettingsValue, type RemoteSettingsValue } from '../compat/remote-settings.ts'
 import { mountRemoteTools } from './tools-registration.ts'
 
@@ -31,6 +31,7 @@ export const Config = z.object({
 export const inject = ['multiRootCompat', 'multiRootProviders', 'multiRootRegistry', 'tools', 'sandboxPolicy', 'sessions']
 
 export function apply(ctx: Context, config: Config = {}): void {
+  captureSshProfile(ctx)
   const registry = ctx.multiRootRegistry
   let child: Fiber | undefined
   let closed = false
@@ -40,17 +41,13 @@ export function apply(ctx: Context, config: Config = {}): void {
   const hasLegacyBroker = configValue(config.team) !== undefined || configValue(config.broker) !== undefined
   const configuredMode = mode === undefined && hasLegacyBroker ? 'legacy-broker' : mode
 
-  const mount = (scope: Context): void => {
-    if (classifySshCapability({
-      platform: process.platform, local: scope.multiRootCompat.report,
-      readVersion: sshPackageVersion, privateCopy: sshPrivateCopy,
-    }).status !== 'eligible') return
-
+  const resolveGate = () => inspectSshProfile(ctx).gate
+  const mount = (scope: Context, gate: NonNullable<ReturnType<typeof resolveGate>>): void => {
     void scope.effect(async function* () {
       const { SshEnvironmentManager } = await import('./ssh-environment.ts')
       const credentialRoot = registry.remoteCredentialRoot
       const manager = new SshEnvironmentManager({
-        manifest: registry.remoteManifest, logger: scope.logger, custody: 'personal',
+        manifest: registry.remoteManifest, logger: scope.logger, custody: 'personal', gate, resolveGate,
         managedKnownHostsFile: credentialRoot === undefined ? undefined : join(credentialRoot, 'known_hosts'),
       })
       yield () => manager.disposeAll()
@@ -77,7 +74,10 @@ export function apply(ctx: Context, config: Config = {}): void {
       if (!registry.remoteEnabled) { await unmount(); return }
       // Personal config changes rebind the existing manager, including while
       // the plane is temporarily unready. Wait for readiness on the first mount.
-      if (child === undefined && registry.remoteStatus.state === 'ready') child = ctx.plugin(mount).ctx.fiber
+      if (child === undefined && registry.remoteStatus.state === 'ready') {
+        const gate = resolveGate()
+        if (gate !== undefined) child = ctx.plugin(scope => mount(scope, gate)).ctx.fiber
+      }
       return
     }
     try {

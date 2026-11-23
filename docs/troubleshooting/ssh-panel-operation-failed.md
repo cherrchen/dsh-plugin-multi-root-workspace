@@ -71,13 +71,20 @@
 
 另：`endpoint-unverifiable`、`ssh-config-not-linked`、`host-identity-unverifiable`、`invalid-manifest`、`workspace-invalid` 的 Host message 现在都透传到面板（`errorHasDetail`），同一文案背后的三种原因（校验器缺失 / 只读 confine 不满 / 探针超时）不再被压平。
 
-### 报错只剩 `Command failed: ssh ...`（括号内无原因）
+## Helper 安装诊断
 
-`execFile` 非零退出时 error.message 只有命令行，真实原因（`Permission denied`、`Connection timed out`、`Host key verification failed`）在 `error.stderr` 上被丢弃；`defaultExec` 现在把退出码/信号与 stderr（截断）附进报错。
+设置页显示本地依赖缺失、部分安装、版本错误、私有副本、解析失败或需要重启。打开「管理 SSH 远端」，核对当前 Profile 和 DSH 版本。按[个人 SSH 指南](../guide/user/ssh-remote-environments.md#安装当前-profile-的-ssh-依赖)退出 Host、安装并重新检测。Web 页面刷新本身不会重启 Host。
 
-其中 `command -v node` 这条还有个可达性缺陷：远端缺 node 时它退出 1，`execFile` 直接 reject，带文案的 `helper-node-missing` 永远不可达（`testConnection` 的探针有 `|| true`，`installHelper` 漏了）。已对齐为 `command -v node || true`：空输出落到 `checkRemotePath`，正常抛 `helper-node-missing`。
+| 阶段 | 常见原因与处理 |
+| --- | --- |
+| 本地 Host 预检查 | 依赖未就绪或同版 Host Helper 文件无法读取。检查 Profile 包状态及 OpenSSH。 |
+| SSH 连接 | 从 Host 检查域名、端口或认证。指纹失败时先经独立可信渠道核对，再更新连接。 |
+| 远端环境检查 | 检查 Node.js ≥ 24.9.0、绝对路径、npm、`HOME` 和目录访问权限。 |
+| 远端安装 | 确认 Registry 可访问且包含该精确版本，检查远端 npm 自己的日志和磁盘空间。安装超时或连接中断后先确认目录现状。 |
+| 产物校验或入口部署 | npm 可能已成功。核对远端包文件、摘要和写权限。连接只会运行经校验并被 Host 登记的 Helper。 |
+| Host 配置登记 | 远端可能已成功。重新加载连接信息，检查 revision 或配置写入权限。确认当前状态后再决定是否重新安装。 |
 
-同一函数里 `printf %s "$HOME"` / `sha256sum` 这类秒级探测在小规格远端 `npm install` 刚结束的颠簸窗口内会因连接瞬断失败；三者各自动重试一次（`npm install` 本身永不重试），持续性失败仍以原样报错。
+错误详情只保留稳定代码、阶段和有限的安全诊断。原始 npm 日志留在远端，SSH 凭据及命令参数不通过 RPC 返回。
 
 ### 安装 helper 走到最后一步报「个人配置无效，未写入。」
 

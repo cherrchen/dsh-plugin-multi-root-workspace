@@ -25,9 +25,19 @@ English: [ssh-remote-environments.en.md](./ssh-remote-environments.en.md)
    - **插件详情页**：开启后设置卡顶部会出现「**SSH 远端 → 管理**」按钮（此入口可在无活动会话时管理全局连接）。
    - **工作区面板**：点击侧栏底部的 **工作区目录（Folders）**（或新会话页工作区行右侧入口）→ 在「远端工作目录」区点击 **管理 SSH 远端…**。
 
+## 安装当前 Profile 的 SSH 依赖
+
+安装 Multi-root Workspace 后即可使用本地工作区功能。确认开启个人 SSH 后，若当前 Profile 的依赖未就绪，界面会自动打开「安装 SSH 依赖」对话框。关闭后可从「管理 SSH 远端」再次查看四包状态。依赖已就绪时可直接配置连接。
+
+1. 如果界面提示缺失、只安装了一部分或版本不符，点击 **复制安装命令**。
+2. 完全退出相应的 DSH Host。在运行 DSH 的机器上，使用与界面显示的 Host **完全同版**的 `dsh` CLI 执行命令。Web 使用运行 Web Host 的机器，Desktop 先退出应用再执行 `desktop` Profile 的命令。命令包含当前 Profile、DSH Home 和四个精确版本。
+3. 使用同一 Profile 重新启动 Host，再打开「管理 SSH 远端」。如仍显示依赖提示，点击 **重新检测依赖**，根据各包状态定位。检测只读取状态，当前进程发现磁盘已修复时仍提示重启。
+
+更换 DSH 版本后，用新 Host 提供的命令重新对齐四个包。版本与部署边界见 [SSH 技术参考](../../reference/ssh-remote-environments.md#host-profile-依赖)。
+
 ## 设置连接与目录绑定
 
-个人模式完全在 GUI 中完成配置，无需 root 权限、独立系统账户或部署清单文件。
+Profile 就绪后，连接和绑定在 GUI 中配置，无需 root 权限、独立系统账户或部署清单文件。
 
 ### 第 1 步：准备凭据（二选一）
 
@@ -49,7 +59,7 @@ English: [ssh-remote-environments.en.md](./ssh-remote-environments.en.md)
 3. **第 2 步（连接设置）**：
    - **密码凭据**：先点击 **安装访问密钥**，使用刚才保存的密码登录一次并在远端写入访问密钥。
    - **托管凭据链接**：如果界面提示「尚未链接」，点击 **链接到 ~/.ssh/config**。插件会先备份原 `~/.ssh/config`，再在其首行写入一条 `Include` 指令以使托管别名生效（未链接前无法建立连接）。`~/.ssh/config` 是符号链接时，改动落在链接目标上、符号链接保持不变。
-   - **安装 Helper**（如需命令执行或对象级核验，推荐安装）：可先点 **检测 Node**，再点击 **安装 Helper**（插件会通过 SSH 在远端 `~/.dsh-helper/<版本>` 安装与宿主完全同版的 `@deepseek-ai/dsh-ssh`，并写入一个每次启动都会校验整个依赖文件集的入口脚本；要求远端已安装 Node.js 且 `command -v node` 返回绝对路径）。
+   - **安装 Helper**（如需命令执行或对象级核验，推荐安装）：可先点 **检测 Node**，再点击 **安装 Helper**（插件会通过 SSH 在远端 `~/.dsh-helper/<版本>` 安装与宿主完全同版的 `@deepseek-ai/dsh-ssh`，并写入一个每次启动都会校验整个依赖文件集的入口脚本；要求远端 Node.js ≥ 24.9.0、可运行的 npm 和可写安装目录，Node 路径须为规范化绝对路径）。如果远端 PATH 选中了旧版本，可在连接卡片的安装表单内指定新版 Node 的绝对路径。
    - 勾选 **允许命令执行**（需 Helper 已安装）和/或 **允许文件传输**，点击 **完成**。
 
 ### 第 3 步：绑定目录到工作区并登记
@@ -74,6 +84,7 @@ English: [ssh-remote-environments.en.md](./ssh-remote-environments.en.md)
 - **`endpoint-unverifiable`** — 确认 Host 使用受支持的 DSH 版本，并已安装四个版本匹配的 SSH 可选包。
 - **`ssh-config-not-linked`**（个人模式）：存在托管凭据的环境但尚未把插件生成的配置链接进 `~/.ssh/config`，在「远端连接」中点击 **链接到 ~/.ssh/config**。
 - **`access-key-reconcile-required`**：安装或回滚的结果无法确认。使用错误消息中的密钥编号，在原 SSH 主机上核对 `authorized_keys` 后再重试。
+- **Helper 安装失败**：连接页显示失败阶段、修复建议和可展开的技术详情。如果显示远端可能已改动，先检查服务器上的安装目录和 npm 日志。如果显示远端已校验但 Host 登记未确认，先重新读取连接状态，再决定是否重新安装。参见 [SSH 故障排查](../../troubleshooting/ssh-panel-operation-failed.md#helper-安装诊断)。
 - **`helper-outdated`**：记录的 Helper 早于 Host 侧入口完整性校验，在对应连接卡片上重新 **安装 Helper**。
 - **`unknown` 返回与 `reconcileId`**：远端命令启动后连接断开或文件发布应答丢失时，工具不会自动重试（避免重复执行或覆盖文件），请凭返回的 `reconcileId` 到远端对账后再决定后续操作。
 

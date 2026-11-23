@@ -68,6 +68,7 @@ export interface SshEnvironmentManagerOptions {
   readonly manifest: DeploymentManifest | undefined
   readonly logger: { debug(message: string): void; warn(message: string): void }
   readonly gate?: SshCapability
+  readonly resolveGate?: () => SshCapability | undefined
   readonly allowUnattestedForTesting?: boolean
   /**
    * This process is the credential broker, running under the dedicated
@@ -164,7 +165,13 @@ const UNAVAILABLE_MANIFEST: DeploymentManifest = { schemaVersion: 1, configVersi
 export class SshEnvironmentManager {
   private manifest: DeploymentManifest
   private readonly logger: SshEnvironmentManagerOptions['logger']
-  private readonly gate: SshCapability
+  private readonly startupGate: SshCapability
+  private readonly resolveGate: SshEnvironmentManagerOptions['resolveGate']
+
+  private get gate(): SshCapability {
+    if (this.resolveGate === undefined) return this.startupGate
+    return this.resolveGate() ?? { status: 'absent', reason: 'identity-mismatch', detail: 'Host SSH dependencies changed', packages: [] }
+  }
   private readonly allowUnattested: boolean
   private readonly brokerCustody: boolean
   private readonly managedKnownHostsFile: string | undefined
@@ -180,7 +187,8 @@ export class SshEnvironmentManager {
   constructor(options: SshEnvironmentManagerOptions) {
     this.manifest = options.manifest ?? UNAVAILABLE_MANIFEST
     this.logger = options.logger
-    this.gate = options.gate ?? classifySshCapability({
+    this.resolveGate = options.resolveGate
+    this.startupGate = options.gate ?? classifySshCapability({
       platform: process.platform, local: classifyInstallation(),
       readVersion: sshPackageVersion, privateCopy: sshPrivateCopy,
     })
@@ -215,9 +223,16 @@ export class SshEnvironmentManager {
   get deployment(): DeploymentManifest { return this.manifest }
 
   get capability(): { readonly eligible: boolean; readonly reason?: string } {
-    return this.gate.status === 'eligible'
-      ? { eligible: true }
-      : { eligible: false, reason: this.gate.status === 'absent' ? this.gate.reason : 'unknown' }
+    const gate = this.gate
+    return gate.status === 'eligible' ? { eligible: true } : { eligible: false, reason: gate.reason }
+  }
+
+  private requireGate(): Extract<SshCapability, { status: 'eligible' }> {
+    const gate = this.gate
+    if (gate.status !== 'eligible') {
+      throw new SshEnvironmentError(`ssh-capability-absent:${gate.reason}`, 'SSH capability is not eligible on this host')
+    }
+    return gate
   }
 
   private helperKey(environmentId: string, workspace?: string): string {
@@ -243,6 +258,7 @@ export class SshEnvironmentManager {
     const key = this.helperKey(environmentId, workspace)
     const existing = this.openings.get(key)
     if (existing !== undefined) {
+      this.requireGate()
       const env = await existing
       if (this.openings.get(key) !== existing) throw new SshEnvironmentError('remote-unavailable', 'the Helper generation was superseded')
       try {
@@ -304,6 +320,7 @@ export class SshEnvironmentManager {
     signal?.throwIfAborted()
     this.requireEnvironmentDigest(environmentId, expectedDigest)
     let opening = this.sftpOpenings.get(environmentId)
+    if (opening !== undefined) this.requireGate()
     if (opening === undefined) {
       const ownsSlot = () => this.sftpOpenings.get(environmentId) === pending
       const pending: Promise<SftpEnvironment> = this.openSftpFresh(environmentId, () => {
@@ -377,9 +394,7 @@ export class SshEnvironmentManager {
   private async openSftpFresh(environmentId: string, onLoss: () => void, signal?: AbortSignal): Promise<SftpEnvironment> {
     const environment = this.manifest.environments.find(entry => entry.environmentId === environmentId)
     if (environment === undefined) throw new SshEnvironmentError('unknown-environment', `no manifest environment "${environmentId}"`)
-    if (this.gate.status !== 'eligible') {
-      throw new SshEnvironmentError(`ssh-capability-absent:${this.gate.status === 'absent' ? this.gate.reason : 'unknown'}`, 'SSH capability is not eligible on this host')
-    }
+    this.requireGate()
     // The SFTP session is the transfer adapter, not the environment's exec
     // transport: a helper environment that declares `transfer` uses the same
     // alias's SFTP subsystem, and a device may be SFTP-only.
@@ -412,9 +427,7 @@ export class SshEnvironmentManager {
   private async openFresh(environmentId: string, bindingPath?: string): Promise<SshEnvironment> {
     const environment = this.manifest.environments.find(entry => entry.environmentId === environmentId)
     if (environment === undefined) throw new SshEnvironmentError('unknown-environment', `no manifest environment "${environmentId}"`)
-    if (this.gate.status !== 'eligible') {
-      throw new SshEnvironmentError(`ssh-capability-absent:${this.gate.status === 'absent' ? this.gate.reason : 'unknown'}`, `SSH capability is not eligible on this host`)
-    }
+    this.requireGate()
     if (environment.transport !== 'helper') throw new SshEnvironmentError('transport-not-helper', `environment "${environmentId}" uses transport "${environment.transport}"`)
     // A helper installed before full-artifact integrity has no entry point to
     // verify its file set: refuse rather than trust the single-file digest.
@@ -434,7 +447,7 @@ export class SshEnvironmentManager {
     if (this.personalCustody) {
       await verifyHelperEntry(this.exec, connection.host, connection.nodePath!, connection.helperPath!, environment.helper!.treeSha256!)
     }
-    const modules = await loadHostSshPackages(this.gate) as Record<string, Record<string, unknown> & { default?: Record<string, unknown> }>
+    const modules = await loadHostSshPackages(this.requireGate()) as Record<string, Record<string, unknown> & { default?: Record<string, unknown> }>
     const exported = (pkg: string, name: string) => modules[pkg]![name] ?? modules[pkg]!.default?.[name]
     const ctx = new Context()
     const mount = ctx.plugin.bind(ctx) as (plugin: unknown, config?: unknown) => { dispose(): Promise<void> }
