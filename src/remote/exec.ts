@@ -10,6 +10,9 @@ import { posix } from 'node:path'
 import type { MultiRootRegistry } from '../registry.ts'
 import { RemoteAdmissionError } from './contract.ts'
 import type { AdmittedRemoteEndpoint, RemoteEndpointRef, RemoteOperationSession } from './contract.ts'
+import { currentEndpointCandidates } from './endpoint-candidates.ts'
+import { effectivePreviewLimit } from './output-budget.ts'
+import { execFailureGuidance, execScopeUnconfirmedGuidance, execTerminationGuidance, execUncertainGuidance, type ExecGuidanceContext, type Guidance } from './result-guidance.ts'
 
 /** The deployment-side execution contract a backend advertises. */
 export interface RemoteExecDeployment {
@@ -19,6 +22,32 @@ export interface RemoteExecDeployment {
   readonly stdoutLimit: number
   readonly stderrLimit: number
   readonly terminateGraceMs: number
+}
+
+/**
+ * Whole-stream coordinates one collected output chunk arrives with. A backend
+ * that cannot prove them omits the meta; the tool then reports the stream's
+ * totals as explicitly unknown instead of guessing.
+ */
+export interface OutputChunkMeta {
+  /** Whole-stream byte offset of this chunk's first byte when the window is byte-faithful. */
+  readonly offset?: number
+  /** Total raw bytes observed on this stream; exact even when the window start is approximate. */
+  readonly totalBytes?: number
+  /** The chunk is a retained tail: bytes before it were already dropped upstream. */
+  readonly lossy: boolean
+  /**
+   * The decoded text is not a byte-faithful image of the upstream window (a
+   * boundary cut or invalid bytes produced U+FFFD). The total stays provable;
+   * the number of raw bytes inside the preview window is not.
+   */
+  readonly approximate?: boolean
+}
+
+/** One command's output sink; `meta` is optional on purpose (test doubles and older adapters omit it). */
+export interface RemoteProcessOutputSink {
+  stdout(chunk: Uint8Array, meta?: OutputChunkMeta): void
+  stderr(chunk: Uint8Array, meta?: OutputChunkMeta): void
 }
 
 export interface RemoteExecutionBackend {
@@ -33,7 +62,7 @@ export interface RemoteExecutionBackend {
   spawn(
     argv: readonly string[],
     options: { cwd: string; env: Readonly<Record<string, string>>; generation: string },
-    sink: { stdout(chunk: Uint8Array): void; stderr(chunk: Uint8Array): void },
+    sink: RemoteProcessOutputSink,
   ): RemoteProcessHandle
 }
 
@@ -54,6 +83,8 @@ export interface RemoteCommandRequest {
   readonly cwdRelative?: string | undefined
   readonly command: string
   readonly timeoutMs: number
+  /** Per-stream preview cap; the tool layer clamps it to the deployment limit. */
+  readonly maxOutputBytes?: number | undefined
 }
 
 interface Base {
@@ -65,6 +96,10 @@ interface Base {
   readonly operationId?: string
   readonly environmentId: string
   readonly rootId: string
+  /** Bounded diagnostic copy generated from a stable code. */
+  readonly message?: string
+  /** Bounded, actionable next step when the code is diagnosable. */
+  readonly hint?: string
 }
 
 export type RemoteCommandResult =
@@ -78,6 +113,10 @@ export type RemoteCommandResult =
       stdout: string
       stderr: string
       truncated: { stdout: boolean; stderr: boolean }
+      /** Raw bytes observed per stream; null when the backend cannot prove the total. */
+      totalBytes: { stdout: number | null; stderr: number | null }
+      /** Raw bytes not included in the preview; null when totalBytes is unknown. */
+      droppedBytes: { stdout: number | null; stderr: number | null }
       termination?: 'timeout' | 'cancelled' | 'revoked'
     })
   | (Base & { status: 'unknown'; reconcileId: string; reason: string; termination?: 'timeout' | 'cancelled' | 'revoked' })
@@ -87,10 +126,40 @@ const TRANSIENT_ADMISSION_ERRORS = new Set([
   'authority-unavailable', 'authority-disconnected', 'authority-busy', 'authority-timeout',
 ])
 
-const notStarted = (base: Base, code: string): RemoteCommandResult =>
-  base.operationId === undefined
-    ? { environmentId: base.environmentId, rootId: base.rootId, status: 'not-started', code }
-    : { ...base, status: 'not-started', code }
+const STABLE_CODE = /^[a-z][a-z0-9-]{1,63}$/
+
+/** Only stable lowercase codes may reach a result; anything else is generic. */
+const stableCode = (code: string | undefined): string =>
+  code !== undefined && STABLE_CODE.test(code) ? code : 'remote-failed'
+
+/** Refusal codes whose hint may name registered endpoints usable for execution. */
+const ENDPOINT_FAILURE_CODES = new Set([
+  'endpoint-not-registered',
+  'endpoint-withheld',
+  'endpoint-revoked',
+  'action-not-allowed',
+  'binding-not-authorized',
+])
+
+const notStarted = (base: Base, code: string, text: Guidance): RemoteCommandResult => {
+  const copy = { message: text.message, hint: text.hint }
+  return base.operationId === undefined
+    ? { environmentId: base.environmentId, rootId: base.rootId, status: 'not-started', code, ...copy }
+    : { ...base, status: 'not-started', code, ...copy }
+}
+
+/** Read execution candidates from the Registry snapshot; this never opens a connection. */
+async function enrichExecCandidates(
+  registry: MultiRootRegistry,
+  session: RemoteOperationSession | undefined,
+  guidance: ExecGuidanceContext,
+  code: string,
+): Promise<void> {
+  if (!ENDPOINT_FAILURE_CODES.has(code) || session === undefined) return
+  const lists = await currentEndpointCandidates(registry, session.header.cwd, [{ direction: 'exec' }])
+  const [candidates] = lists ?? []
+  if (candidates !== undefined) guidance.candidates = candidates
+}
 
 function checkCwdRelative(cwdRelative: string): boolean {
   return cwdRelative === '' || (!cwdRelative.startsWith('/') && !cwdRelative.includes('\0') && !cwdRelative.includes('\\')
@@ -121,7 +190,9 @@ export async function runRemoteCommand(
   signal: AbortSignal,
 ): Promise<RemoteCommandResult> {
   const base: Base = { environmentId: request.environmentId, rootId: request.rootId }
-  if (signal.aborted) return notStarted(base, 'cancelled')
+  const guidance: ExecGuidanceContext = { environmentId: request.environmentId, rootId: request.rootId }
+  const refuse = (target: Base, code: string): RemoteCommandResult => notStarted(target, code, execFailureGuidance(code, guidance))
+  if (signal.aborted) return refuse(base, 'cancelled')
   const endpoint: RemoteEndpointRef = { environmentId: request.environmentId, rootId: request.rootId }
   const admission = () => ({
     session: request.session, toolName, purpose: 'exec' as const, endpoints: [endpoint],
@@ -132,7 +203,8 @@ export async function runRemoteCommand(
     try {
       await backend.verifyCwd(cwd, admitted.displayPath, signal, admitted.verifiedTarget)
     } catch (error) {
-      const code = typeof (error as { code?: unknown }).code === 'string' ? (error as { code: string }).code : 'cwd-unverifiable'
+      const raw = (error as { code?: unknown }).code
+      const code = typeof raw === 'string' && STABLE_CODE.test(raw) ? raw : 'cwd-unverifiable'
       if (code === 'endpoint-redirected' && admitted.incarnation !== undefined && request.session !== undefined) {
         await registry.withholdRemote(request.session.header.cwd, endpoint, admitted.incarnation).catch(() => {})
       }
@@ -145,13 +217,16 @@ export async function runRemoteCommand(
   let prep: Prep | RemoteCommandResult
   try {
     prep = await registry.withRemoteOperation(admission(), async operation => {
-      const denied = (code: string): RemoteCommandResult => notStarted({ ...base, operationId: operation.identity.operationId }, code)
+      const denied = (code: string): RemoteCommandResult => refuse({ ...base, operationId: operation.identity.operationId }, code)
       const admitted = operation.endpoints[0]!
+      guidance.displayPath = admitted.displayPath
       const backend = backendFor(request.environmentId, admitted.displayPath, admitted.environmentDigest ?? undefined)
       if (backend === undefined) return denied('backend-unavailable')
       const cwdRelative = request.cwdRelative ?? ''
+      guidance.cwdRelative = cwdRelative
       if (!checkCwdRelative(cwdRelative)) return denied('invalid-cwd')
       const { deployment } = backend
+      guidance.maxTimeoutMs = deployment.maxTimeoutMs
       if (!Number.isInteger(request.timeoutMs) || request.timeoutMs < 1 || request.timeoutMs > deployment.maxTimeoutMs) {
         return denied('invalid-timeout')
       }
@@ -174,15 +249,20 @@ export async function runRemoteCommand(
       } satisfies Prep
     })
   } catch (error) {
-    if (error instanceof RemoteAdmissionError) return notStarted(base, error.code)
+    if (error instanceof RemoteAdmissionError) {
+      const code = stableCode(error.code)
+      await enrichExecCandidates(registry, request.session, guidance, code)
+      return refuse(base, code)
+    }
     throw error
   }
   if ('status' in prep) return prep
 
+  guidance.displayPath = prep.endpoint.displayPath
   const backend = backendFor(request.environmentId, prep.endpoint.displayPath, prep.endpoint.environmentDigest ?? undefined)
   if (backend !== undefined) {
     const cwdError = await checkCwd(backend, prep.remoteCwd, prep.endpoint)
-    if (cwdError !== undefined) return notStarted({ ...base, operationId: prep.operationId }, cwdError)
+    if (cwdError !== undefined) return refuse({ ...base, operationId: prep.operationId }, cwdError)
   }
 
   // Admission B: the FINAL launch admission. The identical request re-enters
@@ -192,7 +272,7 @@ export async function runRemoteCommand(
   let launch: { result: RemoteCommandResult } | { launched: Launched }
   try {
     launch = await registry.withRemoteOperation(admission(), operation => {
-      const denied = (code: string) => ({ result: notStarted({ ...base, operationId: operation.identity.operationId }, code) })
+      const denied = (code: string) => ({ result: refuse({ ...base, operationId: operation.identity.operationId }, code) })
       if (signal.aborted) return denied('cancelled')
       const admitted = operation.endpoints[0]!
       const backend = backendFor(request.environmentId, admitted.displayPath, admitted.environmentDigest ?? undefined)
@@ -206,19 +286,23 @@ export async function runRemoteCommand(
         && (admitted.verifiedTarget?.value ?? null) === (prep!.endpoint.verifiedTarget?.value ?? null)
         && backend.currentGeneration() === prep!.generation
       if (!unchanged) return denied('admission-changed')
-      const stdout = createSink(prep!.deployment.stdoutLimit)
-      const stderr = createSink(prep!.deployment.stderrLimit)
+      const stdout = createSink(effectivePreviewLimit(request.maxOutputBytes, prep!.deployment.stdoutLimit))
+      const stderr = createSink(effectivePreviewLimit(request.maxOutputBytes, prep!.deployment.stderrLimit))
       try {
         const handle = backend.spawn(prep!.argv, {
           cwd: prep!.remoteCwd, env: prep!.deployment.env, generation: prep!.generation,
         }, { stdout: stdout.append, stderr: stderr.append })
         return { launched: { operationId: operation.identity.operationId, handle, stdout, stderr } }
       } catch {
-        return { result: { ...base, operationId: operation.identity.operationId, status: 'admitted-may-start' as const, reason: 'remote launch acknowledgement was not confirmed' } }
+        return { result: { ...base, operationId: operation.identity.operationId, status: 'admitted-may-start' as const, reason: 'remote launch acknowledgement was not confirmed', ...execUncertainGuidance('admitted-may-start') } }
       }
     })
   } catch (error) {
-    if (error instanceof RemoteAdmissionError) return notStarted(base, error.code)
+    if (error instanceof RemoteAdmissionError) {
+      const code = stableCode(error.code)
+      await enrichExecCandidates(registry, request.session, guidance, code)
+      return refuse(base, code)
+    }
     throw error
   }
   if ('result' in launch) return launch.result
@@ -282,7 +366,7 @@ export async function runRemoteCommand(
   try {
     try { await Promise.race([handle.started, lossBeforeStart, deadline.promise]) } catch (error) {
       if (error instanceof RemoteConnectionLost) throw error
-      return { ...base, operationId, status: 'admitted-may-start', reason: 'remote launch acknowledgement was not confirmed' }
+      return { ...base, operationId, status: 'admitted-may-start', reason: 'remote launch acknowledgement was not confirmed', ...execUncertainGuidance('admitted-may-start') }
     }
     const exit = await Promise.race([exited, deadline.promise])
     const confirmed = await Promise.race([handle.waitForExit(prep.deployment.terminateGraceMs), deadline.promise])
@@ -292,7 +376,11 @@ export async function runRemoteCommand(
       exitCode: exit.exitCode, signal: exit.signal,
       stdout: stdout.text(), stderr: stderr.text(),
       truncated: { stdout: stdout.truncated, stderr: stderr.truncated },
-      ...(termination === undefined ? {} : { termination }),
+      totalBytes: { stdout: stdout.totalBytes, stderr: stderr.totalBytes },
+      droppedBytes: { stdout: stdout.droppedBytes, stderr: stderr.droppedBytes },
+      ...(termination === undefined
+        ? confirmed ? {} : { ...execScopeUnconfirmedGuidance() }
+        : { termination, ...execTerminationGuidance(termination) }),
     }
   } catch (error) {
     if (error instanceof RemoteConnectionLost) {
@@ -300,6 +388,7 @@ export async function runRemoteCommand(
         ...base, operationId, status: 'unknown', reconcileId: operationId,
         reason: 'remote execution or cleanup acknowledgement was lost',
         ...(termination === undefined ? {} : { termination }),
+        ...execUncertainGuidance('unknown'),
       }
     }
     throw error
@@ -314,19 +403,54 @@ export async function runRemoteCommand(
 }
 
 interface Sink {
-  readonly append: (chunk: Uint8Array) => void
+  readonly append: (chunk: Uint8Array, meta?: OutputChunkMeta) => void
   readonly text: () => string
   readonly truncated: boolean
+  /** Raw bytes observed on the stream; null when the backend could not prove them. */
+  readonly totalBytes: number | null
+  /** Raw bytes outside the preview; null when the total is unknown. */
+  readonly droppedBytes: number | null
 }
 
-/** One bounded byte sink: appends until the limit, then only flags. */
+/**
+ * One bounded byte sink: appends until the limit while keeping whole-stream
+ * coordinates. `totalBytes`/`droppedBytes` are defined on RAW bytes; a
+ * backend that omits coordinates makes both explicitly null. A truncated
+ * UTF-8 tail is withheld instead of decoded into a replacement character.
+ */
 function createSink(limit: number): Sink {
   const chunks: Uint8Array[] = []
   let size = 0
   let over = false
+  let headDropped = false
+  let total: number | undefined
+  let totalKnown = false
+  let exactWindow = true
+  let first = true
+  const truncated = (): boolean => over || headDropped || (totalKnown && total !== undefined && total > size)
   return {
-    get truncated() { return over },
-    append: chunk => {
+    get truncated() { return truncated() },
+    get totalBytes() { return totalKnown ? total ?? null : null },
+    get droppedBytes() {
+      // Without a provable total or a byte-faithful window the dropped count is
+      // explicitly unknown; a boundary-cut preview must not guess it.
+      if (!totalKnown || !exactWindow || total === undefined) return null
+      return Math.max(0, total - size)
+    },
+    append: (chunk, meta) => {
+      if (meta === undefined) {
+        exactWindow = false
+      } else {
+        if (first && (meta.lossy || (meta.offset !== undefined && meta.offset > 0))) headDropped = true
+        if (typeof meta.totalBytes === 'number' && Number.isInteger(meta.totalBytes) && meta.totalBytes >= 0) {
+          total = meta.totalBytes
+          totalKnown = true
+        } else {
+          totalKnown = false
+        }
+        if (meta.approximate === true || meta.offset === undefined) exactWindow = false
+      }
+      first = false
       const remaining = Math.max(0, limit - size)
       if (chunk.byteLength > remaining) over = true
       const prefix = chunk.subarray(0, remaining)
@@ -337,7 +461,7 @@ function createSink(limit: number): Sink {
       let offset = 0
       for (const chunk of chunks) { whole.set(chunk, offset); offset += chunk.byteLength }
       // Do not synthesize a replacement character for a truncated UTF-8 tail.
-      return new TextDecoder().decode(whole, { stream: over })
+      return new TextDecoder().decode(whole, { stream: truncated() })
     },
   }
 }

@@ -82,6 +82,28 @@ Connections are plugin-global, while directory bindings belong to each workspace
 > [!TIP]
 > Before deleting a connection, unbind all workspace bindings referencing it — in the bindings dialog, or via **Remove** in the remote row's `…` menu (in personal mode, remove revokes the registration and unbinds at once) — `environment-in-use` otherwise. If editing permissions or updating the connection marks an endpoint **Withheld**, click **Register** again from the `…` menu. To change a bound directory's path, actions, or local transfers, click **Edit** in that row's `…` menu — it opens the bindings dialog directly into that binding's edit form.
 
+## Using the remote tools
+
+The model reaches a registered remote directory only through `remote_copy` and `remote_bash`. Both copy endpoints take the same fields, and an **omitted** `environmentId` means the local workspace: the local primary root is `local:primary` (omit `environmentId`, use `rootId` `primary`), an additional root uses its registered `aliasId` (for example `docs`), and a remote endpoint must name `environmentId` explicitly with the `rootId` registered in the bindings dialog. `relativePath` is a normalized relative POSIX path to one regular file inside the root; it may not start with `/` or contain `.` or `..` segments.
+
+One upload and one download call:
+
+```json
+{"from":{"rootId":"primary","relativePath":"dist/app.tar"},
+ "to":{"environmentId":"build","rootId":"app","relativePath":"in/app.tar"}}
+```
+
+```json
+{"from":{"environmentId":"build","rootId":"app","relativePath":"out/app.tar"},
+ "to":{"rootId":"primary","relativePath":"dist/app.tar"}}
+```
+
+A copy handles one regular file and the destination must not exist: the target is created with mode 0600, the source mtime and executable bit are not preserved, and an existing file is never overwritten. To move several files, pack them inside an authorized root first (for example `tar -cf dist/app.tar -C dist .`), copy the archive as one file, and unpack it on the destination side.
+
+`remote_bash` previews at most 64 KiB of stdout and of stderr by default; pass `maxOutputBytes` for more, bounded by the per-stream limit saved on that connection. In the result, `totalBytes` is the raw byte count the command wrote and `droppedBytes` is the raw count outside the preview; both are `null` when the backend cannot prove the exact total. Keep large output out of model context: redirect it into a file inside an authorized remote root (for example run `command > /srv/work/build.log 2>&1` through `remote_bash`), then read it back in sections with `remote_bash` (`sed -n '1,200p' …`, `tail -n 200 …`) or copy the file back. Automatic spill-to-file and result references are not wired into tool results yet.
+
+Failures carry a stable `code`, a bounded `message`, and a `hint`; endpoint errors such as `endpoint-not-registered` also list `environmentId:rootId` candidates (up to six per direction). Candidates only help correct the call — every retry is admitted again. `unknown` and `admitted-may-start` mean the outcome is uncertain: for `unknown` check the remote state with `reconcileId`; for `admitted-may-start` first confirm whether the command actually started. Do not retry either blindly.
+
 ## Disabling SSH and troubleshooting
 
 Turn off **SSH remote environments** in the plugin settings to shut down the remote tools and control plane. To reuse a profile from an earlier broker experiment, see the [configuration migration notes](../../reference/ssh-remote-environments.md#停用的旧配置).
@@ -95,5 +117,6 @@ Turn off **SSH remote environments** in the plugin settings to shut down the rem
 - **Helper installation failed**. The connection screen shows the stage, what to do next, and expandable technical details. If remote files may have changed, check the server’s installation directory and npm logs first. If the remote Helper was verified and Host registration is unconfirmed, reload the connection state before deciding whether to reinstall. See [SSH troubleshooting](../../troubleshooting/ssh-panel-operation-failed.md#helper-安装诊断).
 - **`helper-outdated`**: the recorded helper on a desktop Host has no BoringSSL transport entry; click **Install helper** again on that connection card. Registered Roots stay valid and do not need re-registration.
 - **`unknown` result with `reconcileId`**: connection dropped after a remote command started or after sending a file publish request. Tools never auto-retry to avoid duplicate execution or overwrites; reconcile on the remote host or in the Broker audit log using `reconcileId`.
+- **`invalid-arguments`**: the tool refused structurally invalid arguments before Registry admission and any SSH/SFTP I/O; `message` names the offending field (for example `"to.relativePath" is required`). Fix the fields named by `hint` and retry.
 
 For protocol schemas, full refusal codes, and architectural invariants, see the [SSH remote environments reference](../../reference/ssh-remote-environments.md) and the [control plane reference](../../reference/multi-environment-control-plane.md).

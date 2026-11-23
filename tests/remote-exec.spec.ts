@@ -14,7 +14,15 @@ import { RemoteAdmissionError } from '../src/remote/contract.ts'
 import { handlePersonalEndpoint } from '../src/remote/personal-endpoints.ts'
 import { loadPersonalConfig, savePersonalConfig, type PersonalConfig } from '../src/remote/personal/config.ts'
 import { remoteBashTool } from '../src/remote/exec-tool.ts'
-import { RemoteConnectionLost, runRemoteCommand, type RemoteExecutionBackend, type RemoteProcessHandle } from '../src/remote/exec.ts'
+import {
+  RemoteConnectionLost,
+  runRemoteCommand,
+  type OutputChunkMeta,
+  type RemoteExecutionBackend,
+  type RemoteExecDeployment,
+  type RemoteProcessHandle,
+  type RemoteProcessOutputSink,
+} from '../src/remote/exec.ts'
 import { executeTool, installToolExecutor } from './support/tool-executor.ts'
 import { mountRegistryStack, type RegistryStack } from './support/registry-stack.ts'
 import { createFixtureWorkspace, type FixtureWorkspace } from './support/temp-workspace.ts'
@@ -48,15 +56,16 @@ class FakeHandle implements RemoteProcessHandle {
   waitResult = true
   private readonly exit = Promise.withResolvers<{ exitCode: number | null; signal: string | null }>()
   readonly exited = this.exit.promise
-  constructor(private readonly sink: { stdout(c: Uint8Array): void; stderr(c: Uint8Array): void }, private readonly onTerminate?: (h: FakeHandle) => void) {}
-  emit(chunk: string, err = false) { this.sink[err ? 'stderr' : 'stdout'](new TextEncoder().encode(chunk)) }
+  constructor(private readonly sink: RemoteProcessOutputSink, private readonly onTerminate?: (h: FakeHandle) => void) {}
+  emit(chunk: string, err = false, meta?: OutputChunkMeta) { this.sink[err ? 'stderr' : 'stdout'](new TextEncoder().encode(chunk), meta) }
   finish(exitCode = 0, signal: string | null = null) { this.exit.resolve({ exitCode, signal }) }
   lose() { this.exit.reject(new RemoteConnectionLost('connection lost')) }
   terminate() { this.terminateCalls++; this.onTerminate?.(this) }
   async waitForExit() { return this.waitResult }
 }
 
-function fakeBackend(over: { enforcement?: 'full' | 'partial' } = {}) {
+function fakeBackend(over: { enforcement?: 'full' | 'partial'; deployment?: RemoteExecDeployment } = {}) {
+  const deployment = over.deployment ?? DEPLOYMENT
   const state = {
     generation: 'gen-1',
     confineCalls: [] as { argv: readonly string[]; policy: { sessionId: string } }[],
@@ -65,7 +74,7 @@ function fakeBackend(over: { enforcement?: 'full' | 'partial' } = {}) {
     handles: [] as FakeHandle[],
   }
   const backend: RemoteExecutionBackend = {
-    deployment: DEPLOYMENT,
+    deployment,
     async confine(argv, policy) {
       const generation = state.generation
       state.confineCalls.push({ argv: [...argv], policy })
@@ -263,7 +272,12 @@ describe.skipIf(process.platform === 'win32')('the two-admission remote command 
     await new Promise(resolve => setTimeout(resolve, 10))
     await stack.registry.removeRemote(fixture.workspace, REF)
     state.confineGate.resolve()
-    await expect(pending).resolves.toMatchObject({ status: 'not-started', code: 'endpoint-not-registered' })
+    await expect(pending).resolves.toMatchObject({
+      status: 'not-started',
+      code: 'endpoint-not-registered',
+      message: expect.stringContaining('not registered'),
+      hint: expect.stringMatching(/[Rr]egistered|workspace topology/),
+    })
     expect(state.spawnCalls).toHaveLength(0)
   })
 
@@ -278,6 +292,13 @@ describe.skipIf(process.platform === 'win32')('the two-admission remote command 
       session, environmentId: 'build-01', rootId: 'app', command: 'x', timeoutMs: 10,
     }, 'remote_bash', new AbortController().signal)).resolves.toMatchObject({ status: 'not-started', code: 'mode-denies' })
     expect(ro.state.confineCalls).toHaveLength(0)
+    const invalidCwd = await run(stack, ro.backend, { cwdRelative: '../escape' })
+    expect(invalidCwd).toMatchObject({
+      status: 'not-started',
+      code: 'invalid-cwd',
+      message: expect.stringContaining('cwdRelative'),
+      hint: expect.stringContaining('/work/app'),
+    })
     for (const [over, code] of [
       [{ cwdRelative: '../escape' }, 'invalid-cwd'],
       [{ cwdRelative: '/abs' }, 'invalid-cwd'],
@@ -288,7 +309,9 @@ describe.skipIf(process.platform === 'win32')('the two-admission remote command 
       [{ timeoutMs: 0 }, 'invalid-timeout'],
       [{ timeoutMs: DEPLOYMENT.maxTimeoutMs + 1 }, 'invalid-timeout'],
     ] as const) {
-      await expect(run(stack, ro.backend, over)).resolves.toMatchObject({ status: 'not-started', code })
+      await expect(run(stack, ro.backend, over)).resolves.toMatchObject({
+        status: 'not-started', code, message: expect.any(String), hint: expect.any(String),
+      })
     }
     const capped = await mount({ remote_bash: 'read-only' })
     const cappedBackend = fakeBackend()
@@ -303,18 +326,35 @@ describe.skipIf(process.platform === 'win32')('the two-admission remote command 
     await waitHandles(state)
     state.handles[0]!.emit('x'.repeat(200)); state.handles[0]!.emit('err', true)
     state.handles[0]!.finish(7)
-    await expect(done).resolves.toMatchObject({ status: 'scope-exited', scope: 'confirmed', exitCode: 7, truncated: { stdout: true, stderr: false } })
+    await expect(done).resolves.toMatchObject({
+      status: 'scope-exited',
+      scope: 'confirmed',
+      exitCode: 7,
+      truncated: { stdout: true, stderr: false },
+      totalBytes: { stdout: null, stderr: null },
+      droppedBytes: { stdout: null, stderr: null },
+    })
     const unconfirmed = fakeBackend()
     const pending = run(stack, unconfirmed.backend)
     await waitHandles(unconfirmed.state)
     unconfirmed.state.handles[0]!.waitResult = false
     unconfirmed.state.handles[0]!.finish(0)
-    await expect(pending).resolves.toMatchObject({ status: 'exited', scope: 'unconfirmed' })
+    await expect(pending).resolves.toMatchObject({
+      status: 'exited',
+      scope: 'unconfirmed',
+      message: expect.stringContaining('scope'),
+      hint: expect.stringContaining('Descendants'),
+    })
     const lost = fakeBackend()
     const hanging = run(stack, lost.backend)
     await waitHandles(lost.state)
     lost.state.handles[0]!.lose()
-    await expect(hanging).resolves.toMatchObject({ status: 'unknown', reconcileId: expect.any(String) })
+    await expect(hanging).resolves.toMatchObject({
+      status: 'unknown',
+      reconcileId: expect.any(String),
+      message: expect.stringContaining('unknown'),
+      hint: expect.stringContaining('reconcileId'),
+    })
     expect(lost.state.spawnCalls).toHaveLength(1)
   })
 
@@ -391,6 +431,126 @@ describe.skipIf(process.platform === 'win32')('the two-admission remote command 
     await expect(pending).resolves.toMatchObject({ stdout: 'a'.repeat(60) + 'bcde', truncated: { stdout: true, stderr: false } })
   })
 
+  it('reports exactly-at-limit output without truncating and keeps raw totals', async () => {
+    const stack = await mount()
+    const { backend, state } = fakeBackend()
+    const pending = run(stack, backend)
+    await waitHandles(state)
+    state.handles[0]!.emit('x'.repeat(64), false, { offset: 0, totalBytes: 64, lossy: false })
+    state.handles[0]!.finish()
+    await expect(pending).resolves.toMatchObject({
+      stdout: 'x'.repeat(64),
+      truncated: { stdout: false, stderr: false },
+      totalBytes: { stdout: 64, stderr: null },
+      droppedBytes: { stdout: 0, stderr: null },
+    })
+  })
+
+  it('reports the raw total and the dropped bytes of over-budget output', async () => {
+    const stack = await mount()
+    const { backend, state } = fakeBackend()
+    const pending = run(stack, backend)
+    await waitHandles(state)
+    state.handles[0]!.emit('x'.repeat(200), false, { offset: 0, totalBytes: 200, lossy: false })
+    state.handles[0]!.finish()
+    await expect(pending).resolves.toMatchObject({
+      stdout: 'x'.repeat(64),
+      truncated: { stdout: true, stderr: false },
+      totalBytes: { stdout: 200, stderr: null },
+      droppedBytes: { stdout: 136, stderr: null },
+    })
+  })
+
+  it('handles an upstream output window that already dropped its head', async () => {
+    const stack = await mount()
+    const { backend, state } = fakeBackend()
+    const pending = run(stack, backend)
+    await waitHandles(state)
+    state.handles[0]!.emit('y'.repeat(64), false, { offset: 936, totalBytes: 1000, lossy: true })
+    state.handles[0]!.finish()
+    await expect(pending).resolves.toMatchObject({
+      stdout: 'y'.repeat(64),
+      truncated: { stdout: true, stderr: false },
+      totalBytes: { stdout: 1000, stderr: null },
+      droppedBytes: { stdout: 936, stderr: null },
+    })
+  })
+
+  it('cuts at a UTF-8 boundary without a replacement character or an inflated count', async () => {
+    const stack = await mount()
+    const { backend, state } = fakeBackend()
+    const pending = run(stack, backend)
+    await waitHandles(state)
+    const prefix = 'a'.repeat(63) + 'é'
+    state.handles[0]!.emit(prefix, false, { offset: 0, totalBytes: Buffer.byteLength(prefix), lossy: false })
+    state.handles[0]!.finish()
+    const result = await pending
+    expect(result).toMatchObject({
+      stdout: 'a'.repeat(63),
+      truncated: { stdout: true, stderr: false },
+      totalBytes: { stdout: 65, stderr: null },
+      droppedBytes: { stdout: 1, stderr: null },
+    })
+    expect('stdout' in result && result.stdout).not.toContain('\uFFFD')
+  })
+
+  it('reports an exact total but an unknown dropped count for an approximate window', async () => {
+    const stack = await mount()
+    const { backend, state } = fakeBackend()
+    const pending = run(stack, backend)
+    await waitHandles(state)
+    state.handles[0]!.emit('abc', false, { lossy: true, totalBytes: 10, approximate: true })
+    state.handles[0]!.finish()
+    await expect(pending).resolves.toMatchObject({
+      stdout: 'abc',
+      truncated: { stdout: true, stderr: false },
+      totalBytes: { stdout: 10, stderr: null },
+      droppedBytes: { stdout: null, stderr: null },
+    })
+  })
+
+  it('applies the bounded preview default to an existing 1 MiB deployment', async () => {
+    const stack = await mount()
+    const deployment = { ...DEPLOYMENT, stdoutLimit: 1_048_576, stderrLimit: 1_048_576 }
+    const { backend, state } = fakeBackend({ deployment })
+    const pending = run(stack, backend)
+    await waitHandles(state)
+    state.handles[0]!.emit('z'.repeat(100_000), false, { offset: 0, totalBytes: 100_000, lossy: false })
+    state.handles[0]!.finish()
+    const result = await pending
+    expect(result).toMatchObject({
+      truncated: { stdout: true, stderr: false },
+      totalBytes: { stdout: 100_000, stderr: null },
+      droppedBytes: { stdout: 100_000 - 65_536, stderr: null },
+    })
+    expect('stdout' in result && result.stdout).toHaveLength(65_536)
+  })
+
+  it('lets maxOutputBytes raise the preview up to the deployment limit and clamps beyond it', async () => {
+    const stack = await mount()
+    const raised = fakeBackend({ deployment: { ...DEPLOYMENT, stdoutLimit: 1_048_576, stderrLimit: 1_048_576 } })
+    const pending = run(stack, raised.backend, { maxOutputBytes: 131_072 })
+    await waitHandles(raised.state)
+    raised.state.handles[0]!.emit('w'.repeat(100_000), false, { offset: 0, totalBytes: 100_000, lossy: false })
+    raised.state.handles[0]!.finish()
+    const raisedResult = await pending
+    expect(raisedResult).toMatchObject({ truncated: { stdout: false }, totalBytes: { stdout: 100_000 }, droppedBytes: { stdout: 0 } })
+    expect('stdout' in raisedResult && raisedResult.stdout).toHaveLength(100_000)
+
+    const clamped = fakeBackend({ deployment: { ...DEPLOYMENT, stdoutLimit: 1_024, stderrLimit: 1_024 } })
+    const clampedPending = run(stack, clamped.backend, { maxOutputBytes: 8_192 })
+    await waitHandles(clamped.state)
+    clamped.state.handles[0]!.emit('c'.repeat(2_048), false, { offset: 0, totalBytes: 2_048, lossy: false })
+    clamped.state.handles[0]!.finish()
+    const clampedResult = await clampedPending
+    expect(clampedResult).toMatchObject({
+      truncated: { stdout: true },
+      totalBytes: { stdout: 2_048 },
+      droppedBytes: { stdout: 1_024 },
+    })
+    expect('stdout' in clampedResult && clampedResult.stdout).toHaveLength(1_024)
+  })
+
   it('reports unknown with a reconcile id when the start acknowledgement is lost, and never retries', async () => {
     const stack = await mount()
     const { backend, state } = fakeBackend()
@@ -452,7 +612,12 @@ describe.skipIf(process.platform === 'win32')('the two-admission remote command 
     controller.abort()
     controller.abort()
     handle.finish(null, 'SIGKILL')
-    await expect(pending).resolves.toMatchObject({ status: 'scope-exited', termination: 'cancelled' })
+    await expect(pending).resolves.toMatchObject({
+      status: 'scope-exited',
+      termination: 'cancelled',
+      message: expect.stringContaining('cancelled'),
+      hint: expect.stringContaining('remote process'),
+    })
     expect(handle.terminateCalls).toBe(1)
     const timed = fakeBackend()
     const waiting = run(stack, timed.backend, { timeoutMs: 20 })
@@ -460,7 +625,13 @@ describe.skipIf(process.platform === 'win32')('the two-admission remote command 
     for (let i = 0; i < 400 && timed.state.handles[0]!.terminateCalls === 0; i++) await new Promise(resolve => setTimeout(resolve, 5))
     timed.state.handles[0]!.waitResult = false
     timed.state.handles[0]!.finish(null, 'SIGKILL')
-    await expect(waiting).resolves.toMatchObject({ status: 'exited', scope: 'unconfirmed', termination: 'timeout' })
+    await expect(waiting).resolves.toMatchObject({
+      status: 'exited',
+      scope: 'unconfirmed',
+      termination: 'timeout',
+      message: expect.stringContaining('timeoutMs'),
+      hint: expect.stringContaining('timeoutMs'),
+    })
     expect(timed.state.handles[0]!.terminateCalls).toBe(1)
   })
 
@@ -544,7 +715,7 @@ describe.skipIf(process.platform === 'win32')('remote_bash through the real tool
   }
   const call = (ctx: RegistryStack['ctx'], agent: Agent, args: object) => executeTool(ctx, {
     callId: 'g3-call', name: 'remote_bash', args, signal: new AbortController().signal, agent,
-  }) as Promise<{ isError?: boolean; error?: { message?: string } }>
+  }) as Promise<{ isError?: boolean; error?: { message?: string }; value?: Record<string, unknown> }>
 
   it('errors when the tool is not registered', async () => {
     const { stack, agent } = await toolWorld()
@@ -552,21 +723,68 @@ describe.skipIf(process.platform === 'win32')('remote_bash through the real tool
     expect(result.isError).toBe(true)
   })
 
-  it('uses the dispatch session and tool name, ignoring forged fields', async () => {
+  it('rejects forged session and tool-name fields before any admission', async () => {
+    const { stack, agent } = await toolWorld()
+    const { backend, state } = fakeBackend()
+    await stack.ctx.plugin({
+      name: 'g3-remote-tool', inject: ['tools'],
+      apply(fiber) { fiber.tools.register(remoteBashTool({ registry: stack.registry, backendFor: () => backend }) as never) },
+    })
+    const outcome = await call(stack.ctx, agent, {
+      environmentId: 'build-01', rootId: 'app', command: 'ls', timeoutMs: 500,
+      sessionId: 'forged', toolName: 'other_tool',
+    })
+    expect(outcome.value).toMatchObject({
+      status: 'not-started',
+      code: 'invalid-arguments',
+      message: expect.stringContaining('"sessionId"'),
+      hint: expect.stringContaining('remote_bash'),
+    })
+    expect(state.confineCalls).toHaveLength(0)
+    expect(state.spawnCalls).toHaveLength(0)
+  })
+
+  it('applies the 64 KiB preview default and maxOutputBytes through dispatch', async () => {
+    const { stack, agent } = await toolWorld()
+    const deployment = { ...DEPLOYMENT, stdoutLimit: 1_048_576, stderrLimit: 1_048_576 }
+    const { backend, state } = fakeBackend({ deployment })
+    await stack.ctx.plugin({
+      name: 'g3-remote-tool', inject: ['tools'],
+      apply(fiber) { fiber.tools.register(remoteBashTool({ registry: stack.registry, backendFor: () => backend }) as never) },
+    })
+    const pending = call(stack.ctx, agent, { environmentId: 'build-01', rootId: 'app', command: 'ls', timeoutMs: 500 })
+    await waitHandles(state)
+    state.handles[0]!.emit('z'.repeat(100_000), false, { offset: 0, totalBytes: 100_000, lossy: false })
+    state.handles[0]!.finish(0)
+    const outcome = await pending
+    expect(outcome.value).toMatchObject({
+      truncated: { stdout: true, stderr: false },
+      totalBytes: { stdout: 100_000, stderr: null },
+      droppedBytes: { stdout: 100_000 - 65_536, stderr: null },
+    })
+    expect(String(outcome.value?.stdout)).toHaveLength(65_536)
+  })
+
+  it('uses the dispatch session and tool name for admission', async () => {
     const { stack, session, agent } = await toolWorld()
     const { backend, state } = fakeBackend()
     await stack.ctx.plugin({
       name: 'g3-remote-tool', inject: ['tools'],
       apply(fiber) { fiber.tools.register(remoteBashTool({ registry: stack.registry, backendFor: () => backend }) as never) },
     })
-    const pending = call(stack.ctx, agent, {
-      environmentId: 'build-01', rootId: 'app', command: 'ls', timeoutMs: 500,
-      sessionId: 'forged', toolName: 'other_tool',
+    const seen: { sessionId?: string; toolName?: string } = {}
+    const original = stack.registry.withRemoteOperation.bind(stack.registry)
+    vi.spyOn(stack.registry, 'withRemoteOperation').mockImplementation(async (request, body) => {
+      seen.sessionId ??= request.session?.id
+      seen.toolName ??= request.toolName
+      return await original(request, body)
     })
-    await new Promise(resolve => setTimeout(resolve, 50))
-    state.handles[0]?.finish(0)
+    const pending = call(stack.ctx, agent, { environmentId: 'build-01', rootId: 'app', command: 'ls', timeoutMs: 500 })
+    await waitHandles(state)
+    state.handles[0]!.finish(0)
     await pending
-    expect(state.confineCalls.length).toBeGreaterThan(0)
+    expect(seen.sessionId).toBe(session.id)
+    expect(seen.toolName).toBe('remote_bash')
     for (const callInfo of state.confineCalls) expect(callInfo.policy.sessionId).toBe(session.id)
   })
 })

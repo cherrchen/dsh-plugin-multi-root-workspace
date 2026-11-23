@@ -10,7 +10,7 @@ import { renderRemoteCapabilities } from '../src/remote/capabilities.ts'
 import { apply as applyRemoteTools, inject } from '../src/remote/tools.ts'
 import { createFixtureWorkspace, type FixtureWorkspace } from './support/temp-workspace.ts'
 import { executeTool } from './support/tool-executor.ts'
-import { mountRemoteTools, registerRemote, type RemoteToolsWorld } from './support/remote-tools.ts'
+import { mountRemoteTools, registerLocalPeer, registerRemote, type RemoteToolsWorld } from './support/remote-tools.ts'
 import type { DeploymentManifest } from '../src/remote/manifest.ts'
 
 let fixture: FixtureWorkspace
@@ -140,6 +140,176 @@ describe.skipIf(process.platform === 'win32')('the explicit remote tools row', (
     // The switch is off: the row loads and registers nothing.
     const missing = await world.call('remote_copy', localToLocal) as Failure
     expect(missing.isError).toBe(true)
+  })
+})
+
+describe.skipIf(process.platform === 'win32')('remote tool arguments and endpoint correction', () => {
+  interface CopyValue {
+    readonly status: string
+    readonly code?: string
+    readonly from?: string
+    readonly to?: string
+    readonly message?: string
+    readonly hint?: string
+    readonly stage?: string
+    readonly staging?: string
+  }
+  interface ExecValue {
+    readonly status: string
+    readonly code?: string
+    readonly message?: string
+    readonly hint?: string
+  }
+
+  const copy = (result: unknown): CopyValue => result as CopyValue
+  const exec = (result: unknown): ExecValue => result as ExecValue
+
+  it('copies both directions when environmentId is omitted, and explicit local means the same endpoint', async () => {
+    world = await mountRemoteTools(fixture)
+    await registerRemote(world, 'build', 'app')
+    const remote = world.remotes.get('build')!
+    writeFileSync(join(fixture.workspace, 'up.txt'), 'upload-bytes')
+    writeFileSync(join(fixture.workspace, 'explicit.txt'), 'explicit-bytes')
+
+    const upload = copy(await world.call('remote_copy', {
+      from: { rootId: 'primary', relativePath: 'up.txt' },
+      to: { environmentId: 'build', rootId: 'app', relativePath: 'dist/up.txt' },
+    }))
+    expect(upload, JSON.stringify(upload)).toMatchObject({ status: 'committed', from: 'primary:up.txt', to: 'build/app:dist/up.txt' })
+    expect(remote.read('/srv/root/dist/up.txt')!.toString()).toBe('upload-bytes')
+
+    remote.seed('/srv/root/dist/down.bin', 'download-bytes')
+    const download = copy(await world.call('remote_copy', {
+      from: { environmentId: 'build', rootId: 'app', relativePath: 'dist/down.bin' },
+      to: { rootId: 'primary', relativePath: 'down.bin' },
+    }))
+    expect(download, JSON.stringify(download)).toMatchObject({ status: 'committed' })
+    expect(readFileSync(join(fixture.workspace, 'down.bin'), 'utf8')).toBe('download-bytes')
+
+    const explicitUpload = copy(await world.call('remote_copy', {
+      from: { environmentId: 'local', rootId: 'primary', relativePath: 'explicit.txt' },
+      to: { environmentId: 'build', rootId: 'app', relativePath: 'dist/explicit.txt' },
+    }))
+    expect(explicitUpload.status).toBe('committed')
+    const explicitDownload = copy(await world.call('remote_copy', {
+      from: { environmentId: 'build', rootId: 'app', relativePath: 'dist/explicit.txt' },
+      to: { environmentId: 'local', rootId: 'primary', relativePath: 'explicit-back.txt' },
+    }))
+    expect(explicitDownload.status).toBe('committed')
+    expect(readFileSync(join(fixture.workspace, 'explicit-back.txt'), 'utf8')).toBe('explicit-bytes')
+  })
+
+  it('uses an additional root aliasId on either copy side', async () => {
+    world = await mountRemoteTools(fixture, { localRootIds: ['primary', 'docs'] })
+    await registerRemote(world, 'build', 'app')
+    await registerLocalPeer(world, fixture.outside, 'docs')
+    const remote = world.remotes.get('build')!
+    writeFileSync(join(fixture.outside, 'from-docs.txt'), 'docs-bytes')
+
+    const up = copy(await world.call('remote_copy', {
+      from: { rootId: 'docs', relativePath: 'from-docs.txt' },
+      to: { environmentId: 'build', rootId: 'app', relativePath: 'dist/from-docs.txt' },
+    }))
+    expect(up, JSON.stringify(up)).toMatchObject({ status: 'committed' })
+    expect(remote.read('/srv/root/dist/from-docs.txt')!.toString()).toBe('docs-bytes')
+
+    const down = copy(await world.call('remote_copy', {
+      from: { environmentId: 'build', rootId: 'app', relativePath: 'dist/from-docs.txt' },
+      to: { rootId: 'docs', relativePath: 'back.txt' },
+    }))
+    expect(down, JSON.stringify(down)).toMatchObject({ status: 'committed' })
+    expect(readFileSync(join(fixture.outside, 'back.txt'), 'utf8')).toBe('docs-bytes')
+  })
+
+  it('refuses malformed copy arguments before admission or SFTP I/O', async () => {
+    world = await mountRemoteTools(fixture)
+    const remote = world.remotes.get('build')!
+    const admission = vi.spyOn(world.stack.registry, 'withRemoteOperation')
+    const valid = { rootId: 'primary', relativePath: 'a.txt' }
+    const cases: readonly { args: unknown; located: string }[] = [
+      { args: { from: valid }, located: '"to" is required' },
+      { args: { from: { rootId: 5, relativePath: 'a.txt' }, to: valid }, located: '"from.rootId" must be a string' },
+      { args: { from: valid, to: valid, extra: true }, located: '"extra" is not an accepted field' },
+      { args: { from: { ...valid, sessionId: 'forged' }, to: valid }, located: '"from.sessionId" is not an accepted field' },
+      { args: { from: { environmentId: null, ...valid }, to: valid }, located: '"from.environmentId" must be a string' },
+      { args: { from: { environmentId: '', ...valid }, to: valid }, located: '"from.environmentId" must not be empty' },
+      { args: null, located: 'arguments must be an object' },
+    ]
+    for (const entry of cases) {
+      const result = copy(await world.call('remote_copy', entry.args))
+      expect(result, JSON.stringify(result)).toMatchObject({ status: 'failed', code: 'invalid-arguments', stage: 'admission' })
+      expect(result.message).toContain(entry.located)
+      expect(result.hint).toBeTruthy()
+    }
+    expect(admission).not.toHaveBeenCalled()
+    expect(remote.sftpCalls).toHaveLength(0)
+  })
+
+  it('refuses malformed bash arguments before admission, confine or spawn', async () => {
+    world = await mountRemoteTools(fixture)
+    const remote = world.remotes.get('build')!
+    const admission = vi.spyOn(world.stack.registry, 'withRemoteOperation')
+    const valid = { environmentId: 'build', rootId: 'app', command: 'true', timeoutMs: 10 }
+    const cases: readonly { args: unknown; located: string }[] = [
+      { args: { ...valid, sessionId: 'forged', toolName: 'other_tool' }, located: '"sessionId" is not an accepted field' },
+      { args: { ...valid, command: undefined }, located: '"command" is required' },
+      { args: { ...valid, environmentId: null }, located: '"environmentId" must be a string' },
+      { args: { ...valid, environmentId: '' }, located: '"environmentId" must not be empty' },
+      { args: { ...valid, environmentId: 'local' }, located: '"environmentId" must name a remote environment' },
+      { args: { ...valid, timeoutMs: 0 }, located: '"timeoutMs" must be at least 1' },
+      { args: { ...valid, maxOutputBytes: 0 }, located: '"maxOutputBytes" must be at least 1' },
+    ]
+    for (const entry of cases) {
+      const result = exec(await world.call('remote_bash', entry.args))
+      expect(result, JSON.stringify(result)).toMatchObject({ status: 'not-started', code: 'invalid-arguments' })
+      expect(result.message).toContain(entry.located)
+      expect(result.hint).toBeTruthy()
+    }
+    expect(admission).not.toHaveBeenCalled()
+    expect(remote.execCalls).toHaveLength(0)
+    expect(remote.sftpCalls).toHaveLength(0)
+  })
+
+  it('offers registered candidates filtered by direction and action', async () => {
+    world = await mountRemoteTools(fixture)
+    await registerRemote(world, 'build', 'app')
+    writeFileSync(join(fixture.workspace, 'candidate.txt'), 'x')
+    const refused = copy(await world.call('remote_copy', {
+      from: { rootId: 'primary', relativePath: 'candidate.txt' },
+      to: { environmentId: 'device', rootId: 'out', relativePath: 'out.txt' },
+    }))
+    expect(refused).toMatchObject({ status: 'failed', code: 'endpoint-not-registered' })
+    expect(refused.hint).toContain('build:app')
+    expect(refused.hint).toContain('source direction')
+    expect(refused.hint).toContain('destination direction')
+
+    await registerRemote(world, 'device', 'out')
+    const bash = exec(await world.call('remote_bash', { environmentId: 'device', rootId: 'out', command: 'true', timeoutMs: 10 }))
+    expect(bash).toMatchObject({ status: 'not-started', code: 'action-not-allowed' })
+    expect(bash.hint).toContain('build:app')
+    expect(bash.hint).not.toContain('device:out')
+  })
+
+  it('keeps the original exec refusal when the snapshot is unavailable', async () => {
+    world = await mountRemoteTools(fixture)
+    await registerRemote(world, 'build', 'app')
+    vi.spyOn(world.stack.registry, 'remoteList').mockRejectedValue(new Error('registry ipc unavailable'))
+    const refused = exec(await world.call('remote_bash', { environmentId: 'device', rootId: 'out', command: 'true', timeoutMs: 10 }))
+    expect(refused).toMatchObject({ status: 'not-started', code: 'endpoint-not-registered' })
+    expect(refused.hint).toContain('workspace topology')
+  })
+
+  it('keeps the original refusal with a generic hint when the snapshot is unavailable', async () => {
+    world = await mountRemoteTools(fixture)
+    await registerRemote(world, 'build', 'app')
+    vi.spyOn(world.stack.registry, 'remoteList').mockRejectedValue(new Error('registry ipc unavailable'))
+    writeFileSync(join(fixture.workspace, 'snapshot.txt'), 'x')
+    const refused = copy(await world.call('remote_copy', {
+      from: { rootId: 'primary', relativePath: 'snapshot.txt' },
+      to: { environmentId: 'device', rootId: 'out', relativePath: 'out.txt' },
+    }))
+    expect(refused).toMatchObject({ status: 'failed', code: 'endpoint-not-registered' })
+    expect(refused.hint).toContain('workspace topology')
   })
 })
 

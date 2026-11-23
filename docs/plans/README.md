@@ -38,6 +38,7 @@ completed/
 
 active：
 
+- [2026-11-23-remote-tool-hardening.md](./active/2026-11-23-remote-tool-hardening.md) — 个人 SSH 工具硬化：`remote_copy` 两端统一参数（省略 `environmentId` 才取 `local`，`null`/空串报错）、execute 边界与广告 schema 同源的 `invalid-arguments`、稳定码生成的有界 `message`/`hint` 与有界端点候选、`remote_bash` 每流 64 KiB 预览默认与 `maxOutputBytes`/`totalBytes`/`droppedBytes`，以及单普通文件、0600、不保留 mtime、拒绝覆盖的传输属性与后续扩展记录。
 - [2026-11-22-remote-copy-stream-budget.md](./active/2026-11-22-remote-copy-stream-budget.md) — PR #73 Codex 评审 P2：`remote_copy` 的两条上传路径只在源绑定时检查 `maxBytes`，源在 `stat` 后增长时会把超限字节先写入远端 staging，再由 `source-changed` 收尾；修复为 `RemoteStage.write` 的累计写入前检查（`transfer-too-large`），两条上传循环共用，含红/绿回归与退出验收。
 
 - [2026-11-16-sidebar-footer-row-alignment-and-coexistence.md](./active/2026-11-16-sidebar-footer-row-alignment-and-coexistence.md) — 侧栏 footer 入口的 workspace tree 图标与跨两代几何对齐（旧 19 版 / 新 5 版，分界 `0.2.2-alpha.2`；rail 圆角按其更早的 `0.1.6-alpha.2` 分界处理，22/24 对齐、最老 2 版已知偏差），以及同槽出现第二行时的纵向共存规则：一份带 fallback 的 CSS 配方、`:has()` 作用域的 slot anchor 纵向列、不隐藏/不读槽账本/不改他人行；含复刻取证、测试与文档清单。决策见 [ADR-0044](../decisions/ADR-0044-sidebar-footer-row-alignment-and-coexistence.md)。

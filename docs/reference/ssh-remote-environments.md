@@ -153,9 +153,9 @@ GUI 入口有两处：
 **开关默认值**（GUI 勾选"允许命令执行"/"允许文件传输"时写入的完整节，见上文文件 schema）：
 
 ```jsonc
-// exec
+// exec（新草稿；已保存的连接保留它自己的上限）
 { "shell": ["/bin/sh", "-c"], "env": { "PATH": "/usr/local/bin:/usr/bin:/bin" },
-  "maxTimeoutMs": 600000, "stdoutLimit": 1048576, "stderrLimit": 262144, "terminateGraceMs": 2000 }
+  "maxTimeoutMs": 600000, "stdoutLimit": 65536, "stderrLimit": 65536, "terminateGraceMs": 2000 }
 // transfer
 { "maxBytes": 268435456, "timeoutMs": 600000 }
 ```
@@ -163,6 +163,20 @@ GUI 入口有两处：
 所有变更请求携带当前 `revision`；`personal-config-conflict` 时前端先重取 `sshState` 再显示本地化冲突文案。服务端错误一律经 `error.*` 本地化渲染。
 
 exec 与 transfer 独立授权：执行前用 helper 的只读受限 stat/realpath 探针分别验证根与 cwd；无需 transfer 配置或 SFTP 发布扩展。重定向目录和越界 cwd 在命令准备前拒绝。
+
+## 模型工具：参数、结果与输出预算
+
+`remote_copy` 与 `remote_bash` 广告的 JSON Schema 与 execute 边界的实际校验来自同一份声明（`src/remote/tool-arguments.ts`）：缺字段、错误类型、未知字段与嵌套对象都在工具层以带字段位置的 `invalid-arguments` 结束，早于 Registry 准入与任何 SSH/SFTP I/O。
+
+**`remote_copy` 端点。** `from` 与 `to` 使用同一定义 `{environmentId?, rootId, relativePath}`，两侧规则相同：只有**省略** `environmentId` 才取 `local`，`null` 与空串是参数错误；远端端点必须显式给出环境 ID。本地主根写作 `environmentId: "local"` + `rootId: "primary"`（可省略 environmentId，即 `local:primary`），附加根使用登记的 `aliasId`。`relativePath` 是单个普通文件的规范化相对 POSIX 路径。上传示例 `{"from":{"rootId":"primary","relativePath":"dist/app.tar"},"to":{"environmentId":"build","rootId":"app","relativePath":"in/app.tar"}}`；下载示例 `{"from":{"environmentId":"build","rootId":"app","relativePath":"out/app.tar"},"to":{"rootId":"primary","relativePath":"dist/app.tar"}}`。
+
+**`remote_bash` 参数。** `environmentId` 必填且必须命名远端环境（`"local"` 是参数错误）；`rootId` 是登记的绑定根，`cwdRelative` 相对它（`""` 或省略表示根目录本身）；`timeoutMs` 是整数毫秒；`maxOutputBytes` 是可选单流预览上限。工具名与 Session 只取自调度上下文，模型参数里的同名字段作为未知字段被拒绝。
+
+**结果文案。** 两个工具保留既有 `status`/`code`/`stage`/`staging`/`operationId`/`reconcileId` 语义，并为可诊断的失败增加有界 `message` 与 `hint`：文案只由稳定错误码与安全字段（环境/根 ID、相对路径、已准入的 displayPath、候选列表）生成，不包含捕获到的异常文本、SSH 诊断原文或凭据路径。`invalid-cwd` 的提示说明 `cwdRelative` 为空表示已准入根目录（附 displayPath），否则必须是规范化相对路径；`destination-parent-missing` 指明缺失的是目标父目录；`local-root-unavailable` 说明 `primary` 与 `aliasId` 的写法。
+
+**端点候选。** `endpoint-not-registered`、`endpoint-withheld`、`endpoint-revoked`、`action-not-allowed` 与 `transfer-pair-not-allowed` 的提示附候选（每个方向最多 6 个，一次提示最多 12 个 `environmentId:rootId`）。候选读取当前 Session 主根对应的 Registry 快照（`remoteList`）与当前清单，按实际登记状态、方向所需的 `read`/`write`/`exec` 动作以及已知对端配对筛选；读取不建立任何远端连接，也不消耗准入。快照不可用（控制面未就绪、读取超时或失败）时仍返回原错误码与通用提示。候选只用于纠错，每次重试仍走正式准入。`unknown` 与 `admitted-may-start` 不给出盲重试建议：前者的提示要求先按 `reconcileId` 核对远端状态，后者没有 `reconcileId`，提示先确认命令是否真的启动。
+
+**输出预算。** `remote_bash` 的 stdout 与 stderr 默认各预览最多 64 KiB（`DEFAULT_OUTPUT_PREVIEW_BYTES`）。该默认在工具层应用，因此已保存 1 MiB `exec` 上限的旧连接也得到短结果；`maxOutputBytes` 可显式放大单流上限，但始终被该流的部署上限（`exec.stdoutLimit`/`exec.stderrLimit`）夹取。新 SSH 草稿把这两个部署上限也写为该默认值；已保存连接保持原配置。结果除 `stdout`/`stderr`/`truncated` 外还逐流报告：`totalBytes` 是后端观察到的原始字节数，无法证明精确总数（例如适配器未提供坐标）时为 `null`；`droppedBytes` 是未包含在预览中的原始字节数，`totalBytes` 未知时为 `null`。SSH 适配器把上游采集器的整体坐标（`nextOffset`）与 `lossy`（上游已丢弃开头）传入 sink；上游已截断时预览从保留窗口开始，`truncated` 为真，`droppedBytes` 含被上游丢弃的部分。窗口边界落在多字节字符中间时，适配器去掉该 U+FFFD 伪字符并标记窗口为近似：`totalBytes` 仍是精确总数，`droppedBytes` 为 `null`（该窗口不是原始字节的逐字节映射，不做猜测）。工具层自己的预览截断只发生在 UTF-8 边界之外，不产生替换字符；`droppedBytes` 按保留窗口的原始字节计，窗口末尾被文本省略的不完整字符仍计入窗口。大输出请重定向到已授权远端根内的文件再分段读取或复制，不要在结果里追逐完整输出；自动落盘与结果引用属于后续设计，需先定容量、清理与读取准入。
 
 ## 在飞命令撤权与清理
 

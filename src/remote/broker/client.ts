@@ -17,6 +17,7 @@ import type { SshEnvironment, SftpEnvironment } from '../ssh-environment.ts'
 import type { SftpClient, SftpVersion } from '../sftp.ts'
 import { SftpConnectionLost, SftpStatusError } from '../sftp.ts'
 import { RemoteConnectionLost, type RemoteProcessHandle } from '../exec.ts'
+import { DEFAULT_OUTPUT_PREVIEW_BYTES } from '../output-budget.ts'
 import type { RemoteToolsManager } from '../tools-registration.ts'
 import {
   BROKER_PROTOCOL,
@@ -425,8 +426,8 @@ export class BrokerEnvironmentManager implements RemoteToolsManager {
       argv: [...input.argv],
       cwd: input.cwd,
       env: { ...input.env },
-      stdoutLimit: input.stdio?.stdout?.maxBytes ?? 65_536,
-      stderrLimit: input.stdio?.stderr?.maxBytes ?? 65_536,
+      stdoutLimit: input.stdio?.stdout?.maxBytes ?? DEFAULT_OUTPUT_PREVIEW_BYTES,
+      stderrLimit: input.stdio?.stderr?.maxBytes ?? DEFAULT_OUTPUT_PREVIEW_BYTES,
       graceMs: input.graceMs ?? 0,
       generation,
       confinementToken,

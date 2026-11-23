@@ -9,14 +9,19 @@
  */
 import type { SshBindingDraft, SshEnvironmentView } from './ssh-client.ts'
 import type { Key } from './locales.ts'
+import { DEFAULT_OUTPUT_PREVIEW_BYTES } from '../remote/output-budget.ts'
 
-/** The exec stanza the "allow command execution" toggle materializes (ADR-0049). */
+/**
+ * The exec stanza the "allow command execution" toggle materializes (ADR-0049).
+ * New connections use the same per-stream preview default as `remote_bash`;
+ * saved connections keep the limits they stored.
+ */
 export const EXEC_DEFAULTS = {
   shell: ['/bin/sh', '-c'],
   env: { PATH: '/usr/local/bin:/usr/bin:/bin' },
   maxTimeoutMs: 600_000,
-  stdoutLimit: 1_048_576,
-  stderrLimit: 262_144,
+  stdoutLimit: DEFAULT_OUTPUT_PREVIEW_BYTES,
+  stderrLimit: DEFAULT_OUTPUT_PREVIEW_BYTES,
   terminateGraceMs: 2_000,
 } as const
 
