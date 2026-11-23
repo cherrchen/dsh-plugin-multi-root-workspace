@@ -8,9 +8,9 @@ English: [CHANGELOG.en.md](./CHANGELOG.en.md)
 - 安装方式、受支持的上游运行时与已知限制见 [README](./README.md)。
 - 每个版本的实施证据、编号口径与发布状态见[路线图 §进度总账](./docs/plans/active/2026-09-12-multi-root-workspace.md#进度总账)；GitHub Release 的正文由 `scripts/release-notes.mjs` 从 commit 历史生成，是本文件之外的完整原始清单。
 
-## [Unreleased]
+## [0.1.24-beta.4] - 2026-11-23
 
-本版修复个人 SSH 活跃时卸载插件导致 Host 退出的问题，并把 SSH 依赖安装收敛为一条随插件发行的命令。没有配置或协议变更；SSH 仍为实验性、默认关闭。
+本版是 `0.1.24` 线的第四个 beta，修复个人 SSH 活跃时卸载插件导致 Host 退出的问题，并把 SSH 依赖安装收敛为一条随插件发行的命令。没有配置或协议变更；SSH 仍为实验性、默认关闭。
 
 ### Fixed
 
@@ -405,7 +405,8 @@ English: [CHANGELOG.en.md](./CHANGELOG.en.md)
 
 - 发布前外部评审提出的 8 项发现（其中 3 项发布阻断）全部修复，每项各带一个回归测试：登记目录被替换为符号链接后授权转移（引入 `recordedPath`，**重新解析路径不等于重新授权**）、并发修改注册表丢写或复活已撤销的授权（每个主根的变更串行）、刷新不重新检查目录、手输路径被目录选择器覆盖、`reveal` 的应答契约与失败码、重复 id 未校验、主根未纳入嵌套校验、CI 先测后构建。
 
-[Unreleased]: https://github.com/cherrchen/dsh-plugin-multi-root-workspace/compare/v0.1.24-beta.3...HEAD
+[Unreleased]: https://github.com/cherrchen/dsh-plugin-multi-root-workspace/compare/v0.1.24-beta.4...HEAD
+[0.1.24-beta.4]: https://github.com/cherrchen/dsh-plugin-multi-root-workspace/compare/v0.1.24-beta.3...v0.1.24-beta.4
 [0.1.24-beta.3]: https://github.com/cherrchen/dsh-plugin-multi-root-workspace/compare/v0.1.24-beta.2...v0.1.24-beta.3
 [0.1.24-beta.2]: https://github.com/cherrchen/dsh-plugin-multi-root-workspace/compare/v0.1.24-beta.1...v0.1.24-beta.2
 [0.1.24-beta.1]: https://github.com/cherrchen/dsh-plugin-multi-root-workspace/compare/v0.1.23...v0.1.24-beta.1

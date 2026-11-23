@@ -8,9 +8,9 @@ This file records the user-visible changes of every **released** version.
 - For installation sources, the supported upstream runtimes, and known limitations, see the [README](./README.en.md).
 - The evidence, numbering, and release state of each version live in the [roadmap progress ledger](./docs/plans/active/2026-09-12-multi-root-workspace.md#进度总账). The body of each GitHub Release is generated from the commit history by `scripts/release-notes.mjs` and is the complete raw list behind this file.
 
-## [Unreleased]
+## [0.1.24-beta.4] - 2026-11-23
 
-This release fixes the Host exit caused by uninstalling the plugin while a personal SSH connection is active, and reduces SSH dependency installation to one command shipped with the package. There are no configuration or protocol changes; SSH remains experimental and off by default.
+This is the fourth beta of the `0.1.24` line. It fixes the Host exit caused by uninstalling the plugin while a personal SSH connection is active, and reduces SSH dependency installation to one command shipped with the package. There are no configuration or protocol changes; SSH remains experimental and off by default.
 
 ### Fixed
 
@@ -405,7 +405,8 @@ The first release: the three MVP milestones (M1–M3).
 
 - All eight findings of the pre-release external review (three of them release-blocking) are fixed, each with a regression test: a registered directory replaced by a symlink transplanting its authority (which introduced `recordedPath` — **re-resolving a path is not re-authorizing it**), concurrent registry mutations losing a write or reviving a revoked grant (per-primary-root mutations are serialized), a refresh not re-checking directories, a typed path being overwritten by the directory picker, the `reveal` response contract and failure code, duplicate ids not validated, the primary root missing from nesting validation, and CI testing before building.
 
-[Unreleased]: https://github.com/cherrchen/dsh-plugin-multi-root-workspace/compare/v0.1.24-beta.3...HEAD
+[Unreleased]: https://github.com/cherrchen/dsh-plugin-multi-root-workspace/compare/v0.1.24-beta.4...HEAD
+[0.1.24-beta.4]: https://github.com/cherrchen/dsh-plugin-multi-root-workspace/compare/v0.1.24-beta.3...v0.1.24-beta.4
 [0.1.24-beta.3]: https://github.com/cherrchen/dsh-plugin-multi-root-workspace/compare/v0.1.24-beta.2...v0.1.24-beta.3
 [0.1.24-beta.2]: https://github.com/cherrchen/dsh-plugin-multi-root-workspace/compare/v0.1.24-beta.1...v0.1.24-beta.2
 [0.1.24-beta.1]: https://github.com/cherrchen/dsh-plugin-multi-root-workspace/compare/v0.1.23...v0.1.24-beta.1

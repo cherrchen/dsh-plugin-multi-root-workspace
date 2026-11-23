@@ -28,7 +28,7 @@ No todos los proyectos son monorepos. Un proyecto de desarrollo suele estar form
 - **Entornos remotos SSH (experimental, desactivado por defecto)**: activa SSH personal en la página del complemento para usar `remote_copy` y `remote_bash` en directorios remotos registrados. Las conexiones y los vínculos del espacio de trabajo se gestionan por separado, y el Registry autoriza cada llamada.
 - **No registrar equivale a no tenerlo instalado**: sin raíces adicionales, el comportamiento es exactamente el mismo que con el plugin no instalado; una configuración incorrecta genera un error en lugar de degradarse en silencio.
 
-La última publicación es la beta `v0.1.24-beta.3`; la etiqueta `latest` de npm sigue apuntando a la versión estable `v0.1.23`, así que instala la beta indicando `@beta`. Los cambios visibles para el usuario de cada versión están en el [CHANGELOG](./CHANGELOG.en.md); el progreso y el estado de publicación están en el [libro mayor de progreso de la hoja de ruta](./docs/plans/active/2026-09-12-multi-root-workspace.md#进度总账).
+La última publicación es la beta `v0.1.24-beta.4`; la etiqueta `latest` de npm sigue apuntando a la versión estable `v0.1.23`, así que instala la beta indicando `@beta`. Los cambios visibles para el usuario de cada versión están en el [CHANGELOG](./CHANGELOG.en.md); el progreso y el estado de publicación están en el [libro mayor de progreso de la hoja de ruta](./docs/plans/active/2026-09-12-multi-root-workspace.md#进度总账).
 
 ## Inicio rápido
 
@@ -89,7 +89,7 @@ La instalación admite dos vías: desde la línea de comandos (CLI) o desde el g
 dsh plugin --profile web add @dsh-electron/dsh-plugin-multi-root-workspace
 ```
 
-Actualmente `latest` es la versión estable `v0.1.23`; para instalar la beta (`v0.1.24-beta.3` en esta entrega), indica `@beta` explícitamente:
+Actualmente `latest` es la versión estable `v0.1.23`; para instalar la beta (`v0.1.24-beta.4` en esta entrega), indica `@beta` explícitamente:
 
 ```sh
 dsh plugin --profile web add @dsh-electron/dsh-plugin-multi-root-workspace@beta
@@ -100,8 +100,8 @@ dsh plugin --profile web add @dsh-electron/dsh-plugin-multi-root-workspace@beta
 ```sh
 pnpm pack @dsh-electron/dsh-plugin-multi-root-workspace
 # o descargue el tgz de los recursos del GitHub Release, por ejemplo:
-# https://github.com/cherrchen/dsh-plugin-multi-root-workspace/releases/download/v0.1.24-beta.3/dsh-electron-dsh-plugin-multi-root-workspace-0.1.24-beta.3.tgz
-dsh plugin --profile web add ./dsh-electron-dsh-plugin-multi-root-workspace-0.1.24-beta.3.tgz
+# https://github.com/cherrchen/dsh-plugin-multi-root-workspace/releases/download/v0.1.24-beta.4/dsh-electron-dsh-plugin-multi-root-workspace-0.1.24-beta.4.tgz
+dsh plugin --profile web add ./dsh-electron-dsh-plugin-multi-root-workspace-0.1.24-beta.4.tgz
 ```
 
 También son artefactos precompilados, adecuados para entregas en redes internas o entornos sin conexión.
@@ -121,10 +121,10 @@ allowBuilds:
   '@dsh-electron/dsh-plugin-multi-root-workspace@github:cherrchen/dsh-plugin-multi-root-workspace#<commit>': true
 ```
 
-Se recomienda fijar una versión (por ejemplo `#v0.1.24-beta.3`) para que un push posterior no pueda cambiar en silencio lo que realmente se ejecuta:
+Se recomienda fijar una versión (por ejemplo `#v0.1.24-beta.4`) para que un push posterior no pueda cambiar en silencio lo que realmente se ejecuta:
 
 ```sh
-dsh plugin --profile web add github:cherrchen/dsh-plugin-multi-root-workspace#v0.1.24-beta.3
+dsh plugin --profile web add github:cherrchen/dsh-plugin-multi-root-workspace#v0.1.24-beta.4
 ```
 
 #### Instalar desde una copia local del código fuente
@@ -218,12 +218,12 @@ DeepSeek Harness Desktop puede instalar un comando `dsh` global desde la opción
 1. Cierre Desktop por completo, incluido el icono de la bandeja.
 2. Instalación nueva:
    ```sh
-   dsh plugin --profile desktop add @dsh-electron/dsh-plugin-multi-root-workspace@0.1.24-beta.3
+   dsh plugin --profile desktop add @dsh-electron/dsh-plugin-multi-root-workspace@0.1.24-beta.4
    ```
 3. Ya instalado pero sin el registro del bundle: ejecute `remove` y después `add` (volver a ejecutar solo `add` no añade el registro):
    ```sh
    dsh plugin --profile desktop remove @dsh-electron/dsh-plugin-multi-root-workspace
-   dsh plugin --profile desktop add @dsh-electron/dsh-plugin-multi-root-workspace@0.1.24-beta.3
+   dsh plugin --profile desktop add @dsh-electron/dsh-plugin-multi-root-workspace@0.1.24-beta.4
    ```
 4. Abra `$DSH_HOME/profiles/desktop/package.json` (normalmente `~/.dsh/profiles/desktop/package.json` cuando `DSH_HOME` no está definido) y confirme que `dsh.profile.bundles` incluye este paquete.
 5. Vuelva a abrir Desktop (arranque en frío).
