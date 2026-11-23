@@ -776,11 +776,14 @@ describe.skipIf(process.platform === 'win32')('personal RPC refusals through the
     expect(initial).toMatchObject({ ok: true, value: { status: { state: 'disabled' }, dependencies: { packages: expect.any(Array) } } })
     await world.stack.registry.configureRemote({ enabled: true, mode: 'personal' })
     const result = await world.panel('status', {}, SSH_SETTINGS_CHANNEL)
-    const dependencies = (result.value as { dependencies: { code: string; command?: string; packages: unknown[] } }).dependencies
+    const dependencies = (result.value as { dependencies: { code: string; command?: string; release?: string; packages: unknown[] } }).dependencies
     expect(dependencies.packages).toHaveLength(4)
     if (dependencies.code !== 'ssh-host-unsupported') {
       expect(dependencies.code).toMatch(/^ssh-deps-(?:private|missing)$/)
-      expect(dependencies.command).toContain('dsh plugin --profile web add --save-exact')
+      expect(dependencies.command).toContain('install-ssh-deps.mjs')
+      expect(dependencies.command).toContain('--profile web')
+      expect(dependencies.release).toBeDefined()
+      expect(dependencies.command).toContain(`--release ${dependencies.release}`)
     }
     const response = await world.panel('sshHelperInstall', { revision: 0, environmentId: 'dev-box' }, SSH_SETTINGS_CHANNEL)
     expect(response.ok).toBe(false)

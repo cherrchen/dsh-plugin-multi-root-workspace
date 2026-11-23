@@ -5,6 +5,7 @@
  * fallback handshake.
  */
 import { createHash } from 'node:crypto'
+import { EventEmitter } from 'node:events'
 import { createServer, connect, type TLSSocket } from 'node:tls'
 import { describe, expect, it } from 'vitest'
 import {
@@ -107,13 +108,25 @@ describe('installClientPskFallback', () => {
     expect(seen[3]![0]).toMatchObject({ ciphers: UPSTREAM_PSK_CIPHER })
   })
 
-  it('does not patch a native or unsupported runtime', () => {
+  it('guards a native runtime and refuses an unsupported one', () => {
     const native: PskTlsModule = { getCiphers: () => OPENSSL_PSK, connect: () => 'native' }
     const unsupported: PskTlsModule = { getCiphers: () => ['psk-aes256-cbc-sha'], connect: () => 'none' }
-    expect(installClientPskFallback({ tls: native })).toMatchObject({ installed: false, plan: { kind: 'native' } })
+    expect(installClientPskFallback({ tls: native })).toMatchObject({ installed: true, plan: { kind: 'native' } })
     expect(installClientPskFallback({ tls: unsupported })).toMatchObject({ installed: false, plan: { kind: 'unsupported' } })
     expect(native.connect(upstreamOptions())).toBe('native')
     expect(unsupported.connect(upstreamOptions())).toBe('none')
+  })
+
+  it('attaches the forwarded-stream error guard before the upstream abort can fire', () => {
+    const native: PskTlsModule = { getCiphers: () => OPENSSL_PSK, connect: () => new EventEmitter() }
+    const installed = installClientPskFallback({ tls: native })
+    const stream = native.connect(upstreamOptions()) as import('node:events').EventEmitter
+    // Upstream removes its authentication handler on secureConnect; an abort
+    // in that gap used to emit an unhandled 'error'. The guard is attached
+    // synchronously before any event can run.
+    expect(stream.listenerCount('error')).toBe(1)
+    expect(() => { stream.emit('error', new Error('SSH connection lost')) }).not.toThrow()
+    installed.restore()
   })
 })
 

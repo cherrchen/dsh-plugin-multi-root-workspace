@@ -1,4 +1,4 @@
-import { mkdtempSync, rmSync, writeFileSync } from 'node:fs'
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { Context } from '@deepseek-ai/cordis'
@@ -25,9 +25,11 @@ describe.skipIf(process.platform !== 'darwin' && process.platform !== 'linux')('
       const before = inspectSshProfile(running)
       expect(before.gate).toBeUndefined()
       expect(before.view.code).toMatch(/^ssh-deps-(?:missing|private)$/)
-      expect(before.view.command).toContain("dsh plugin --profile ssh-dev add --save-exact")
+      expect(before.view.command).toContain('install-ssh-deps.mjs')
+      expect(before.view.command).toContain('--profile ssh-dev')
+      expect(before.view.command).toContain(`--release ${release}`)
       expect(before.view.command).toContain("'\\''")
-      for (const name of SSH_PEER_PACKAGES) expect(before.view.command).toContain(`${name}@${release}`)
+      expect(before.view.command).toContain('--dsh')
 
       installFixtureSsh(dir, release)
       expect(inspectSshProfile(running)).toMatchObject({ view: { code: 'ssh-deps-restart' } })
@@ -43,6 +45,28 @@ describe.skipIf(process.platform !== 'darwin' && process.platform !== 'linux')('
     } finally {
       await running.fiber.dispose()
       await restarted.fiber.dispose()
+      rmSync(home, { recursive: true, force: true })
+    }
+  })
+
+  it('reports a partially installed set separately from a fully missing one', async () => {
+    const home = mkdtempSync(join(tmpdir(), 'mrfw-profile-'))
+    const ctx = host()
+    try {
+      const dir = provideSshProfile(ctx, home, 'ssh-partial')
+      installFixtureSsh(dir, release, SSH_PEER_PACKAGES.slice(1))
+      captureSshProfile(ctx)
+      const state = inspectSshProfile(ctx)
+      // The development tree also carries a plugin-private copy of the missing
+      // peer, so the gate reports that stronger refusal; the per-package view
+      // still separates the three installed peers from the missing one.
+      expect(['ssh-deps-partial', 'ssh-deps-private']).toContain(state.view.code)
+      expect(state.view).toMatchObject({ profile: 'ssh-partial', release })
+      expect(['missing', 'private']).toContain(state.view.packages.find(pkg => pkg.name === SSH_PEER_PACKAGES[0])?.state)
+      expect(state.view.packages.slice(1).every(pkg => pkg.state === 'installed')).toBe(true)
+      expect(state.view.command).toContain('--profile ssh-partial')
+    } finally {
+      await ctx.fiber.dispose()
       rmSync(home, { recursive: true, force: true })
     }
   })
@@ -66,6 +90,31 @@ describe.skipIf(process.platform !== 'darwin' && process.platform !== 'linux')('
     } finally {
       await ctx.fiber.dispose()
       rmSync(home, { recursive: true, force: true })
+    }
+  })
+
+  it('starts the Desktop executable in Node mode instead of the launcher-bound node script', async () => {
+    const home = mkdtempSync(join(tmpdir(), 'mrfw-profile-desktop-'))
+    const resources = mkdtempSync(join(tmpdir(), 'mrfw-resources-'))
+    const ctx = host()
+    const previous = Object.getOwnPropertyDescriptor(process, 'resourcesPath')
+    try {
+      mkdirSync(join(resources, 'runtime', 'cli', 'bin'), { recursive: true })
+      writeFileSync(join(resources, 'runtime', 'cli', 'bin', 'dsh'), '#!/bin/sh\n')
+      Object.defineProperty(process, 'resourcesPath', { configurable: true, value: resources })
+      provideSshProfile(ctx, home, 'desktop')
+      captureSshProfile(ctx)
+      const command = inspectSshProfile(ctx).view.command
+      expect(command).toContain('ELECTRON_RUN_AS_NODE=1')
+      expect(command).toContain(process.execPath)
+      expect(command).toContain(join(resources, 'runtime', 'cli', 'bin', 'dsh'))
+      expect(command).not.toContain(join(resources, 'runtime', 'bin', 'node'))
+    } finally {
+      if (previous === undefined) Reflect.deleteProperty(process, 'resourcesPath')
+      else Object.defineProperty(process, 'resourcesPath', previous)
+      await ctx.fiber.dispose()
+      rmSync(home, { recursive: true, force: true })
+      rmSync(resources, { recursive: true, force: true })
     }
   })
 

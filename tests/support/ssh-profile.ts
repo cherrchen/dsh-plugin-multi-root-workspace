@@ -4,11 +4,15 @@ import type { Context } from '@deepseek-ai/cordis'
 import { SSH_PEER_PACKAGES } from '../../src/compat/dsh-version.ts'
 import { captureSshProfile } from '../../src/compat/ssh-profile.ts'
 
-export function provideSshProfile(ctx: Context, home: string, name = 'web'): string {
+export function provideSshProfile(ctx: Context, home: string, name = 'web', release = '0.2.2-rc.5'): string {
   const dir = join(home, 'profiles', name)
   mkdirSync(dir, { recursive: true })
   writeFileSync(join(dir, 'package.json'), '{}')
-  ctx.provide('profileContext', { dir, home, name, installAnchor: join(home, 'host', 'package.json') } as never)
+  const anchor = join(home, 'host', 'package.json')
+  mkdirSync(join(home, 'host', 'lib'), { recursive: true })
+  writeFileSync(anchor, JSON.stringify({ name: '@deepseek-ai/dsh', version: release, bin: { dsh: 'lib/bin.js' } }))
+  writeFileSync(join(home, 'host', 'lib', 'bin.js'), '#!/usr/bin/env node\n')
+  ctx.provide('profileContext', { dir, home, name, installAnchor: anchor } as never)
   ctx.provide('pluginPackages', { resolution: { entries: [] } } as never)
   return dir
 }

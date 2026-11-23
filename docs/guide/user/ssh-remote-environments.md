@@ -29,9 +29,17 @@ English: [ssh-remote-environments.en.md](./ssh-remote-environments.en.md)
 
 安装 Multi-root Workspace 后即可使用本地工作区功能。确认开启个人 SSH 后，若当前 Profile 的依赖未就绪，界面会自动打开「安装 SSH 依赖」对话框。关闭后可从「管理 SSH 远端」再次查看四包状态。依赖已就绪时可直接配置连接。
 
-1. 如果界面提示缺失、只安装了一部分或版本不符，点击 **复制安装命令**。
-2. 完全退出相应的 DSH Host。在运行 DSH 的机器上，使用与界面显示的 Host **完全同版**的 `dsh` CLI 执行命令。Web 使用运行 Web Host 的机器，Desktop 先退出应用再执行 `desktop` Profile 的命令。命令包含当前 Profile、DSH Home 和四个精确版本。
+依赖修正有两种入口，任选其一；两者都只写入当前 Profile，不要求逐包安装或手动填写版本。
+
+1. **Desktop 一键安装（启动器明确支持时）**：对话框显示 **安装并重启**。点击后由 Desktop 启动器校验当前 Host、Profile 和版本，停止 Host 并等待退出，复用下方命令行的同一套安装核心，然后以原配置重启 `desktop` Profile。按钮会依次显示停止、安装、重启和检测状态；Web、旧版 Desktop 或启动器未提供该能力时不显示此按钮。
+2. **复制安装命令（所有宿主可用）**：点击 **复制安装命令**，完全退出相应的 DSH Host，在运行 DSH 的机器上执行。命令使用界面上显示的 Host **完全同版**的 CLI、准确的 Profile 与 DSH Home，并通过一次 `dsh plugin --profile <name> add --save-exact` 对齐四个包。Web 使用运行 Web Host 的机器；Desktop 在完全退出应用后执行 `desktop` Profile 的命令。重复执行是安全的：四包已经对齐时直接报告「已就绪」，不会重复写入。
 3. 使用同一 Profile 重新启动 Host，再打开「管理 SSH 远端」。如仍显示依赖提示，点击 **重新检测依赖**，根据各包状态定位。检测只读取状态，当前进程发现磁盘已修复时仍提示重启。
+
+界面的三种结果要区分：
+
+- **安装完成**：本次命令或启动器操作成功写入了四个包；
+- **待重启**：磁盘上的包已对齐，但当前进程仍在使用启动时加载的旧依赖；
+- **依赖已就绪**：当前 Host 已能解析四个同版包，可以配置连接。
 
 更换 DSH 版本后，用新 Host 提供的命令重新对齐四个包。版本与部署边界见 [SSH 技术参考](../../reference/ssh-remote-environments.md#host-profile-依赖)。
 

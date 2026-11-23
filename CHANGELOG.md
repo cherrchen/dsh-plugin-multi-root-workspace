@@ -8,6 +8,19 @@ English: [CHANGELOG.en.md](./CHANGELOG.en.md)
 - 安装方式、受支持的上游运行时与已知限制见 [README](./README.md)。
 - 每个版本的实施证据、编号口径与发布状态见[路线图 §进度总账](./docs/plans/active/2026-09-12-multi-root-workspace.md#进度总账)；GitHub Release 的正文由 `scripts/release-notes.mjs` 从 commit 历史生成，是本文件之外的完整原始清单。
 
+## [Unreleased]
+
+本版修复个人 SSH 活跃时卸载插件导致 Host 退出的问题，并把 SSH 依赖安装收敛为一条随插件发行的命令。没有配置或协议变更；SSH 仍为实验性、默认关闭。
+
+### Fixed
+
+- **卸载仍持有活 SSH 连接的插件会让 Host 以未捕获异常退出**：上游 `SshConnection` 在转发流 TLS `secureConnect` 后移除认证期的一次性 `error` 监听，连接丢失落在挂上永久监听之前时，`socket.destroy(error)` 把 `SshRpcPeer.close()` 构造的 `SSH connection lost` 变成未处理的 `'error'` 事件。插件在 `tls.connect` 返回时同步为上游转发流套接字附加错误保护，并在 native 与 BoringSSL 运行时都安装；不替换连接自身的监听，不改变真实掉线的失效与上报，也不使用进程级异常吞噬。管理器的关闭改为幂等事务：先停止接纳新操作，取消并等待在途传输，再逐项清理 Helper、SFTP 会话与 fiber；关闭开始后才完成的连接会被回收，单个资源失败只记录诊断并继续清理其余资源。
+
+### Added
+
+- **随插件发行的 SSH 依赖安装命令**：发布 tarball 新增 `scripts/install-ssh-deps.mjs` 与 `lib/install-ssh-deps.js`。命令从可信安装上下文确定精确 DSH CLI、Profile、DSH Home 与 Host 版本，校验版本与 Profile 后以结构化 argv 执行一次 `dsh plugin --profile <name> add --save-exact`，把四个 SSH 包对齐到 Host 版本；重复执行直接报告已就绪，路径中的空格、单引号与非 ASCII 字符均受支持。
+- **Desktop 一键安装入口**：依赖对话框在 Desktop 启动器明确支持时显示 **安装并重启**，保留复制命令与重新检测；启动器只接受固定的动作，由可信端生成 Profile、版本与参数。Web 与旧版 Desktop 继续使用复制命令。
+
 ## [0.1.24-beta.3] - 2026-11-23
 
 本版是 `0.1.24` 线的第三个 beta，只修复 DSH Desktop 上登记远端目录失败：Electron 的 BoringSSL 不实现上游转发流固定的 GCM-PSK 套件，Host 在本地创建 TLS 上下文时报 `NO_CIPHER_MATCH`，目录核验与登记中断。插件在 BoringSSL 运行时只改写上游的那一次转发流调用，改用 AEAD 的 ChaCha20-PSK，并给 Helper 部署附加入口；plain Node Host 继续协商原套件，记录与已登记 Root 不变，桌面端旧 Helper 需重装一次。没有不兼容变更；未开启 SSH 时行为与 `v0.1.24-beta.2` 相同。

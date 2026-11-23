@@ -105,6 +105,7 @@
     "CHANGELOG.en.md",
     "LICENSE",
     "THIRD_PARTY_LICENSE",
+    "scripts/install-ssh-deps.mjs",
     "scripts/windows-broker/*.ps1",
     "scripts/windows-broker/*.cs",
     "src/auto-review/FORK.md",
