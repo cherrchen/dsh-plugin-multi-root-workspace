@@ -6,7 +6,7 @@
  * Every external command goes through the injected ExecFile seam.
  */
 import { createHash as hashServerKey } from 'node:crypto'
-import { existsSync, mkdtempSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, renameSync, rmSync, symlinkSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
@@ -22,12 +22,17 @@ import { mountRegistryStack, type RegistryStack } from './support/registry-stack
 import { handlePersonalEndpoint } from '../src/remote/personal-endpoints.ts'
 import { parseSshCall, type SshCall, type SshStateView } from '../src/remote/personal-contract.ts'
 import { loadPersonalConfig, savePersonalConfig, type PersonalConfig, type PersonalEnvironment } from '../src/remote/personal/config.ts'
-import type { ExecFile } from '../src/remote/personal/credentials.ts'
+import { CommandExecutionError, defaultExec, type ExecFile } from '../src/remote/personal/credentials.ts'
 import { installAccessKey, installHelper } from '../src/remote/personal/operations.ts'
 import { attestBroker, assertBrokerDestinations } from '../src/remote/broker/attest.ts'
 import type { DeploymentManifest } from '../src/remote/manifest.ts'
 import type { MultiRootRegistry } from '../src/registry.ts'
-import type { Context } from '@deepseek-ai/cordis'
+import { Context } from '@deepseek-ai/cordis'
+import { provideReadySshProfile, provideSshProfile } from './support/ssh-profile.ts'
+import { readInstalledVersion, SUPPORTED_SSH_RELEASES } from '../src/compat/dsh-version.ts'
+import { remoteNodeVersionStatus } from '../src/remote/ssh-diagnostics.ts'
+import { SSH_SETTINGS_CHANNEL } from '../src/remote/personal-contract.ts'
+import { parseErrorView } from '../src/contract.ts'
 
 const dirs: string[] = []
 const tmp = (): string => { const dir = mkdtempSync(join(tmpdir(), 'mrfw-ops-')); dirs.push(dir); return dir }
@@ -396,39 +401,6 @@ describe.skipIf(process.platform === 'win32')('personal endpoint behaviours (R1/
     expect(state.environments[0]!.helper).not.toBeNull()
   })
 
-  it('sshHelperInstall resolves the host helper lib set through the package root — exports never publishes lib/*', async () => {
-    const { registry, personalPath } = world()
-    writeConfig(personalPath, CONFIG())
-    const { createRequire } = await import('node:module')
-    const { createHash } = await import('node:crypto')
-    const { dirname } = await import('node:path')
-    const { readdirSync, statSync } = await import('node:fs')
-    const require = createRequire(import.meta.url)
-    const hostLibDir = join(dirname(require.resolve('@deepseek-ai/dsh-ssh/package.json')), 'lib')
-    const hostLib: Record<string, string> = {}
-    for (const name of readdirSync(hostLibDir)) {
-      if (statSync(join(hostLibDir, name)).isFile()) hostLib[name] = createHash('sha256').update(readFileSync(join(hostLibDir, name))).digest('hex')
-    }
-    const commands: string[] = []
-    const exec: ExecFile = async (_file, args) => {
-      const remote = String(args.at(-1))
-      commands.push(remote)
-      if (remote === 'command -v node || true') return { stdout: '/usr/bin/node\n', stderr: '' }
-      if (remote === 'printf %s "$HOME"') return { stdout: '/home/builder\n', stderr: '' }
-      if (remote.includes(' -e ')) return { stdout: JSON.stringify({ tree: 'b'.repeat(64), lib: hostLib }), stderr: '' }
-      if (remote.startsWith('umask 077; cat > ')) return { stdout: '', stderr: '' }
-      return { stdout: '', stderr: '' }
-    }
-    const state = await handlePersonalEndpoint(undefined as never as Context, registry, '/w',
-      { endpoint: 'sshHelperInstall', sessionId: 's', revision: 0, environmentId: 'dev-box' }, { exec }) as { environments: PersonalEnvironment[] }
-    const helper = state.environments[0]!.helper
-    expect(helper?.sha256).toMatch(/^[0-9a-f]{64}$/)
-    expect(helper?.helperPath).toContain('helper-entry.mjs')
-    expect(helper?.protocol).toBe(3)
-    expect(commands.some(cmd => cmd.includes('npm install'))).toBe(true)
-    expect(loadPersonalConfig(personalPath).environments[0]!.helper?.integrity).toBe(2)
-  })
-
   it('R6: a failed access-key install removes the orphan key; env remove cleans its access key', async () => {
     const { registry, personalPath, credentialRoot } = world()
     writeConfig(personalPath, CONFIG())
@@ -514,114 +486,172 @@ describe.skipIf(process.platform === 'win32')('operations argv/env and hash chec
     expect(captured!.input).toBe('ssh-ed25519 AAAAPUB\n')
   })
 
-  it('installHelper resolves node remotely, rejects non-absolute, and verifies the lib set', async () => {
-    const credentialRoot = join(tmp(), 'cred')
-    const hostLibDir = tmp()
-    const hostHelper = join(hostLibDir, 'helper.js')
-    writeFileSync(hostHelper, 'HELPER-BYTES')
-    writeFileSync(join(hostLibDir, 'protocol.js'), 'PROTOCOL-BYTES')
-    const { createHash } = await import('node:crypto')
-    const hash = (name: string) => createHash('sha256').update(readFileSync(join(hostLibDir, name))).digest('hex')
-    const remoteProbe = (lib: Record<string, string>) => JSON.stringify({ tree: 'c'.repeat(64), lib })
-    const goodLib = { 'helper.js': hash('helper.js'), 'protocol.js': hash('protocol.js') }
-    const commands: string[] = []
-    let entryWrite: { input?: string } | undefined
-    const exec: ExecFile = async (_file, args, options) => {
-      const remote = String(args.at(-1))
-      commands.push(remote)
-      if (remote === 'command -v node || true') return { stdout: '/usr/local/bin/node\n', stderr: '' }
-      if (remote === 'printf %s "$HOME"') return { stdout: '/home/builder', stderr: '' }
-      if (remote.includes(' -e ')) return { stdout: remoteProbe(goodLib), stderr: '' }
-      if (remote.startsWith('umask 077; cat > ')) { entryWrite = options; return { stdout: '', stderr: '' } }
-      return { stdout: '', stderr: '' }
+  const helperFixture = () => {
+    const hostHelperPath = join(tmp(), 'helper.js')
+    writeFileSync(hostHelperPath, 'HELPER-BYTES')
+    const helperHash = hashServerKey('sha256').update('HELPER-BYTES').digest('hex')
+    const options = { sshVersion: '0.2.2-rc.2', hostHelperPath }
+    return { options, helperHash, credentialRoot: join(tmp(), 'cred') }
+  }
+
+  const stageOf = (command: string): string => {
+    if (command.includes('uname -s')) return 'ssh-connect'
+    if (command.includes('npm.status===0') && !command.includes('mkdirSync')) return 'remote-prerequisites'
+    if (command.includes('mkdirSync')) return 'remote-install'
+    if (command.includes('renameSync')) return 'entry-generation'
+    return 'artifact-verification'
+  }
+  const fakeHelper = (helperHash: string, overrides: Record<string, unknown | (() => unknown)> = {}) => {
+    const defaults: Record<string, unknown> = {
+      'ssh-connect': 'Linux\n/usr/bin/node\n/home/builder\n',
+      'remote-prerequisites': { version: 'v24.9.0', npm: true },
+      'remote-install': { outcome: 'installed' },
+      'artifact-verification': { tree: 'd'.repeat(64), lib: { 'helper.js': helperHash } },
+      'entry-generation': { written: true },
     }
-    const result = await installHelper(exec, SSH_CONFIG_ENV, credentialRoot, { sshVersion: '0.2.2-rc.2', hostHelperPath: hostHelper })
-    expect(result.nodePath).toBe('/usr/local/bin/node')
-    expect(result.helperPath).toBe('/home/builder/.dsh-helper/0.2.2-rc.2/helper-entry.mjs')
-    expect(result.integrity).toBe(2)
-    expect(result.treeSha256).toBe('c'.repeat(64))
-    // helper.sha256 stays the helper.js artifact digest — upstream's
-    // hello.hash identifies the launched helper.js, never the entry script.
-    expect(result.sha256).toBe(hash('helper.js'))
-    expect(commands.some(cmd => cmd.includes(' -e '))).toBe(true)
-    // The entry pins the recorded set digest and imports the upstream helper.
-    expect(entryWrite?.input).toContain('integrity check failed')
-    expect(entryWrite?.input).toContain('import("./node_modules/@deepseek-ai/dsh-ssh/lib/helper.js")')
-    expect(entryWrite?.input).toContain('c'.repeat(64))
+    return vi.fn<ExecFile>(async (_file, args) => {
+      const stage = stageOf(args.at(-1)!)
+      const override = overrides[stage]
+      const response = typeof override === 'function' ? override() : override ?? defaults[stage]
+      return { stdout: typeof response === 'string' ? response : JSON.stringify(response), stderr: '' }
+    })
+  }
 
-    await expect(installHelper(async (_f, args) => {
-      const remote = String(args.at(-1))
-      if (remote === 'command -v node || true') return { stdout: 'node\n', stderr: '' } // not absolute
-      return { stdout: '', stderr: '' }
-    }, SSH_CONFIG_ENV, credentialRoot, { sshVersion: '0.2.2-rc.2', hostHelperPath: hostHelper }))
-      .rejects.toMatchObject({ code: 'helper-node-missing' })
-
-    // A host with no node at all: `|| true` exits 0 with empty output, so the
-    // check — not a bare `Command failed:` — produces `helper-node-missing`.
-    await expect(installHelper(async (_f, args) => {
-      const remote = String(args.at(-1))
-      if (remote === 'command -v node || true') return { stdout: '', stderr: '' }
-      return { stdout: '', stderr: '' }
-    }, SSH_CONFIG_ENV, credentialRoot, { sshVersion: '0.2.2-rc.2', hostHelperPath: hostHelper }))
-      .rejects.toMatchObject({ code: 'helper-node-missing' })
-
-    await expect(installHelper(async (_f, args) => {
-      const remote = String(args.at(-1))
-      if (remote === 'command -v node || true') return { stdout: '/usr/bin/node\n', stderr: '' }
-      if (remote === 'printf %s "$HOME"') return { stdout: '/home/builder', stderr: '' }
-      if (remote.includes(' -e ')) return { stdout: remoteProbe({ ...goodLib, 'protocol.js': '0'.repeat(64) }), stderr: '' }
-      return { stdout: '', stderr: '' }
-    }, SSH_CONFIG_ENV, credentialRoot, { sshVersion: '0.2.2-rc.2', hostHelperPath: hostHelper }))
-      .rejects.toMatchObject({ code: 'helper-hash-mismatch' })
+  it('uses the Host Helper bytes and deploys its pinned entry after all read-only checks', async () => {
+    const { options, helperHash, credentialRoot } = helperFixture()
+    const exec = fakeHelper(helperHash)
+    const result = await installHelper(exec, MANAGED, credentialRoot, options)
+    expect(result).toEqual({
+      nodePath: '/usr/bin/node',
+      helperPath: '/home/builder/.dsh-helper/0.2.2-rc.2/helper-entry.mjs',
+      sha256: helperHash, integrity: 2, treeSha256: 'd'.repeat(64),
+    })
+    expect(exec.mock.calls.map(([, args]) => stageOf(args.at(-1)!))).toEqual([
+      'ssh-connect', 'remote-prerequisites', 'remote-install', 'artifact-verification', 'entry-generation',
+    ])
+    const entry = exec.mock.calls[4]![2]?.input
+    expect(entry).toContain('integrity check failed')
+    expect(entry).toContain('import("./node_modules/@deepseek-ai/dsh-ssh/lib/helper.js")')
+    expect(entry).toContain('d'.repeat(64))
+    expect(exec.mock.calls.every(([, args]) => args.includes('BatchMode=yes'))).toBe(true)
   })
 
-  it('installHelper retries each second-scale probe once but never retries npm install', async () => {
-    const credentialRoot = join(tmp(), 'cred')
-    const hostHelper = join(tmp(), 'helper.js')
-    writeFileSync(hostHelper, 'HELPER-BYTES')
-    const { createHash } = await import('node:crypto')
-    const hostHash = createHash('sha256').update('HELPER-BYTES').digest('hex')
-    const attempts = new Map<string, number>()
-    const exec: ExecFile = async (_file, args) => {
-      const remote = String(args.at(-1))
-      attempts.set(remote, (attempts.get(remote) ?? 0) + 1)
-      // Every probe flaps once — the observed post-install link flap. The
-      // entry write is not a probe: it fails immediately, like npm install.
-      if (!remote.includes('npm install') && !remote.startsWith('umask') && attempts.get(remote) === 1) {
-        throw new Error('ssh: connect to host build.internal port 22: Connection timed out')
-      }
-      if (remote === 'command -v node || true') return { stdout: '/usr/bin/node\n', stderr: '' }
-      if (remote === 'printf %s "$HOME"') return { stdout: '/home/builder', stderr: '' }
-      if (remote.includes(' -e ')) return { stdout: JSON.stringify({ tree: 'd'.repeat(64), lib: { 'helper.js': hostHash } }), stderr: '' }
-      return { stdout: '', stderr: '' }
+  it.skipIf(remoteNodeVersionStatus(process.version) !== 'ok')('runs the real preflight, npm wrapper, digest and atomic entry scripts in a temporary server home', async () => {
+    const { options, helperHash, credentialRoot } = helperFixture()
+    const home = tmp()
+    const bin = join(home, 'bin')
+    mkdirSync(bin)
+    const nodePath = join(bin, 'node')
+    symlinkSync(process.execPath, nodePath)
+    writeFileSync(join(bin, 'npm'), `#!/bin/sh
+if [ "$1" = '--version' ]; then echo 11.0.0; exit 0; fi
+lib="$3/node_modules/@deepseek-ai/dsh-ssh/lib"
+mkdir -p "$lib" || exit 1
+printf %s HELPER-BYTES > "$lib/helper.js"
+`, { mode: 0o700 })
+    const exec: ExecFile = async (_file, args, opts) => await defaultExec('sh', ['-c', args.at(-1)!], {
+      ...opts, env: { ...opts?.env, HOME: home, PATH: bin + ':/usr/bin:/bin' },
+    })
+    const result = await installHelper(exec, MANAGED, credentialRoot, { ...options, nodePath })
+    expect(result.sha256).toBe(helperHash)
+    expect(readFileSync(result.helperPath, 'utf8')).toContain(result.treeSha256)
+  })
+
+  it.each([
+    ['ssh-connect', 'Linux\n\n/home/builder\n', 'helper-node-missing', 'remote-prerequisites'],
+    ['ssh-connect', 'Linux\nrelative/node\n/home/builder\n', 'helper-node-path', 'remote-prerequisites'],
+    ['ssh-connect', 'FreeBSD\n/usr/bin/node\n/home/builder\n', 'helper-remote-platform', 'remote-prerequisites'],
+    ['remote-prerequisites', { version: 'v24.8.0', npm: true }, 'node-too-old', 'remote-prerequisites'],
+    ['remote-prerequisites', { version: 'unparseable', npm: true }, 'helper-node-version', 'remote-prerequisites'],
+    ['remote-prerequisites', { version: 'v24.9.0', npm: false }, 'helper-npm-missing', 'remote-prerequisites'],
+    ['remote-prerequisites', { version: 'v24.9.0', directory: 'EACCES' }, 'helper-remote-directory', 'remote-prerequisites'],
+    ['remote-install', { outcome: 'npm', exitCode: 1, code: 'ENOTFOUND' }, 'helper-npm-network', 'remote-install'],
+    ['remote-install', { outcome: 'npm', exitCode: 1, code: 'ETARGET' }, 'helper-npm-package', 'remote-install'],
+    ['remote-install', { outcome: 'npm', exitCode: 17 }, 'helper-npm-exit', 'remote-install'],
+    ['remote-install', { outcome: 'npm', exitCode: 1, code: 'ENOSPC' }, 'helper-disk-space', 'remote-install'],
+    ['remote-install', { outcome: 'process', code: 'ETIMEDOUT' }, 'helper-install-timeout', 'remote-install'],
+    ['remote-install', 'no record', 'helper-stage-unexpected', 'remote-install'],
+    ['artifact-verification', { artifact: 'missing' }, 'helper-artifact-missing', 'artifact-verification'],
+    ['artifact-verification', { tree: 'x' }, 'helper-tree-invalid', 'artifact-verification'],
+    ['artifact-verification', 'null', 'helper-artifact-invalid', 'artifact-verification'],
+    ['artifact-verification', { tree: 'a'.repeat(64), lib: { 'helper.js': 'a'.repeat(64) } }, 'helper-hash-mismatch', 'artifact-verification'],
+    ['entry-generation', { written: false, code: 'EACCES' }, 'helper-entry-write', 'entry-generation'],
+  ] as const)('diagnoses %s as %s with an explicit phase', async (step, result, code, stage) => {
+    const { options, helperHash, credentialRoot } = helperFixture()
+    const exec = fakeHelper(helperHash, { [step]: result })
+    await expect(installHelper(exec, MANAGED, credentialRoot, options)).rejects.toMatchObject({ code, details: { stage } })
+    const observed = exec.mock.calls.map(([, args]) => stageOf(args.at(-1)!))
+    expect(observed.at(-1)).toBe(step)
+    expect(observed.filter(observedStage => observedStage === 'remote-install')).toHaveLength(stage === 'remote-prerequisites' ? 0 : 1)
+  })
+
+  it.each([
+    ['secret user@name: Permission denied (publickey).', 'ssh-connect-auth'],
+    ['Host key verification failed.', 'ssh-connect-host-key'],
+    ['ssh: Could not resolve hostname secret: nodename nor servname provided, or not known', 'ssh-connect-unreachable'],
+    ['ssh: connect to host secret port 22: Connection timed out', 'ssh-connect-timeout'],
+    ['Connection reset by secret', 'ssh-connect-interrupted'],
+    ['arbitrary secret password text', 'ssh-connect-unknown'],
+  ])('keeps process facts, safe excerpts, and the underlying cause for %s', async (stderr, code) => {
+    const { options, helperHash, credentialRoot } = helperFixture()
+    const cause = new CommandExecutionError(255, undefined, false, stderr, new Error('secret argv'))
+    const exec = fakeHelper(helperHash, { 'ssh-connect': () => { throw cause } })
+    const failure = await installHelper(exec, MANAGED, credentialRoot, options).catch((error: unknown) => error)
+    expect(failure).toMatchObject({ code, cause, details: { stage: 'ssh-connect', exitCode: 255 } })
+    expect(JSON.stringify(failure)).not.toContain('secret')
+    expect(exec).toHaveBeenCalledTimes(1)
+  })
+
+  it('classifies a lost SSH response during npm without rerunning the command', async () => {
+    const { options, helperHash, credentialRoot } = helperFixture()
+    const exec = fakeHelper(helperHash, {
+      'remote-install': () => { throw new CommandExecutionError(undefined, undefined, true, 'secret', new Error('secret')) },
+    })
+    await expect(installHelper(exec, MANAGED, credentialRoot, options)).rejects.toMatchObject({
+      code: 'helper-install-timeout',
+      details: { stage: 'remote-install', remoteState: 'may-have-changed', retryable: false },
+    })
+    expect(exec).toHaveBeenCalledTimes(3)
+  })
+
+  it.each(['saved', 'conflict', 'write failure'] as const)('records remote completion separately from Host outcome %s', async outcome => {
+    const { registry, personalPath } = world()
+    writeConfig(personalPath, CONFIG())
+    const ctx = new Context()
+    const release = '0.2.2-rc.5'
+    ctx.provide('multiRootCompat', { report: { release, verdict: 'supported' } } as never)
+    const profile = provideReadySshProfile(ctx, tmp(), release)
+    const helperPath = join(profile, 'node_modules', '@deepseek-ai', 'dsh-ssh', 'lib', 'helper.js')
+    writeFileSync(helperPath, 'HELPER-BYTES')
+    const helperHash = hashServerKey('sha256').update('HELPER-BYTES').digest('hex')
+    const exec = fakeHelper(helperHash, { 'entry-generation': () => {
+      if (outcome === 'conflict') writeConfig(personalPath, { ...CONFIG(), revision: 1 })
+      if (outcome === 'write failure') { rmSync(personalPath); writeFileSync(personalPath, 'secret config bytes') }
+      return { written: true }
+    } })
+    const result = handlePersonalEndpoint(ctx, registry, '/w',
+      { endpoint: 'sshHelperInstall', sessionId: 's', revision: 0, environmentId: 'dev-box' }, { exec })
+    if (outcome === 'saved') {
+      await expect(result).resolves.toMatchObject({ revision: 1, environments: [{ helper: { sha256: helperHash, protocol: 3, integrity: 2 } }] })
+    } else {
+      const failure = await result.catch((error: unknown) => error)
+      expect(failure).toMatchObject({
+        code: outcome === 'conflict' ? 'personal-config-conflict' : 'helper-config-commit',
+        details: { stage: 'config-commit', remoteState: 'verified', registration: 'unconfirmed', retryable: false },
+      })
+      expect(JSON.stringify(failure)).not.toContain('secret')
     }
-    const result = await installHelper(exec, SSH_CONFIG_ENV, credentialRoot, { sshVersion: '0.2.2-rc.2', hostHelperPath: hostHelper })
-    expect(result.nodePath).toBe('/usr/bin/node')
-    expect(attempts.get('command -v node || true')).toBe(2)
-    expect(attempts.get('printf %s "$HOME"')).toBe(2)
-    const hashCommand = [...attempts.keys()].find(command => command.includes(' -e '))!
-    expect(attempts.get(hashCommand)).toBe(2)
-    const npmCommand = [...attempts.keys()].find(command => command.includes('npm install'))!
-    expect(attempts.get(npmCommand)).toBe(1)
-
-    // A persistent probe failure still surfaces after the single retry.
-    let printfAttempts = 0
-    await expect(installHelper(async (_f, args) => {
-      const remote = String(args.at(-1))
-      if (remote === 'command -v node || true') return { stdout: '/usr/bin/node\n', stderr: '' }
-      if (remote === 'printf %s "$HOME"') { printfAttempts++; throw new Error('killed by timeout') }
-      return { stdout: '', stderr: '' }
-    }, SSH_CONFIG_ENV, credentialRoot, { sshVersion: '0.2.2-rc.2', hostHelperPath: hostHelper }))
-      .rejects.toThrowError(/killed by timeout/)
-    expect(printfAttempts).toBe(2)
+    expect(exec.mock.calls.filter(([, args]) => args.at(-1)!.includes('mkdirSync'))).toHaveLength(1)
+    await ctx.fiber.dispose()
   })
 
-  it('defaultExec surfaces the exit status and stderr a bare Command failed hides', async () => {
-    const { defaultExec } = await import('../src/remote/personal/credentials.ts')
-    await expect(defaultExec('sh', ['-c', 'echo host key verification failed >&2; exit 255']))
-      .rejects.toThrowError(/exit 255.*host key verification failed/)
-    await expect(defaultExec('sh', ['-c', 'exit 1'])).rejects.toThrowError(/\(exit 1\)$/)
+  it('defaultExec keeps process status and stderr separate from the safe error message', async () => {
+    await expect(defaultExec('sh', ['-c', 'echo secret >&2; exit 255']))
+      .rejects.toMatchObject({ exitCode: 255, stderr: 'secret\n', message: 'External command failed (exit 255)' })
+    await expect(defaultExec('sh', ['-c', 'exec sleep 10'], { timeoutMs: 20 }))
+      .rejects.toMatchObject({ timedOut: true })
   })
+
 })
 
 describe.skipIf(process.platform === 'win32')('team attestation shape and plane reload', () => {
@@ -714,6 +744,58 @@ describe.skipIf(process.platform === 'win32')('personal RPC refusals through the
   let world: RemoteToolsWorld | undefined
   beforeEach(() => { fixture = createFixtureWorkspace('remote-personal-rpc') })
   afterEach(async () => { await world?.dispose(); world = undefined; fixture.dispose() })
+
+  it('returns dependency guidance and a structured Helper refusal without affecting the local Roots RPC', async () => {
+    const personalPath = join(fixture.base, 'personal.json')
+    writeConfig(personalPath, CONFIG())
+    world = await mountRemoteTools(fixture, {
+      withPanel: true,
+      beforePanel: ctx => { provideSshProfile(ctx, fixture.base) },
+      remote: { enabled: false, personalPath, credentialRoot: join(fixture.base, 'cred') },
+    })
+    await world.stack.registry.configureRemote({ enabled: true, mode: 'personal' })
+    const result = await world.panel('status', {}, SSH_SETTINGS_CHANNEL)
+    const dependencies = (result.value as { dependencies: { code: string; command?: string; packages: unknown[] } }).dependencies
+    expect(dependencies.packages).toHaveLength(4)
+    if (dependencies.code !== 'ssh-host-unsupported') {
+      expect(dependencies.code).toMatch(/^ssh-deps-(?:private|missing)$/)
+      expect(dependencies.command).toContain('dsh plugin --profile web add --save-exact')
+    }
+    const response = await world.panel('sshHelperInstall', { revision: 0, environmentId: 'dev-box' }, SSH_SETTINGS_CHANNEL)
+    expect(response.ok).toBe(false)
+    expect(parseErrorView(response.error)).toMatchObject({
+      code: dependencies.code, ssh: { stage: 'host-preflight', retryable: false },
+    })
+    expect(await world.panel('list', { sessionId: world.session.id })).toMatchObject({ ok: true })
+  })
+
+  it.skipIf(!SUPPORTED_SSH_RELEASES.some(version => version === readInstalledVersion('@deepseek-ai/dsh')))('serializes a real SSH child failure without leaking its command output or credentials', async () => {
+    const personalPath = join(fixture.base, 'personal.json')
+    writeConfig(personalPath, CONFIG())
+    const bin = join(fixture.base, 'bin')
+    mkdirSync(bin)
+    writeFileSync(join(bin, 'ssh'), '#!/bin/sh\necho "alice-test-secret: Permission denied (publickey)." >&2\necho "PASSWORD=test-secret-value" >&2\nexit 255\n', { mode: 0o700 })
+    world = await mountRemoteTools(fixture, {
+      withPanel: true,
+      beforePanel: ctx => {
+        const dir = provideReadySshProfile(ctx, fixture.base, ctx.multiRootCompat.report.release!)
+        writeFileSync(join(dir, 'node_modules', '@deepseek-ai', 'dsh-ssh', 'lib', 'helper.js'), 'HELPER')
+      },
+      remote: { enabled: false, personalPath, credentialRoot: join(fixture.base, 'cred') },
+    })
+    await world.stack.registry.configureRemote({ enabled: true, mode: 'personal' })
+    vi.stubEnv('PATH', bin + ':' + process.env.PATH)
+    try {
+      const response = await world.panel('sshHelperInstall', { revision: 0, environmentId: 'dev-box' }, SSH_SETTINGS_CHANNEL)
+      expect(response).toMatchObject({ ok: false, error: { code: 'ssh-connect-auth' } })
+      expect(parseErrorView(response.error)).toMatchObject({
+        ssh: { stage: 'ssh-connect', exitCode: 255, stderr: 'Permission denied (SSH authentication).', remediation: 'authentication' },
+      })
+      expect(JSON.stringify(response)).not.toContain('test-secret')
+    } finally {
+      vi.unstubAllEnvs()
+    }
+  })
 
   it('answers remote-personal-unavailable when the switch is off', async () => {
     world = await mountRemoteTools(fixture, { withPanel: true, remote: { enabled: false } })
@@ -1017,6 +1099,7 @@ describe.skipIf(process.platform === 'win32')('the remote tools row waits for th
     // hardcoded release flips the gate to `identity-mismatch` on a re-pin.
     const { sshPackageVersion } = await import('../src/compat/dsh-version.ts')
     ctx.provide('multiRootCompat', { report: { verdict: 'supported', release: sshPackageVersion('@deepseek-ai/dsh-ssh') } } as never)
+    provideReadySshProfile(ctx, tmp(), ctx.multiRootCompat.report.release!)
     ctx.provide('multiRootProviders', {} as never)
     ctx.provide('multiRootRegistry', registry)
     ctx.provide('tools', { register: registerTool } as never)

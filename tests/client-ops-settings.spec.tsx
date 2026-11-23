@@ -268,8 +268,8 @@ describe('personal SSH remote-environments settings', () => {
     expect(screen.queryByRole('button', { name: 'ssh.settings.manage' })).toBeNull()
     act(() => { snapshot = { ...snapshot, value: { enabled: true }, revision: 2 }; listeners.forEach(listener => listener()) })
     const title = await screen.findByText('ssh.settings.title')
-    expect(document.querySelector('.mrfw-skillsSettings')).toBe(title.parentElement)
-    fireEvent.click(within(title.parentElement!).getByRole('button', { name: 'ssh.settings.manage' }))
+    expect(document.querySelector('.mrfw-skillsSettings')).toBe(title.closest('.mrfw-skillsSettings'))
+    fireEvent.click(within(title.closest('.mrfw-skillsSettings') as HTMLElement).getByRole('button', { name: 'ssh.settings.manage' }))
 
     const dialog = await screen.findByRole('dialog', { name: 'ssh.dialog.title' })
     expect(await within(dialog).findByRole('button', { name: 'ssh.tab.add' })).toBeTruthy()
@@ -281,6 +281,49 @@ describe('personal SSH remote-environments settings', () => {
     act(() => { snapshot = { ...snapshot, value: { enabled: false }, revision: 3 }; listeners.forEach(listener => listener()) })
     expect(screen.queryByRole('button', { name: 'ssh.settings.manage' })).toBeNull()
     expect(screen.queryByRole('dialog', { name: 'ssh.dialog.title' })).toBeNull()
+  })
+
+  it('copies the exact dependency repair command and rechecks without opening management before restart', async () => {
+    const remoteForm = opsForm({ value: { enabled: true }, status: 'ready', writable: true, revision: 1 })
+    const command = "DSH_HOME='/test' dsh plugin --profile web add --save-exact @deepseek-ai/dsh-ssh@0.2.2-rc.5"
+    let restarted = false
+    let repaired = false
+    const call = vi.fn(async (_channel, endpoint) => ({
+      ok: true,
+      value: endpoint === 'status' ? {
+        custodyMode: 'personal', status: { state: 'ready' }, connections: [],
+        dependencies: {
+          code: restarted ? 'ready' : repaired ? 'ssh-deps-restart' : 'ssh-deps-missing',
+          profile: 'web', release: '0.2.2-rc.5', command: repaired ? undefined : command,
+          packages: [{ name: '@deepseek-ai/dsh-ssh', state: repaired ? 'installed' : 'missing' }],
+        },
+      } : endpoint === 'sshConfigAliases' ? { aliases: [] }
+        : { mode: 'personal', enabled: true, linked: true, revision: 0, environments: [], credentials: [], bindings: [] },
+    }))
+    const clipboard = Object.getOwnPropertyDescriptor(navigator, 'clipboard')
+    const writeText = vi.fn(async () => {})
+    Object.defineProperty(navigator, 'clipboard', { configurable: true, value: { writeText } })
+    try {
+      render(<BundleSettingsCard remoteForm={remoteForm} sshSettings={createSshSettingsClient({ rpc: { call } })} t={t} />)
+      await screen.findByText('error.ssh-deps-missing')
+      fireEvent.click(screen.getByRole('button', { name: 'ssh.settings.manage' }))
+      const dialog = await screen.findByRole('dialog', { name: 'ssh.dialog.title' })
+      expect(await within(dialog).findByText(command)).toBeTruthy()
+      fireEvent.click(within(dialog).getByRole('button', { name: 'ssh.copyInstallCommand' }))
+      expect(await within(dialog).findByText('ssh.commandCopied')).toBeTruthy()
+      expect(writeText).toHaveBeenCalledExactlyOnceWith(command)
+
+      repaired = true
+      fireEvent.click(within(dialog).getByRole('button', { name: 'ssh.recheckDependencies' }))
+      expect(await within(dialog).findByText('error.ssh-deps-restart')).toBeTruthy()
+      expect(call.mock.calls.some(([, endpoint]) => endpoint === 'sshState')).toBe(false)
+      restarted = true
+      fireEvent.click(within(dialog).getByRole('button', { name: 'ssh.recheckDependencies' }))
+      expect(await within(dialog).findByRole('button', { name: 'ssh.tab.add' })).toBeTruthy()
+    } finally {
+      if (clipboard === undefined) Reflect.deleteProperty(navigator, 'clipboard')
+      else Object.defineProperty(navigator, 'clipboard', clipboard)
+    }
   })
 
   it('carries the warning-tone tag and keeps the setting off until acknowledged and confirmed', async () => {

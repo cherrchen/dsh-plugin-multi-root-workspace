@@ -94,3 +94,11 @@
 个人配置的 CAS revision 用于写入排序。运行中操作以实际依赖的登记身份复核权限。采用独立的登记 UUID，可识别复核间隙内同一端点的移除和重加。连接与绑定各有身份，原样保存保留身份。这样可以在共享 Registry 上保留无关项目的在飞工作。
 
 有效的 personal 配置在 owner 和 follower 原位刷新，保留授权域和 IPC。工具子树在个人模式中保留，只废弃有身份变更的连接和失去绑定的目录 Helper。开关与托管档位切换仍执行子树生命周期。此修订取代 §2 关于摘要变化时 follower 重新 hello 的决定。撤权、传输清理及升级行为见 [SSH 远端环境参考](../reference/ssh-remote-environments.md)。
+
+## 2026-11-23 修订：由当前 Profile 提供 SSH 包
+
+检查 DSH `0.2.2-rc.1` 到 `rc.5` 的上游实现后，选择让操作者在 Host 退出时通过 `dsh plugin --profile <name> add --save-exact` 一次安装或对齐四个普通 npm 依赖。CLI 使用 Profile 的 pnpm 配置及 manifest 文件锁。运行中的 `PluginManager.installBundle` 要求目标有 `dsh.bundle`，会拒绝普通包。公开的 `dsh-plugin-manager/operations` 提供 CLI 使用的低层包操作，允许普通包，但没有针对四个普通依赖的运行时原子激活和回滚接口。Profile 的模块解析快照及已加载模块也有独立生命周期。因此设置页提供命令、复制和重新检测，由用户完全退出并重新启动 Host。 [CLI 入口](https://github.com/deepseek-ai/deepseek-harness/blob/dsh-v0.2.2-rc.5/apps/cli/src/plugin.ts) · [Profile 包操作](https://github.com/deepseek-ai/deepseek-harness/blob/dsh-v0.2.2-rc.5/packages/boot/plugin-manager/src/operations.ts) · [运行时 Plugin Manager](https://github.com/deepseek-ai/deepseek-harness/blob/dsh-v0.2.2-rc.5/packages/boot/plugin-manager/src/index.ts) · [Profile 解析](https://github.com/deepseek-ai/deepseek-harness/blob/dsh-v0.2.2-rc.5/packages/boot/app-boot/src/profile.ts)。
+
+Profile 副本需要能从该 Profile 解析，且其 DSH 和 Cordis peers 仍指向安装闭包。所有包版本与当前 Host 的精确版本一致才开放。上游机制与当前契约见 [SSH 技术参考](../reference/ssh-remote-environments.md#host-profile-依赖)。
+
+Helper 安装诊断区分远端写入、完整性校验和 Host CAS 登记。在发送变更后失去确认时，仅报告可证实的阶段和剩余状态，由操作者检查后决定是否重试。

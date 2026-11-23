@@ -14,6 +14,7 @@
  * registry's own `addRemote`.
  */
 import { z } from 'zod'
+import { sshDependencyViewSchema, type SshDependencyView } from './ssh-diagnostics.ts'
 
 /** The endpoints this module owns. */
 export const REMOTE_ENDPOINTS = ['remotes', 'addRemote', 'removeRemote'] as const
@@ -78,6 +79,7 @@ export interface RemotesView {
   readonly custodyMode?: 'personal' | 'team' | 'hardened' | undefined
   /** The control plane's live state; only `ready` admits remote work. */
   readonly status: { readonly state: string; readonly reason?: string | undefined; readonly code?: string | undefined }
+  readonly dependencies?: SshDependencyView | undefined
   readonly endpoints: readonly RemoteEndpointView[]
 }
 
@@ -116,6 +118,7 @@ const remotesViewSchema = z.object({
   ),
   status: z.object({ state: z.string(), reason: z.string().optional(), code: z.string().optional() }),
   endpoints: z.array(endpointViewSchema),
+  dependencies: sshDependencyViewSchema.optional(),
   // An unavailable remote plane reports its reason on `status.reason`; a
   // separate top-level field would render the same string twice.
 })

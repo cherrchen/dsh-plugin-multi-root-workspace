@@ -10,7 +10,7 @@ import { OpsCompatibilitySettingsCard } from './ops-settings.tsx'
 import { ErrorToast } from './error-toast.tsx'
 import type { Key } from './locales.ts'
 import type { Translate } from './WorkspaceFoldersAction.tsx'
-import { PanelError } from './panel-client.ts'
+import { errorKeyOf, PanelError } from './panel-client.ts'
 import { SshManagementDialog } from './ssh-panel.tsx'
 import type { SshSettingsClient, SshSettingsView } from './ssh-client.ts'
 
@@ -165,12 +165,18 @@ export function RemoteSwitchRow({ form, t }: { form: SkillsForm; t: Translate })
   </div>
 }
 
-function SshSettingsDialog({ client, revision, onClose, t }: {
+function SshManagementSetting({ form, client, t }: { form: SkillsForm; client: SshSettingsClient; t: Translate }) {
+  const snapshot = useSyncExternalStore(listener => form.subscribe(listener), () => form.getSnapshot())
+  if (snapshot.status !== 'ready' || snapshot.value?.enabled !== true) return null
+  return <EnabledSshManagementSetting client={client} revision={snapshot.revision} t={t} />
+}
+
+function EnabledSshManagementSetting({ client, revision, t }: {
   client: SshSettingsClient
   revision: number | undefined
-  onClose: () => void
   t: Translate
 }) {
+  const [open, setOpen] = useState(false)
   const [view, setView] = useState<SshSettingsView>()
   const [error, setError] = useState<PanelError>()
   const [refresh, setRefresh] = useState(0)
@@ -186,30 +192,18 @@ function SshSettingsDialog({ client, revision, onClose, t }: {
     })
     return () => controller.abort()
   }, [client, revision, refresh])
-
-  return <SshManagementDialog initialTab="connections" fromSettings sessionId={undefined} ssh={client.management}
-    custodyMode={view?.custodyMode} status={view?.status}
-    overviewError={error} onClose={onClose} onChanged={() => setRefresh(value => value + 1)} t={t} />
-}
-
-function SshManagementSetting({ form, client, t }: { form: SkillsForm; client: SshSettingsClient; t: Translate }) {
-  const snapshot = useSyncExternalStore(listener => form.subscribe(listener), () => form.getSnapshot())
-  if (snapshot.status !== 'ready' || snapshot.value?.enabled !== true) return null
-  return <EnabledSshManagementSetting client={client} revision={snapshot.revision} t={t} />
-}
-
-function EnabledSshManagementSetting({ client, revision, t }: {
-  client: SshSettingsClient
-  revision: number | undefined
-  t: Translate
-}) {
-  const [open, setOpen] = useState(false)
   return <>
     <div className="mrfw-skillsSettings">
-      <div className="mrfw-skillsSettingsTitle">{t('ssh.settings.title')}</div>
-      <Button variant="outline" size="sm" onClick={() => setOpen(true)}>{t('ssh.settings.manage')}</Button>
+      <div className="mrfw-skillsSettingsText">
+        <div className="mrfw-skillsSettingsTitle">{t('ssh.settings.title')}</div>
+        {view?.dependencies === undefined || view.dependencies.code === 'ready' ? null
+          : <div className="mrfw-skillsSettingsDescription">{t(errorKeyOf(view.dependencies.code))}</div>}
+      </div>
+      <Button variant="outline" size="sm" onClick={() => { setRefresh(value => value + 1); setOpen(true) }}>{t('ssh.settings.manage')}</Button>
     </div>
-    {open ? <SshSettingsDialog client={client} revision={revision} onClose={() => setOpen(false)} t={t} /> : null}
+    {open ? <SshManagementDialog initialTab="connections" fromSettings sessionId={undefined} ssh={client.management}
+      custodyMode={view?.custodyMode} status={view?.status} dependencies={view?.dependencies}
+      overviewError={error} onClose={() => setOpen(false)} onChanged={() => setRefresh(value => value + 1)} t={t} /> : null}
   </>
 }
 

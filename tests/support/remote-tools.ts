@@ -14,6 +14,7 @@ import Projections from '@deepseek-ai/dsh-session-projection'
 import Policy from '@deepseek-ai/dsh-sandbox-policy'
 import SystemPrompt from '@deepseek-ai/dsh-system-prompt'
 import Tools from '@deepseek-ai/dsh-tools'
+import { SSH_SETTINGS_CHANNEL } from '../../src/remote/personal-contract.ts'
 import { PANEL_CHANNEL } from '../../src/contract.ts'
 import * as CommandModule from '../../src/command.ts'
 import { mountRemoteTools as registerTools } from '../../src/remote/tools-registration.ts'
@@ -33,7 +34,7 @@ export interface RemoteToolsWorld {
   readonly manager: FakeManager
   call(name: 'remote_copy' | 'remote_bash', args: unknown, options?: { agent?: Agent; signal?: AbortSignal }): Promise<unknown>
   /** Call one panel endpoint through the registered channel handler. */
-  panel(endpoint: string, payload: unknown): Promise<PanelAnswer>
+  panel(endpoint: string, payload: unknown, channel?: string): Promise<PanelAnswer>
   unmountTools(): Promise<void>
   dispose(): Promise<void>
 }
@@ -42,7 +43,7 @@ export interface RemoteToolsWorld {
 export interface PanelAnswer {
   readonly ok: boolean
   readonly value?: unknown
-  readonly error?: { readonly code?: string; readonly message?: string }
+  readonly error?: { readonly code?: string; readonly message?: string; readonly details?: unknown }
 }
 
 export interface RemoteToolsWorldOptions {
@@ -58,6 +59,7 @@ export interface RemoteToolsWorldOptions {
   readonly defaultBackends?: boolean
   /** Mount the command/panel row over a stub Connection; `panel()` then works. */
   readonly withPanel?: boolean
+  readonly beforePanel?: (ctx: Context) => void
   /**
    * The registry's `remoteEnvironments` overlay. Default `{ enabled: true }`;
    * `{}` ships `manifestPath` WITHOUT `enabled` (the default-bundle shape, so
@@ -146,14 +148,15 @@ export async function mountRemoteTools(fixture: FixtureWorkspace, options: Remot
     inject: ['multiRootRegistry', 'multiRootCompat', 'multiRootProviders', 'tools'],
     apply: (ctx: Context) => registerTools(ctx, manager, options.defaultBackends === true ? undefined : id => backends.get(id)),
   })
-  let panelHandler: ((endpoint: string, payload: unknown, signal: AbortSignal) => Promise<PanelAnswer>) | undefined
+  const handlers = new Map<string, (endpoint: string, payload: unknown, signal: AbortSignal) => Promise<PanelAnswer>>()
   if (options.withPanel === true) {
+    options.beforePanel?.(stack.ctx)
     stack.ctx.provide('commands', { register: () => () => {} } as never)
     stack.ctx.provide('webServer', {} as never)
     stack.ctx.provide('connection', {
       rpc: {
-        handle: (channel: string, registered: NonNullable<typeof panelHandler>) => {
-          if (channel === PANEL_CHANNEL) panelHandler = registered
+        handle: (channel: string, registered: (endpoint: string, payload: unknown, signal: AbortSignal) => Promise<PanelAnswer>) => {
+          if (channel === PANEL_CHANNEL || channel === SSH_SETTINGS_CHANNEL) handlers.set(channel, registered)
           return async () => {}
         },
       },
@@ -175,7 +178,8 @@ export async function mountRemoteTools(fixture: FixtureWorkspace, options: Remot
       // success unwraps to the tool's canonical value.
       return outcome.isError ? outcome : outcome.value
     },
-    panel: async (endpoint, payload) => {
+    panel: async (endpoint, payload, channel = PANEL_CHANNEL) => {
+      const panelHandler = handlers.get(channel)
       if (panelHandler === undefined) throw new Error('the composition mounted no panel channel')
       return await panelHandler(endpoint, payload, new AbortController().signal)
     },

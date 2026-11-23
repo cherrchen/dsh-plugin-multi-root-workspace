@@ -206,6 +206,25 @@ export class CredentialStore {
 
 import { execFile } from 'node:child_process'
 
+/** Process facts retained for callers that can safely classify their own output. */
+export class CommandExecutionError extends Error {
+  readonly #stderr: string
+
+  constructor(
+    readonly exitCode: number | undefined,
+    readonly systemCode: string | undefined,
+    readonly timedOut: boolean,
+    stderr: string,
+    cause: unknown,
+  ) {
+    super(exitCode === undefined ? 'External command failed' : `External command failed (exit ${exitCode})`, { cause })
+    this.name = 'CommandExecutionError'
+    this.#stderr = stderr
+  }
+
+  get stderr(): string { return this.#stderr }
+}
+
 /** The real command seam: execFile, captured stdio, 30 s default timeout. */
 export const defaultExec: ExecFile = (file, args, options) => new Promise((resolve, reject) => {
   const child = execFile(file, [...args], {
@@ -214,18 +233,16 @@ export const defaultExec: ExecFile = (file, args, options) => new Promise((resol
     maxBuffer: 16 * 1024 * 1024,
   }, (error, stdout, stderr) => {
     if (error !== null) {
-      const cause = error instanceof Error ? error : new Error(String(error))
-      // execFile reports `Command failed: <argv>` alone; the actionable part
-      // lives in exit status and stderr (Permission denied, timed out, ...).
-      const meta = cause as Error & { code?: unknown; signal?: unknown; killed?: unknown }
-      const status = typeof meta.code === 'number' ? ` (exit ${meta.code})`
-        : typeof meta.signal === 'string' ? ` (${meta.killed === true ? 'killed by ' : ''}signal ${meta.signal})`
-        : ''
-      const detail = stderr.trim() === '' ? '' : ` — ${stderr.trim().slice(0, 400)}`
-      reject(new Error(`${cause.message}${status}${detail}`, { cause }))
+      reject(new CommandExecutionError(
+        typeof error.code === 'number' ? error.code : undefined,
+        typeof error.code === 'string' ? error.code : undefined,
+        error.killed === true && error.signal === 'SIGTERM',
+        stderr.slice(0, 4096),
+        error,
+      ))
     } else resolve({ stdout, stderr })
   })
-  child.stdin?.on('error', reject)
+  child.stdin?.on('error', () => { /* The exit callback reports the command failure. */ })
   try {
     child.stdin?.end(options?.input)
   } catch (error) {

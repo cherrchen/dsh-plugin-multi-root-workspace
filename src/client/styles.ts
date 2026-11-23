@@ -2520,6 +2520,11 @@ button.mrfw-choice:hover:not(:disabled) {
   padding: 0 24px 24px;
 }
 
+.mrfw-sshDependencyCommand {
+  overflow-wrap: anywhere;
+  user-select: text;
+}
+
 .mrfw-sshSettingsHeading {
   display: grid;
   gap: 12px;
