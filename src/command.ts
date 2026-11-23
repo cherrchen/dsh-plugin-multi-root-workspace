@@ -45,6 +45,7 @@ import { ManifestError, type RemoteEnvironment } from './remote/manifest.ts'
 import { CredentialError } from './remote/personal/credentials.ts'
 import { loadPersonalConfig, type PersonalEnvironment } from './remote/personal/config.ts'
 import { RemoteOperationError } from './remote/personal/operations.ts'
+import { SshEnvironmentError } from './remote/ssh-environment.ts'
 import {
   parseRemoteRequest,
   REMOTE_ENDPOINTS,
@@ -1057,7 +1058,8 @@ async function dispatchPanelRequest(
     // and `submit` branches on it (a `personal-config-conflict` reloads the
     // state). Laundering any of these into `panel/internal` loses both.
     if (error instanceof AuthorityRpcError || error instanceof WorktreeError || error instanceof RemoteAdmissionError
-      || error instanceof ManifestError || error instanceof CredentialError || error instanceof RemoteOperationError) {
+      || error instanceof ManifestError || error instanceof CredentialError || error instanceof RemoteOperationError
+      || error instanceof SshEnvironmentError) {
       return { ok: false, error: { code: error.code, message: error.message, details: {} } }
     }
     const workspaceFile = workspaceFileFailureOf(error)

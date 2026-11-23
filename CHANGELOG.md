@@ -8,6 +8,12 @@ English: [CHANGELOG.en.md](./CHANGELOG.en.md)
 - 安装方式、受支持的上游运行时与已知限制见 [README](./README.md)。
 - 每个版本的实施证据、编号口径与发布状态见[路线图 §进度总账](./docs/plans/active/2026-09-12-multi-root-workspace.md#进度总账)；GitHub Release 的正文由 `scripts/release-notes.mjs` 从 commit 历史生成，是本文件之外的完整原始清单。
 
+## [Unreleased]
+
+### Fixed
+
+- **DSH Desktop 登记远端目录时报 `NO_CIPHER_MATCH`**：Electron 的 BoringSSL 不实现上游 `@deepseek-ai/dsh-ssh` 为转发流固定的 `PSK-AES256-GCM-SHA384`，Host 在本地创建 TLS 上下文时就失败，目录核验与登记授权因此中断。插件现在在 BoringSSL 运行时把上游 `authenticateStream` 的那一次调用替换为 `ECDHE-PSK-CHACHA20-POLY1305`（AEAD 且带前向保密；只匹配精确参数形状，调用方自己的 cipher 排除项保持原样），并额外生成 `helper-entry-v3.mjs`，在加载上游 Helper 前给服务端 cipher 列表追加同一套件；`helper-entry.mjs` 保持 beta.2 的逐字节模板，记录的 `integrity`、`helperPath` 与 `bindingDigest` 都不变，plain Node Host 继续协商原套件，beta.2 回退仍可校验并启动。桌面端旧 Helper 缺 v3 入口时以 `helper-outdated` 提示重装，已登记 Root 无需重新登记；面板会原样透传该错误码。实现与备选方案见 [ADR-0051](./docs/decisions/ADR-0051-ssh-stream-psk-boringssl-fallback.md)。
+
 ## [0.1.24-beta.2] - 2026-11-23
 
 本版是 `0.1.24` 线的第二个 beta，只处理启用个人 SSH 后的依赖准备与 Helper 安装诊断。开启 SSH 时若当前 Profile 的四个 SSH 包未就绪，界面直接给出可复制的精确安装命令；Helper 安装失败会说明失败阶段、远端状态与下一步。没有不兼容变更；未开启 SSH 时行为与 `v0.1.24-beta.1` 相同。

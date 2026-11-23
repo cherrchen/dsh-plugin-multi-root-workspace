@@ -5,13 +5,14 @@
  */
 import { createHash, randomBytes } from 'node:crypto'
 import { mkdtempSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs'
-import { dirname, join } from 'node:path'
+import { dirname, join, posix } from 'node:path'
 import { createRequire } from 'node:module'
 import type { ExecFile } from './credentials.ts'
 import { managedHostAlias, renderAskpass } from './ssh-files.ts'
 import type { PersonalEnvironment } from './config.ts'
 import { isRemoteNodePath, REMOTE_NODE_MIN_VERSION, remoteNodeVersionStatus, type SshFailureDetails } from '../ssh-diagnostics.ts'
 import { helperCommandError, HelperInstallError } from './helper-error.ts'
+import { helperServerShimSource } from '../../compat/ssh-stream-ciphers.ts'
 
 export class RemoteOperationError extends Error {
   constructor(readonly code: string, message: string) {
@@ -131,6 +132,20 @@ export function helperProtocol(root: string): number {
   }
 }
 
+/** The recorded entry name every Host verifies; released Hosts pin this exact file. */
+const HELPER_ENTRY_NAME = 'helper-entry.mjs'
+/** Additive stream-TLS entry; new Hosts may launch it, older Hosts never read it. */
+const HELPER_ENTRY_CURRENT_NAME = 'helper-entry-v3.mjs'
+
+/**
+ * The sibling stream-TLS entry for a recorded legacy entry path.
+ * @param entryPath - the recorded `helper-entry.mjs` path.
+ * @returns the additive entry path in the same remote directory.
+ */
+export function helperEntryCurrentPath(entryPath: string): string {
+  return posix.join(posix.dirname(entryPath), HELPER_ENTRY_CURRENT_NAME)
+}
+
 export interface HelperInstallResult {
   readonly nodePath: string
   readonly helperPath: string
@@ -187,7 +202,7 @@ export const treeDigestSource = `(root) => {
  * bytes (`fileURLToPath(import.meta.url)` inside helper.js), never this
  * entry file.
  */
-export const renderHelperEntry = (expected: string): string => `// dsh-helper entry: verify the installed artifact set, then load the upstream helper.
+export const renderLegacyHelperEntry = (expected: string): string => `// dsh-helper entry: verify the installed artifact set, then load the upstream helper.
 import { createRequire } from "node:module"
 import { dirname, join } from "node:path"
 import { fileURLToPath } from "node:url"
@@ -202,6 +217,20 @@ if (digest(root) !== ${JSON.stringify(expected)}) {
 }
 await import("./node_modules/@deepseek-ai/dsh-ssh/lib/helper.js")
 `
+
+/**
+ * The additive stream-TLS entry. Its bytes are built from
+ * {@link renderLegacyHelperEntry} plus the fixed shim source, never from a
+ * function's runtime text, so source and release builds render the same
+ * bytes for the same tree digest.
+ */
+export const renderHelperEntry = (expected: string): string => {
+  const legacy = renderLegacyHelperEntry(expected)
+  const load = 'await import("./node_modules/@deepseek-ai/dsh-ssh/lib/helper.js")'
+  const at = legacy.indexOf(load)
+  if (at < 0) throw new Error('legacy Helper entry template is missing its load statement')
+  return `${legacy.slice(0, at)}${helperServerShimSource()}\n${legacy.slice(at)}`
+}
 
 /** Read a small JSON response from a remote step that owns its output. */
 function objectReply(stdout: string): Record<string, unknown> {
@@ -289,7 +318,8 @@ export async function installHelper(
   const base = `${home}/.dsh-helper/${version}`
   const modulesDir = `${base}/node_modules`
   const packageLib = `${modulesDir}/@deepseek-ai/dsh-ssh/lib`
-  const entryAbs = `${base}/helper-entry.mjs`
+  const entryAbs = `${base}/${HELPER_ENTRY_NAME}`
+  const entryCurrentAbs = `${base}/${HELPER_ENTRY_CURRENT_NAME}`
   const node = shellQuote(nodePath)
   const nodeCommand = (code: string): string => `${node} -e ${shellQuote(code)}`
   const send = 'const send=(result)=>process.stdout.write(JSON.stringify(result));'
@@ -393,21 +423,29 @@ export async function installHelper(
     throw remoteFailure('artifact-verification', 'helper-hash-mismatch', 'The remote dsh-ssh lib files differ from the Host copy.', 'verify', artifactFacts)
   }
 
-  const entry = renderHelperEntry(installed.tree)
+  const legacy = renderLegacyHelperEntry(installed.tree)
+  const current = renderHelperEntry(installed.tree)
   const deploy = send + `
     const {readFileSync,writeFileSync,renameSync,rmSync}=require("node:fs"), {randomUUID,createHash}=require("node:crypto");
-    const path=${JSON.stringify(entryAbs)}, temp=path+"."+randomUUID();
-    try {
-      const bytes=readFileSync(0);
-      if (createHash("sha256").update(bytes).digest("hex")!==${JSON.stringify(createHash('sha256').update(entry).digest('hex'))}) {
-        send({written:false}); return;
-      }
-      writeFileSync(temp,bytes,{flag:"wx",mode:0o600});
-      renameSync(temp,path);
-      send({written:true});
-    } catch (error) { send({written:false,code:error.code}); }
-    finally { try { rmSync(temp,{force:true}); } catch {} }`
-  const deployed = objectReply(await run('entry-generation', nodeCommand(`(()=>{${deploy}})()`), 30_000, 'installed', entry))
+    const input=JSON.parse(readFileSync(0,"utf8"));
+    const targets=[
+      {path:${JSON.stringify(entryAbs)}, content:input.legacy, hash:${JSON.stringify(createHash('sha256').update(legacy).digest('hex'))}},
+      {path:${JSON.stringify(entryCurrentAbs)}, content:input.current, hash:${JSON.stringify(createHash('sha256').update(current).digest('hex'))}}
+    ];
+    let written=0;
+    for (const target of targets) {
+      const bytes=Buffer.from(target.content,"utf8");
+      if (createHash("sha256").update(bytes).digest("hex")!==target.hash) { send({written:false,count:written}); return; }
+      const temp=target.path+"."+randomUUID();
+      try {
+        writeFileSync(temp,bytes,{flag:"wx",mode:0o600});
+        renameSync(temp,target.path);
+        written+=1;
+      } catch (error) { send({written:false,code:error.code,count:written}); return; }
+      finally { try { rmSync(temp,{force:true}); } catch {} }
+    }
+    send({written:true,count:written});`
+  const deployed = objectReply(await run('entry-generation', nodeCommand(`(()=>{${deploy}})()`), 30_000, 'installed', JSON.stringify({ legacy, current })))
   if (deployed.written !== true) {
     const disk = deployed.code === 'ENOSPC' || deployed.code === 'EDQUOT'
     throw remoteFailure('entry-generation', disk ? 'helper-disk-space' : 'helper-entry-write',
@@ -416,19 +454,53 @@ export async function installHelper(
   return { nodePath, helperPath: entryAbs, sha256: hostLib['helper.js']!, integrity: 2, treeSha256: installed.tree }
 }
 
-/** Verify the installed entry against Host-owned metadata before opening it. */
+/** The entry the Host may launch after verification. */
+export interface VerifiedHelperEntry {
+  /** The recorded legacy entry; old Hosts verify and launch exactly this file. */
+  readonly entryPath: string
+  /** The additive stream-TLS sibling. */
+  readonly currentPath: string
+  /** Whether the sibling exists and matches the Host-pinned bytes. */
+  readonly current: boolean
+}
+
+/**
+ * Verify the installed entries against Host-owned metadata before opening
+ * the connection. The recorded entry must always match; the additive sibling
+ * is reported rather than required so a plain-Node Host can keep using an
+ * older Helper and a BoringSSL Host can demand a reinstall explicitly.
+ * @param exec - the SSH command seam.
+ * @param host - the OpenSSH alias.
+ * @param nodePath - the remote Node executable.
+ * @param entryPath - the recorded `helper-entry.mjs` path.
+ * @param treeSha256 - the recorded dependency-tree digest.
+ * @returns the launchable paths and whether the stream-TLS sibling is valid.
+ */
 export async function verifyHelperEntry(
   exec: (file: string, args: readonly string[]) => Promise<{ stdout: string }>,
   host: string, nodePath: string, entryPath: string, treeSha256: string,
-): Promise<void> {
-  const expected = createHash('sha256').update(renderHelperEntry(treeSha256)).digest('hex')
-  const probe = 'const fs=require("node:fs"), crypto=require("node:crypto"); const p=process.argv[1]; if(!fs.lstatSync(p).isFile()) process.exit(78); process.stdout.write(crypto.createHash("sha256").update(fs.readFileSync(p)).digest("hex"))'
+): Promise<VerifiedHelperEntry> {
+  const currentPath = helperEntryCurrentPath(entryPath)
+  const expectedLegacy = createHash('sha256').update(renderLegacyHelperEntry(treeSha256)).digest('hex')
+  const expectedCurrent = createHash('sha256').update(renderHelperEntry(treeSha256)).digest('hex')
+  const probe = 'const fs=require("node:fs"), crypto=require("node:crypto");'
+    + 'const hash=(p)=>{try{if(!fs.lstatSync(p).isFile())return "";return crypto.createHash("sha256").update(fs.readFileSync(p)).digest("hex")}catch{return ""}};'
+    + 'process.stdout.write(JSON.stringify({legacy:hash(process.argv[1]),current:hash(process.argv[2])}))'
   const { stdout } = await exec('ssh', [
     '-o', 'BatchMode=yes', '-o', 'StrictHostKeyChecking=yes', '-o', 'ForwardAgent=no', '-o', 'UpdateHostKeys=no',
     '-o', 'ControlMaster=no', '-o', 'ControlPath=none', '--', host,
-    `${shellQuote(nodePath)} -e ${shellQuote(probe)} ${shellQuote(entryPath)}`,
+    `${shellQuote(nodePath)} -e ${shellQuote(probe)} ${shellQuote(entryPath)} ${shellQuote(currentPath)}`,
   ])
-  if (stdout.trim() !== expected) throw new RemoteOperationError('helper-hash-mismatch', 'the remote Helper entry differs from the Host-pinned artifact')
+  let reply: { legacy?: unknown; current?: unknown }
+  try {
+    const parsed: unknown = JSON.parse(stdout.trim())
+    if (parsed === null || typeof parsed !== 'object' || Array.isArray(parsed)) throw new Error('not an object')
+    reply = parsed as { legacy?: unknown; current?: unknown }
+  } catch {
+    throw new RemoteOperationError('helper-hash-mismatch', 'the remote Helper entry probe returned an unreadable answer')
+  }
+  if (reply.legacy !== expectedLegacy) throw new RemoteOperationError('helper-hash-mismatch', 'the remote Helper entry differs from the Host-pinned artifact')
+  return { entryPath, currentPath, current: reply.current === expectedCurrent }
 }
 
 /**

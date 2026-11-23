@@ -479,7 +479,7 @@ export const de = {
   'error.helper-install-failed': 'Die Installation des Remote-Helpers ist fehlgeschlagen.',
   'error.helper-hash-mismatch': 'Der Hash des Remote-Helpers stimmt nicht mit der Host-Kopie überein.',
   'error.helper-node-missing': 'Auf dem Remote-Host fehlt ein nutzbares node (ein absoluter Pfad ist erforderlich).',
-  'error.helper-outdated': 'Der aufgezeichnete Helper stammt aus der Zeit vor der Integritätsprüfung des Dateisatzes; installieren Sie den Helper erneut.',
+  'error.helper-outdated': 'Der aufgezeichnete Helper verwendet einen älteren Transport-Eintrag; installieren Sie den Helper erneut.',
   'error.host-identity-unverifiable': 'In known_hosts wurde kein eindeutiger Hostschlüssel gefunden.',
   'error.credential-import-failed': 'Der Import des privaten Schlüssels ist fehlgeschlagen: Die Datei ist ungültig oder die Passphrase ist falsch.',
   'error.personal-config-invalid': 'Die persönliche Konfiguration ist ungültig und wurde nicht geschrieben.',

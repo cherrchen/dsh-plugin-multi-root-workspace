@@ -479,7 +479,7 @@ export const en = {
   'error.helper-install-failed': 'The remote helper install failed.',
   'error.helper-hash-mismatch': 'The remote helper hash does not match the Host copy.',
   'error.helper-node-missing': 'The remote host has no usable node (an absolute path is required).',
-  'error.helper-outdated': 'The recorded helper predates full file-set integrity; reinstall the helper.',
+  'error.helper-outdated': 'The recorded helper uses an older transport entry; reinstall the helper.',
   'error.host-identity-unverifiable': 'No single host key was found in known_hosts.',
   'error.credential-import-failed': 'Private-key import failed: the material is invalid or the passphrase is wrong.',
   'error.personal-config-invalid': 'The personal config is invalid and was not written.',

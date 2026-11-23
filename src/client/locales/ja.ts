@@ -479,7 +479,7 @@ export const ja = {
   'error.helper-install-failed': 'リモート Helper のインストールに失敗しました。',
   'error.helper-hash-mismatch': 'リモート Helper のハッシュが Host 側のコピーと一致しません。',
   'error.helper-node-missing': 'リモートに利用可能な node がありません（絶対パスが必要です）。',
-  'error.helper-outdated': '記録された Helper はファイルセット整合性検証より前のものです。Helper を再インストールしてください。',
+  'error.helper-outdated': '記録された Helper は旧版のトランスポートエントリを使用しています。Helper を再インストールしてください。',
   'error.host-identity-unverifiable': 'known_hosts に一意のホスト鍵が見つかりません。',
   'error.credential-import-failed': '秘密鍵のインポートに失敗しました：ファイルが無効か、パスフレーズが誤っています。',
   'error.personal-config-invalid': '個人設定が無効なため、書き込みませんでした。',
