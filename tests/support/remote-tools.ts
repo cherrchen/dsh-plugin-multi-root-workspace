@@ -69,10 +69,15 @@ export interface RemoteToolsWorldOptions {
   readonly remote?: { readonly enabled?: boolean; readonly personalPath?: string; readonly credentialRoot?: string }
   /** Per-environment extra files, keyed by environment and absolute path. */
   readonly seed?: Readonly<Record<string, Readonly<Record<string, string>> | undefined>>
+  /** Opt the device binding into `directoryListing: 'stable-path'`. */
+  readonly deviceListing?: boolean
+  /** Session sandbox policy mode; default `workspace-write`. */
+  readonly policyMode?: 'read-only' | 'workspace-write'
 }
 
 function manifestFile(fixture: FixtureWorkspace, options: RemoteToolsWorldOptions): string {
   const manifest = fakeManifest({
+    deviceListing: options.deviceListing,
     primary: fixture.workspace,
     localRootIds: options.localRootIds ?? ['primary'],
     ...(options.deviceActions === undefined ? {} : { deviceActions: options.deviceActions }),
@@ -124,7 +129,7 @@ export async function mountRemoteTools(fixture: FixtureWorkspace, options: Remot
     beforeGate: async ctx => {
       await ctx.plugin(Projections)
       await ctx.plugin(Sessions)
-      await ctx.plugin(Policy, { mode: 'workspace-write', workspaceRoot: fixture.workspace })
+      await ctx.plugin(Policy, { mode: options.policyMode ?? 'workspace-write', workspaceRoot: fixture.workspace })
     },
   })
   await stack.ctx.plugin(SystemPrompt)

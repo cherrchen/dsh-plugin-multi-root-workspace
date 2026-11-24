@@ -110,10 +110,25 @@ export interface RemoteOperationRequest {
   readonly endpoints: readonly RemoteEndpointRef[]
 }
 
+/**
+ * A UI-sourced remote operation (ADR-0052 P3): same ordered admission and the
+ * same live-session narrowing as a tool request, but keyed by consumer rather
+ * than by a tool name — `remoteFiles.list` reads only.
+ */
+export interface RemoteFilesOperationRequest {
+  readonly consumer: 'files'
+  readonly session: RemoteOperationSession
+  readonly purpose: 'read'
+  readonly endpoints: readonly [RemoteEndpointRef]
+}
+
 export interface RemoteOperationIdentity {
   readonly operationId: string
   readonly purpose: RemotePurpose
-  readonly toolName: string
+  /** 'files' marks a UI-sourced admission; tool requests leave it absent. */
+  readonly consumer?: 'files'
+  /** Present for tool requests, absent for UI admissions. */
+  readonly toolName?: string
   readonly sessionId: string
   readonly primaryRoot: string
   readonly authorityEpoch: string | undefined

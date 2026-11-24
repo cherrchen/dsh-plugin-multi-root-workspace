@@ -1,6 +1,6 @@
 # Provider 化文件树与远端 Workspace Root 浏览（2026-11-24）
 
-> 状态：**active — P0 基线与文档完成，尚未改生产代码**。决策拟议见 [ADR-0052](../../decisions/ADR-0052-provider-file-browsing.md)（Proposed）。
+> 状态：**active — P1/P2 已提交 `4fa56c4`，P3 Host 列举服务已在工作树实现并过门禁**。决策拟议见 [ADR-0052](../../decisions/ADR-0052-provider-file-browsing.md)（Proposed）。
 >
 > 关联：[ADR-0052](../../decisions/ADR-0052-provider-file-browsing.md)、[ADR-0015](../../decisions/ADR-0015-files-tab-plugin-owned-browsing.md)、[ADR-0016](../../decisions/ADR-0016-files-tab-native-tree-fork.md)、[ADR-0030](../../decisions/ADR-0030-environment-and-root-identity.md)、[ADR-0031](../../decisions/ADR-0031-filesystem-routing.md)、[ADR-0041](../../decisions/ADR-0041-additional-root-workspace-search.md)、[ADR-0049](../../decisions/ADR-0049-ssh-custody-modes.md)、[外部评审（2026-11-21）](../../reviews/2026-11-21-ssh-branch-review.md)、[SSH 远端环境参考](../../reference/ssh-remote-environments.md)。
 
@@ -49,9 +49,9 @@
 | 阶段 | 内容 | 状态 | 检查点提交 |
 | --- | --- | --- | --- |
 | P0 | 机械基线与文档（本阶段） | **已完成** | `bc39529` |
-| P1 | 端口与身份合同 | **已完成** | 工作树（未提交，基于 `bc39529`） |
-| P2 | 本地实现迁移 + 本地门禁 | **已完成** | 工作树（未提交，基于 `bc39529`） |
-| P3 | Host 授权读服务与远端实现 | 未开始 | `bc39529` |
+| P1 | 端口与身份合同 | **已完成** | `4fa56c4` |
+| P2 | 本地实现迁移 + 本地门禁 | **已完成** | `4fa56c4` |
+| P3 | Host 授权读服务与远端实现 | **已完成** | 工作树（未提交，基于 `4fa56c4`） |
 | P4 | 三类根 UI 与对齐 | 未开始 | `bc39529` |
 | P5 | 生命周期：撤权/复授、重试、tab 记忆 | 未开始 | `bc39529` |
 | P6 | 预览端口评估（fake port + 架构/安全评审） | 未开始 | `bc39529` |
@@ -83,7 +83,10 @@
 - 进入条件：P2 门禁通过。
 - 内容：`remoteFiles.list` 端点；UI 只读 `purpose:'read'` 准入入口；网络 I/O 前后双准入；请求自有有界 SFTP 通道（不 dispose `remote_copy`/共享通道）；逐项前流式预算；abort 贯穿；稳定错误码；owner 变更失效。
 - 强制门禁：**abort**（取消即断自有通道、不伤共享通道）、**budget**（条目数/字节超限即拒）、**symlink/canonical**（校验—列举一致性按后端诚实边界执行）三闸全过；**SFTP path 后端的隔离条件在本阶段定稿成文**，否则该后端不得准入；Helper fd-bound 列举证据在本阶段给出结论（证据或否决）。
-- 检查点：服务实现提交。
+- 结果：`remoteFiles.list` 独立契约（`src/remote/files-contract.ts`：严格请求/响应 schema、entries/responseBytes/wireBytes/deadline/concurrent 五预算、17 个稳定错误码 + 固定 message/retryable）；`src/remote/files-service.ts` 为唯一列举路径——并发 4 且零排队、12s 含准入总期限、claim 先于工作、令牌 `remoteFilesAuthorization(epoch, incarnation, bindingDigest, environmentDigest)` 在 SSH 前与字节返回前双准入比对、仅本端点失配才取消（无关 owner 变更不打断）；`binding.directoryListing:'stable-path'` 是 SFTP path 后端唯一准入条件（manifest 校验限定 sftp transport），缺席即 `capability-unsupported` 零 I/O，object 授权一律 fail closed；`SshEnvironmentManager.openFilesSftp` 与 `openTransferSftp` 共享自有通道机制但独立 `directorySessions` 表与上限 8，files 用途不要求 transfer block/hardlink/fsync，spawn 前复核 manifest digest；`readdirBounded` 严格类型 + 致命 UTF-8 + 名称校验去重 + 三预算；`SshEndpointVerifier` 对 opt-in binding 改走自有通道校验；`remotesViewOf` 仅在 snapshot 与 live manifest digest 一致且 ready/registered/read/path-target/supports 全满足时签发 `browseAuthorization`；`command.ts` 独立分支严格校验后调服务，错误信封只含稳定码 + `{retryable}`。
+- 隔离条件定稿：SFTP path 后端的 ABA 竞争窗口无法以 SFTP 原语消解，唯一准入条件是部署方 opt-in `stable-path`——运维断言浏览期间无非可信进程可替换 workspace 或其祖先/后代目录、可改变挂载/符号链接解析；此为部署断言而非运行期证明。Helper 后端本轮否决：无 fd-bound 目录列举原语且 verifiedTarget 为 object，一律 fail closed；Broker 无目录流同样 fail closed。
+- Helper 后端结论：**否决**（fail closed），理由如上；后续如有 fd-锚定证明再评估。
+- 检查点：工作树（未提交，基于 `4fa56c4`）。
 
 ### P4 · 三类根 UI 与对齐
 
@@ -148,6 +151,18 @@
 | `git diff --check` | 无空白错误 | 0 |
 
 新增回归 `tests/client-files-provider.spec.ts` 覆盖：`providerKey`/`treeBucketId` 区分同路径的会话/环境/根/代次；无 watch 的 list-only Provider 经真实 face+store 显式初始读（恰好一次 list 一条 entry）；hold 释放后迟到的旧响应不落盘；fake preview port 收到精确 `WorkspaceResourceRef` + `replaceTab`，死 signal 与缺 port 为 no-op；本地跨根资源零 wire 访问且 preview/openInApp 仍拼出 `dsh-resource://file` 地址。存量路径键控断言已迁移为 provider 键（fixture 的 `id`/`addedAt` + 实际 session）。
+
+### P3（工作树，未提交，基于 `4fa56c4`）
+
+| 检查 | 结果 | 退出码 |
+| --- | --- | --- |
+| `pnpm test tests/remote-files-service.spec.ts tests/remote-sftp.spec.ts tests/ssh-verifier.spec.ts tests/ssh-environment.spec.ts tests/ssh-environment-shutdown.spec.ts tests/remote-copy.spec.ts tests/remote-tools.spec.ts tests/remote-exec-root-identity.spec.ts tests/remote-personal.spec.ts`（指定九份规格） | 9 文件 158 用例过 / 1 skipped，10.94s | 0 |
+| `pnpm typecheck` | host + client tsc + auto-review 构建全过 | 0 |
+| `pnpm lint` | 0 errors（2 条既有 require-yield warning） | 0 |
+| `pnpm docs:check` | 0 errors / 0 warnings | 0 |
+| `git diff --check` | 无空白错误 | 0 |
+
+新增 `tests/remote-files-service.spec.ts`（14 用例）覆盖：伪造/未知会话与未登记端点零开通道、opt-out 与 object 授权零开通道、过期令牌拒于 I/O 前、根与子级含字面反斜杠/空格/Unicode 名、符号链接祖先 `path-escapes-root` 且从不 READDIR、canonical 根重定向 `root-identity-changed`、挂起列举取消只关自有通道、4 并发 + 第 5 个 `resource-budget` 零排队、无关授权变更不打断在飞列举、撤权后旧数据不落盘、面板端点端到端 + 遍历/短令牌/多余键 `panel/bad-request`。`tests/remote-sftp.spec.ts` 新增 6 用例：严格 NAME/HANDLE/ATTRS 类型、斜杠名/空 NAME/重复名/致命 UTF-8 全 `invalid-listing`、wireBytes 超限截断、realpath/lstat 严格类型。未实现项：无（阶段内要求的用例均已落地）。
 
 ## 7. 退出验收
 

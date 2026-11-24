@@ -4,6 +4,7 @@ import { REMOTE_CONTEXT_NAME, renderRemoteCapabilities } from './capabilities.ts
 import { remoteBashTool } from './exec-tool.ts'
 import type { RemoteExecutionBackend } from './exec.ts'
 import { environmentDigest } from './manifest.ts'
+import { RemoteFilesService, type RemoteFilesManager } from './files-service.ts'
 import { lazySshExecBackend } from './ssh-exec-backend.ts'
 import type { SshEnvironmentManager } from './ssh-environment.ts'
 import { SshEndpointVerifier, type SshEndpointManager } from './ssh-verifier.ts'
@@ -74,6 +75,21 @@ export function mountRemoteTools(
   // on unload.
   ctx.effect(() => async () => { await Promise.allSettled(pending) })
   ctx.effect(() => registry.setRemoteEndpointVerifier(new SshEndpointVerifier(manager)))
+  // The browse listing service attaches only when the manager can hand out an
+  // owned files channel — a broker or a manager without the port simply never
+  // exposes browseAuthorization and listings fail closed before that anyway.
+  ctx.effect(() => {
+    const opening = manager as Partial<SshEnvironmentManager>
+    if (typeof opening.openFilesSftp !== 'function') return () => {}
+    const service = new RemoteFilesService(registry, opening as unknown as RemoteFilesManager, ctx.logger)
+    const unregister = registry.setRemoteFilesService(service)
+    return () => {
+      unregister()
+      void service.dispose().catch((error: unknown) => {
+        ctx.logger.warn(`multi-root remote: files service cleanup failed: ${error instanceof Error ? error.message : String(error)}`)
+      })
+    }
+  })
   const copy = remoteCopyTool({ registry, deps: { manager } })
   const bash = remoteBashTool({ registry, backendFor })
   ctx.effect(() => ctx.tools.register({ ...copy, execute: track(copy) } as never))

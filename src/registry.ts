@@ -63,6 +63,7 @@ import { RegistryAuthorityLease, RegistryLeaseContendedError } from './registry-
 import { freezeOperationScope, runRegistryOperation, runPrimaryOperation } from './registry-operation.ts'
 import type { RegistryOperation, RegistryOperationKind } from './registry-operation.ts'
 import { RemoteAdmissionError, type RemoteOperation, type RemoteOperationIdentity, type RemoteOperationRequest, type RemoteStatus } from './remote/contract.ts'
+import type { SessionId } from '@deepseek-ai/dsh-session'
 import { effectiveRootAccess } from './contract.ts'
 import type { LocalDestinationAuthority } from './remote/local-sink.ts'
 import { RemoteControlPlane, type RemoteConfig } from './remote/plane.ts'
@@ -1775,6 +1776,29 @@ export class MultiRootRegistry extends Service {
     return () => { if (this.remotePlane.verifier === verifier) this.remotePlane.verifier = undefined }
   }
 
+  private remoteFilesServiceValue: import('./remote/files-service.ts').RemoteFilesService | undefined
+
+  /** The `remoteFiles.list` service when the SSH tools row mounted one. */
+  get remoteFilesService(): import('./remote/files-service.ts').RemoteFilesService | undefined {
+    return this.remoteFilesServiceValue
+  }
+
+  /**
+   * Attach the browse listing service (ADR-0052 P3). Setting or clearing
+   * emits a remote-change notification so live views drop or gain
+   * `browseAuthorization`; an unchanged or stale assignment is a no-op.
+   */
+  setRemoteFilesService(service: import('./remote/files-service.ts').RemoteFilesService): () => void {
+    if (this.remoteFilesServiceValue === service) return () => {}
+    this.remoteFilesServiceValue = service
+    this.notifyRemoteChange()
+    return () => {
+      if (this.remoteFilesServiceValue !== service) return
+      this.remoteFilesServiceValue = undefined
+      this.notifyRemoteChange()
+    }
+  }
+
   private requireRemote(): void {
     if (this.disposed || this.remotePlane.status.state !== 'ready') {
       throw new RemoteAdmissionError('remote-unavailable', `the remote control plane is ${this.remotePlane.status.state}${this.remotePlane.status.reason === undefined ? '' : `: ${this.remotePlane.status.reason}`}`)
@@ -1876,16 +1900,23 @@ export class MultiRootRegistry extends Service {
     effectiveMode: 'read-only' | 'workspace-write'
     capped: boolean
   } | undefined {
+    const effectiveMode = this.remotePolicyMode(session)
+    if (effectiveMode === undefined) return undefined
+    return { effectiveMode, capped: this.ctx.multiRootScope.capsTool(toolName) }
+  }
+
+  /**
+   * The session's live sandbox mode as admission needs it — the SAME resolve
+   * for tool requests and UI-sourced reads (no fake tool, no model cap).
+   */
+  private remotePolicyMode(session: RemoteOperationRequest['session']): 'read-only' | 'workspace-write' | undefined {
     if (session?.header?.cwd === undefined) return undefined
     let policy: SandboxExecutionPolicy | undefined
     try {
       policy = this.ctx.get('sandboxPolicy')?.resolve({ session: session as never }) as SandboxExecutionPolicy | undefined
     } catch { return undefined }
     if (policy?.mode === undefined) return undefined
-    return {
-      effectiveMode: policy.mode === 'read-only' ? 'read-only' : 'workspace-write',
-      capped: this.ctx.multiRootScope.capsTool(toolName),
-    }
+    return policy.mode === 'read-only' ? 'read-only' : 'workspace-write'
   }
 
   /**
@@ -1898,10 +1929,54 @@ export class MultiRootRegistry extends Service {
    * own mode already permits.
    */
   async withRemoteOperation<T>(request: RemoteOperationRequest, body: (operation: RemoteOperation) => T | Promise<T>): Promise<T> {
+    return await this.runRemoteOperation(request, body)
+  }
+
+  /**
+   * The UI admission port for `remoteFiles.list` (ADR-0052 P3): resolves the
+   * LIVE session by id, requires its header cwd to be an absolute path (the
+   * primary root is host-derived, never client-named), and runs the same
+   * ordered read admission as a tool request — with no fake tool name.
+   */
+  async withRemoteFilesRead<T>(sessionId: string, endpoint: RemoteEndpointRef, body: (operation: RemoteOperation) => T | Promise<T>): Promise<T> {
+    const session = this.ctx.get('sessions')?.get(sessionId as SessionId)
+    const cwd = session?.header?.cwd
+    if (session === undefined || typeof cwd !== 'string' || !isAbsolute(cwd)) {
+      throw new RemoteAdmissionError('session-unavailable', 'no live session with an absolute workspace root')
+    }
+    return await this.runRemoteOperation(
+      // The LIVE Session object, not a literal: the policy resolve reads its
+      // full identity, while admission still keys on id + header cwd only.
+      { consumer: 'files', session: session as unknown as NonNullable<RemoteOperationRequest['session']>, purpose: 'read', endpoints: [endpoint] },
+      body,
+    )
+  }
+
+  /**
+   * Admit one remote operation at the owner's ordering point, then run its
+   * body with a frozen handle that expires when the body settles.
+   *
+   * Narrowing happens BEFORE any owner call on every Host: a read-only
+   * session cannot write, exec, or transfer to a remote root, and a capped
+   * tool cannot either — so the owner only ever sees requests the caller's
+   * own mode already permits. UI requests (`consumer: 'files'`) resolve the
+   * same live session mode but skip the per-tool cap: a panel read is not a
+   * model tool.
+   */
+  private async runRemoteOperation<T>(
+    request: RemoteOperationRequest | {
+      readonly consumer: 'files'
+      readonly session: NonNullable<RemoteOperationRequest['session']>
+      readonly purpose: 'read'
+      readonly endpoints: readonly [RemoteEndpointRef]
+    },
+    body: (operation: RemoteOperation) => T | Promise<T>,
+  ): Promise<T> {
     const operationId = randomUUID()
+    const isFiles = 'consumer' in request && request.consumer === 'files'
     const trace = (phase: string, detail = '') =>
       this.ctx.logger.debug(`multi-root-workspace remote ${phase}: op=${operationId} epoch=${this.remoteEpoch() ?? '-'}${detail === '' ? '' : ` ${detail}`}`)
-    trace('requested')
+    trace('requested', isFiles ? 'consumer=files' : '')
     const deny = (code: string, message: string): never => {
       trace('denied', `code=${code}`)
       throw new RemoteAdmissionError(code, message)
@@ -1912,18 +1987,19 @@ export class MultiRootRegistry extends Service {
     if (this.remotePlane.status.state !== 'ready') {
       deny('remote-unavailable', `the remote control plane is ${this.remotePlane.status.state}${this.remotePlane.status.reason === undefined ? '' : `: ${this.remotePlane.status.reason}`}`)
     }
-    const policy = this.remoteToolPolicy(request.session, request.toolName)
-    if (policy === undefined) {
+    const effectiveMode = this.remotePolicyMode(request.session)
+    if (effectiveMode === undefined) {
       deny('session-policy-unavailable', 'no live sandbox policy could be resolved for this session')
     }
+    const toolName = isFiles ? undefined : (request as RemoteOperationRequest).toolName
+    const capped = !isFiles && this.ctx.multiRootScope.capsTool(toolName!)
     const key = primaryKey(request.session!.header.cwd)
-    const { effectiveMode, capped } = policy!
     const transferToRemote = request.purpose === 'transfer' && request.endpoints[1]?.environmentId !== 'local'
     if (effectiveMode === 'read-only' && (request.purpose === 'write' || request.purpose === 'exec' || transferToRemote)) {
       deny('mode-denies', `a read-only session cannot ${request.purpose === 'transfer' ? 'transfer to a remote root' : `${request.purpose} a remote root`}`)
     }
     if (capped && (request.purpose === 'write' || request.purpose === 'exec' || transferToRemote)) {
-      deny('tool-capped', `tool "${request.toolName}" is capped to read-only and cannot ${request.purpose === 'transfer' ? 'transfer to a remote root' : `${request.purpose} a remote root`}`)
+      deny('tool-capped', `tool "${toolName}" is capped to read-only and cannot ${request.purpose === 'transfer' ? 'transfer to a remote root' : `${request.purpose} a remote root`}`)
     }
     trace('narrowed')
     const args = { purpose: request.purpose, endpoints: [...request.endpoints], manifestDigest: this.remotePlane.manifestDigest! }
@@ -1933,8 +2009,10 @@ export class MultiRootRegistry extends Service {
     if (admission.epoch !== this.remoteEpoch()) deny('stale-epoch', 'the remote admission epoch does not match the live channel')
     trace('admitted', 'decision=admit')
     const identity: RemoteOperationIdentity = Object.freeze({
-      operationId, purpose: request.purpose, toolName: request.toolName, sessionId: request.session!.id,
-      primaryRoot: key, authorityEpoch: admission.epoch, authorizationFingerprint: admission.authorizationFingerprint, effectiveMode,
+      operationId, purpose: request.purpose,
+      ...(isFiles ? { consumer: 'files' as const } : toolName === undefined ? {} : { toolName }),
+      sessionId: request.session!.id,
+      primaryRoot: key, authorityEpoch: admission.epoch, authorizationFingerprint: admission.authorizationFingerprint, effectiveMode: effectiveMode!,
     })
     let active = true
     const endpoints = Object.freeze([...admission.endpoints])

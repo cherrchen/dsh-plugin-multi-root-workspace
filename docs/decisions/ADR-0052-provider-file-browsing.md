@@ -83,6 +83,7 @@ Host 计划新增严格独立的 `remoteFiles.list` 端点（不复用 `workspac
 
 - **P1（合同落地）**：`src/client/files-tree/provider.ts` 按本文 §1–§3 落地身份与端口类型 + `rowActions` 分派适配；`providers/resolver.ts` 为唯一组合槽，`providers/local.ts` 为本地实现（唯一 `fileAddressFor` 调用点）。
 - **P2（本地迁移 + 门禁）**：fork 树/RootSwitcher/搜索态/导航记忆全部迁移到 provider + `providerKey`/`treeBucketId` 键控；指定七份 jsdom 规格 148 用例全过、`pnpm typecheck`/`compat:check`/`docs:check`/`git diff --check` 全零。证据明细见实施计划 §6。
+- **P3（Host 列举服务，工作树未提交，基于 `4fa56c4`）**：`remoteFiles.list` 契约（严格 schema、五预算、17 个稳定错误码）+ `RemoteFilesService`（并发 4 零排队、12s 含准入期限、双准入令牌比对、仅本端点撤权取消）；准入唯一条件为 per-binding `directoryListing:'stable-path'`——SFTP ABA 窗口无法以原语消解，此为部署断言非运行期证明；object 授权/Helper/Broker 一律 fail closed（Helper 本轮否决：无 fd-bound 列举证据）。自有有界 `openFilesSftp` 通道独立于 `remote_copy` 会话计数；`readdirBounded` 严格类型 + 致命 UTF-8 + wireBytes 截断；`browseAuthorization` 仅在 snapshot 与 live manifest digest 一致时签发。指定九份规格 158 用例过、`typecheck`/`lint`/`docs:check`/`diff --check` 全过，明细见实施计划 §6。
 
 ## 相关
 

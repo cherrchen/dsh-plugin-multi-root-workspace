@@ -27,6 +27,7 @@ export class FakeRemote {
   readonly generation = randomUUID()
   readonly files = new Map<string, FakeFile>()
   readonly sftpCalls: string[] = []
+  hangReaddir = false
   readonly execCalls: { argv: readonly string[]; cwd: string; env: Readonly<Record<string, string>> }[] = []
   private tick = 1_700_000_000
 
@@ -47,6 +48,12 @@ export class FakeRemote {
   }
 
   read(path: string): Buffer | undefined { return this.files.get(path)?.data }
+
+  /** Seed a symlink entry (mode 0120777) — never followed by lstat. */
+  seedSymlink(path: string): void {
+    this.directory(posix.dirname(path))
+    this.files.set(path, { data: Buffer.alloc(0), mtime: ++this.tick, permissions: 0o120777 })
+  }
   sha256(path: string): string | undefined {
     const file = this.files.get(path)
     return file === undefined || (file.permissions & 0o170000) !== 0o100000 ? undefined : createHash('sha256').update(file.data).digest('hex')
@@ -85,6 +92,32 @@ export class FakeRemote {
     },
     fsync: async () => {},
     close: async () => {},
+    /** The bounded browse listing: direct children of `path`, or a hang. */
+    readdirBounded: async (path: string, signal: AbortSignal) => {
+      this.sftpCalls.push(`readdir ${path}`)
+      if (this.hangReaddir) {
+        await new Promise<void>((resolve, reject) => {
+          const timer = setInterval(() => {
+            if (!this.hangReaddir) { clearInterval(timer); resolve() }
+          }, 10)
+          signal.addEventListener('abort', () => { clearInterval(timer); reject(signal.reason) }, { once: true })
+        })
+      }
+      const file = this.files.get(path)
+      if (file === undefined) throw new SftpStatusError(NO_SUCH_FILE, 'No such file')
+      if ((file.permissions & 0o170000) !== 0o040000) throw new SftpStatusError(FAILURE, 'not a directory')
+      const prefix = path === '/' ? '/' : `${path}/`
+      const entries: { name: string; type: 'file' | 'directory' | 'symlink' | 'other' }[] = []
+      for (const [key, child] of this.files) {
+        if (!key.startsWith(prefix)) continue
+        const tail = key.slice(prefix.length)
+        if (tail === '' || tail.includes('/')) continue
+        const kind = child.permissions & 0o170000
+        entries.push({ name: tail, type: kind === 0o040000 ? 'directory' : kind === 0o120000 ? 'symlink' : kind === 0o100000 ? 'file' : 'other' })
+      }
+      entries.sort((a, b) => a.name.localeCompare(b.name))
+      return { entries, truncated: false }
+    },
     remove: async (path: string) => {
       this.sftpCalls.push(`remove ${path}`)
       if (!this.files.delete(path)) throw new SftpStatusError(NO_SUCH_FILE, 'No such file')
@@ -248,6 +281,8 @@ export function fakeManifest(options: {
   localRootIds?: readonly string[]
   /** Device binding actions; default `['read','write']` (a transfer-only device). */
   deviceActions?: readonly ('read' | 'write' | 'exec')[]
+  /** Opt the device binding into Host-side directory listing. */
+  deviceListing?: boolean
 }): DeploymentManifest {
   const buildPath = options.buildPath ?? '/srv/root'
   const devicePath = options.devicePath ?? '/srv/root'
@@ -283,6 +318,7 @@ export function fakeManifest(options: {
       },
       {
         primary: options.primary, environmentId: 'device', rootId: 'out', path: devicePath,
+        ...(options.deviceListing === true ? { directoryListing: 'stable-path' as const } : {}),
         actions: [...(options.deviceActions ?? ['read', 'write'])],
         transfers: [
           { direction: 'import' as const, peer: { environmentId: 'build', rootId: 'app' } },

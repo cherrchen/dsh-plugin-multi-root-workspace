@@ -79,6 +79,14 @@ export const bindingSchema = z.object({
   /** Personal binding incarnation. Recreating a removed binding cannot revive its old grant. */
   bindingId: z.uuid().optional(),
   path: z.string().min(1).max(4096),
+  /**
+   * Operator opt-in to Host-side directory listing (ADR-0052 P3): the
+   * deployment asserts that no untrusted remote process can replace this
+   * workspace's ancestor or descendant directories — or change mount/symlink
+   * resolution — while the Host browses. A deployment assertion, not a
+   * runtime proof; only `sftp` environments may declare it.
+   */
+  directoryListing: z.literal('stable-path').optional(),
   actions: z.array(z.enum(['read', 'write', 'exec'])).min(1),
   transfers: z.array(z.object({
     direction: z.enum(['import', 'export']),
@@ -228,6 +236,9 @@ export function parseDeploymentManifest(text: string, manifestPath: string, opti
     seen.add(key)
     if (new Set(binding.actions).size !== binding.actions.length) {
       throw new ManifestError('invalid-manifest', `binding "${binding.rootId}" repeats an action`)
+    }
+    if (binding.directoryListing !== undefined && environment.transport !== 'sftp') {
+      throw new ManifestError('invalid-manifest', `binding "${binding.rootId}" declares directoryListing but environment "${environment.environmentId}" is not sftp`)
     }
     const primary = primaryKey(binding.primary)
     const list = byPrimary.get(primary) ?? []

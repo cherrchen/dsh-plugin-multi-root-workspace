@@ -28,7 +28,6 @@ import type { FilesSearchRun, WorkspaceSearchAnswer, WorkspaceSearchRequest } fr
 import type { DirLevel } from '../store.ts'
 import {
   belongsTo,
-  validRelativePath,
   type DirectoryListing,
   type FilesProviderIdentity,
   type WorkspaceFilesProvider,
