@@ -1,6 +1,6 @@
 # 个人 SSH 工具硬化：参数、错误文案与输出预算（2026-11-23）
 
-> 状态：**实施完成，本机门禁通过；Draft PR [#78](https://github.com/cherrchen/dsh-plugin-multi-root-workspace/pull/78) CI 待跑**（分支 `feat/harden-remote-tool`）。
+> 状态：**实施完成，本机门禁通过，已合入 `main`（PR [#78](https://github.com/cherrchen/dsh-plugin-multi-root-workspace/pull/78)，`d7f82c1`）并随 `v0.1.24-beta.5` 发版**（分支 `feat/harden-remote-tool`）。
 >
 > 关联：[SSH 参考](../../reference/ssh-remote-environments.md)、[控制面参考](../../reference/multi-environment-control-plane.md)、[ADR-0032](../../decisions/ADR-0032-upstream-ssh-backend.md)、[ADR-0033](../../decisions/ADR-0033-remote-command-and-sandbox.md)、[ADR-0034](../../decisions/ADR-0034-binary-transfer.md)、[ADR-0049](../../decisions/ADR-0049-ssh-custody-modes.md)、[路线图总账](./2026-09-12-multi-root-workspace.md#个人-ssh-工具硬化2026-11-23)。
 

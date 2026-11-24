@@ -8,6 +8,19 @@ English: [CHANGELOG.en.md](./CHANGELOG.en.md)
 - 安装方式、受支持的上游运行时与已知限制见 [README](./README.md)。
 - 每个版本的实施证据、编号口径与发布状态见[路线图 §进度总账](./docs/plans/active/2026-09-12-multi-root-workspace.md#进度总账)；GitHub Release 的正文由 `scripts/release-notes.mjs` 从 commit 历史生成，是本文件之外的完整原始清单。
 
+## [0.1.24-beta.5] - 2026-11-24
+
+本版是 `0.1.24` 线的第五个 beta，收紧个人 SSH 两个远端工具的参数、失败文案与输出预算：`remote_copy` 的两端使用同一份定义，只有省略 `environmentId` 才表示本机，结构错误在任何 Registry 准入与 SSH/SFTP I/O 之前以带字段位置的 `invalid-arguments` 结束；可诊断的失败补充有界 `message`/`hint`，端点类错误列出与对端匹配的候选；`remote_bash` 默认每路只预览 64 KiB 输出，JSON 转义同样受该预算约束，结果逐流报告可证实的字节计数。没有配置或协议层面的不兼容变更，已保存的 SSH 连接沿用原配置；SSH 仍为实验性、默认关闭。
+
+### Changed
+
+- **`remote_copy` 参数统一**：`from` 与 `to` 引用同一份端点定义 `{environmentId?, rootId, relativePath}`，只有省略 `environmentId` 才取 `local`，`null` 与空串是参数错误，远端端点必须显式给出环境 ID；本地主根写作 `local:primary`，附加根使用登记的 `aliasId`。工具广告的 schema 与 execute 边界校验来自同一份声明，缺字段、错误类型、未知字段与嵌套对象都在工具层以带字段位置的 `invalid-arguments` 结束，早于 Registry 准入与任何 SSH/SFTP I/O。工具描述与用户指南补充一次上传和一次下载示例，用户指南与技术参考同时记录单文件传输属性（目标以 0600 创建、不保留源 mtime 与执行位、目标存在即拒绝）与延后的元数据、覆盖与递归设计。
+
+### Added
+
+- **失败文案与端点候选**：两个工具保留 `status`/`code`/`stage`/`staging`/`operationId`/`reconcileId` 语义，并为可诊断的失败补充有界 `message` 与 `hint`；文案只由稳定错误码与安全字段生成，不把捕获异常、SSH 诊断原文或凭据路径送入模型上下文。`invalid-cwd`、`destination-parent-missing`、`local-root-unavailable` 各有针对性提示；端点类错误可附每个方向至多 6 个 `environmentId:rootId` 候选，候选取自当前 Session 主根的 Registry 快照，按登记状态、所需动作、读写/执行权限与已知对端配对筛选，读取不建连、不消耗准入。快照不可用时保留原错误码与通用提示；`unknown` 与 `admitted-may-start` 提示先核对远端状态，不建议盲重试。
+- **输出预算与字节计数**：`remote_bash` 默认给 stdout 与 stderr 各 64 KiB 预览预算，原始窗口与 JSON 字符串内容分别受同一上限约束；`maxOutputBytes` 可在该流的部署上限内显式调节。结果逐流报告 `truncated`、`totalBytes` 与 `droppedBytes`；`droppedBytes` 扣除的是未进入预览的原始字节，涵盖上游丢头、UTF-8 尾部舍弃与 JSON 预算裁剪，无法核实时为 `null`。新个人 SSH 连接保留 stdout 1 MiB、stderr 256 KiB 的采集上限，已保存连接沿用原配置。
+
 ## [0.1.24-beta.4] - 2026-11-23
 
 本版是 `0.1.24` 线的第四个 beta，修复个人 SSH 活跃时卸载插件导致 Host 退出的问题，并把 SSH 依赖安装收敛为一条随插件发行的命令。没有配置或协议变更；SSH 仍为实验性、默认关闭。
@@ -405,7 +418,8 @@ English: [CHANGELOG.en.md](./CHANGELOG.en.md)
 
 - 发布前外部评审提出的 8 项发现（其中 3 项发布阻断）全部修复，每项各带一个回归测试：登记目录被替换为符号链接后授权转移（引入 `recordedPath`，**重新解析路径不等于重新授权**）、并发修改注册表丢写或复活已撤销的授权（每个主根的变更串行）、刷新不重新检查目录、手输路径被目录选择器覆盖、`reveal` 的应答契约与失败码、重复 id 未校验、主根未纳入嵌套校验、CI 先测后构建。
 
-[Unreleased]: https://github.com/cherrchen/dsh-plugin-multi-root-workspace/compare/v0.1.24-beta.4...HEAD
+[Unreleased]: https://github.com/cherrchen/dsh-plugin-multi-root-workspace/compare/v0.1.24-beta.5...HEAD
+[0.1.24-beta.5]: https://github.com/cherrchen/dsh-plugin-multi-root-workspace/compare/v0.1.24-beta.4...v0.1.24-beta.5
 [0.1.24-beta.4]: https://github.com/cherrchen/dsh-plugin-multi-root-workspace/compare/v0.1.24-beta.3...v0.1.24-beta.4
 [0.1.24-beta.3]: https://github.com/cherrchen/dsh-plugin-multi-root-workspace/compare/v0.1.24-beta.2...v0.1.24-beta.3
 [0.1.24-beta.2]: https://github.com/cherrchen/dsh-plugin-multi-root-workspace/compare/v0.1.24-beta.1...v0.1.24-beta.2

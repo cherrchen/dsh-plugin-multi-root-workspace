@@ -8,6 +8,19 @@ This file records the user-visible changes of every **released** version.
 - For installation sources, the supported upstream runtimes, and known limitations, see the [README](./README.en.md).
 - The evidence, numbering, and release state of each version live in the [roadmap progress ledger](./docs/plans/active/2026-09-12-multi-root-workspace.md#进度总账). The body of each GitHub Release is generated from the commit history by `scripts/release-notes.mjs` and is the complete raw list behind this file.
 
+## [0.1.24-beta.5] - 2026-11-24
+
+This is the fifth beta of the `0.1.24` line. It tightens the arguments, failure guidance, and output budget of the two personal SSH remote tools: both `remote_copy` endpoints share one definition and only an omitted `environmentId` means the local machine; structural errors end as `invalid-arguments` with a field location before any Registry admission or SSH/SFTP I/O; diagnosable failures carry bounded `message`/`hint` text with matching endpoint candidates; and `remote_bash` previews at most 64 KiB per stream by default with JSON escaping counted against that budget and the provable per-stream byte counts reported. There is no configuration or protocol incompatibility; saved SSH connections keep their configuration and SSH remains experimental and off by default.
+
+### Changed
+
+- **Unified `remote_copy` arguments**: `from` and `to` reference the same endpoint definition `{environmentId?, rootId, relativePath}`. Only an omitted `environmentId` defaults to `local`; `null` and the empty string are argument errors, and a remote endpoint must name its environment. The local primary root is spelled `local:primary` and additional roots use their registered `aliasId`. The schema the tools advertise and the execute-boundary validation come from one declaration, so missing fields, wrong types, unknown fields, and nested objects all end at the tool layer as `invalid-arguments` with a field location, before Registry admission and any SSH/SFTP I/O. Tool descriptions and the user guide now show one upload and one download example, and the guide and technical reference record the single-file transfer properties (the target is created 0600, the source mtime and executable bit are not preserved, an existing target is refused) plus the deferred metadata, overwrite, and recursive designs.
+
+### Added
+
+- **Failure guidance and endpoint candidates**: both tools keep the `status`/`code`/`stage`/`staging`/`operationId`/`reconcileId` semantics and add bounded `message` and `hint` text for diagnosable failures. The text is generated only from stable error codes and safe fields; captured exceptions, raw SSH diagnostics, and credential paths never reach the model context. `invalid-cwd`, `destination-parent-missing`, and `local-root-unavailable` each get a targeted hint, and endpoint errors may list up to 6 `environmentId:rootId` candidates per direction. Candidates come from the Registry snapshot of the current Session's primary root and are filtered by registration state, required action, read-write/execute access, and known peer pairing; reading them neither connects nor consumes admission. When the snapshot is unavailable the original error code and a generic hint remain. `unknown` and `admitted-may-start` prompt the model to check the remote state instead of retrying blindly.
+- **Output budget and byte counts**: `remote_bash` gives stdout and stderr a 64 KiB preview budget each by default, with the raw window and the JSON string content each bounded by that same limit; `maxOutputBytes` adjusts the per-stream budget within that stream's deployment cap. Results report `truncated`, `totalBytes`, and `droppedBytes` per stream. `droppedBytes` subtracts only the raw bytes that did not reach the preview, covering upstream head loss, trailing UTF-8 trimming, and JSON budget cropping, and is `null` when it cannot be proven. New personal SSH connections keep the 1 MiB stdout and 256 KiB stderr collection caps; saved connections keep their existing configuration.
+
 ## [0.1.24-beta.4] - 2026-11-23
 
 This is the fourth beta of the `0.1.24` line. It fixes the Host exit caused by uninstalling the plugin while a personal SSH connection is active, and reduces SSH dependency installation to one command shipped with the package. There are no configuration or protocol changes; SSH remains experimental and off by default.
@@ -405,7 +418,8 @@ The first release: the three MVP milestones (M1–M3).
 
 - All eight findings of the pre-release external review (three of them release-blocking) are fixed, each with a regression test: a registered directory replaced by a symlink transplanting its authority (which introduced `recordedPath` — **re-resolving a path is not re-authorizing it**), concurrent registry mutations losing a write or reviving a revoked grant (per-primary-root mutations are serialized), a refresh not re-checking directories, a typed path being overwritten by the directory picker, the `reveal` response contract and failure code, duplicate ids not validated, the primary root missing from nesting validation, and CI testing before building.
 
-[Unreleased]: https://github.com/cherrchen/dsh-plugin-multi-root-workspace/compare/v0.1.24-beta.4...HEAD
+[Unreleased]: https://github.com/cherrchen/dsh-plugin-multi-root-workspace/compare/v0.1.24-beta.5...HEAD
+[0.1.24-beta.5]: https://github.com/cherrchen/dsh-plugin-multi-root-workspace/compare/v0.1.24-beta.4...v0.1.24-beta.5
 [0.1.24-beta.4]: https://github.com/cherrchen/dsh-plugin-multi-root-workspace/compare/v0.1.24-beta.3...v0.1.24-beta.4
 [0.1.24-beta.3]: https://github.com/cherrchen/dsh-plugin-multi-root-workspace/compare/v0.1.24-beta.2...v0.1.24-beta.3
 [0.1.24-beta.2]: https://github.com/cherrchen/dsh-plugin-multi-root-workspace/compare/v0.1.24-beta.1...v0.1.24-beta.2

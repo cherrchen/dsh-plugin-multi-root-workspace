@@ -37,7 +37,7 @@ Two observed caveats (source installs in the DSH `0.2.1-alpha.2` era): the profi
 ## Differences between install sources
 
 - **npm / tarball**: pre-built artifacts — the plugin itself is never compiled; no `allowBuilds` needed.
-- **GitHub**: delivers source code, built automatically during `add` by the package's own `prepare` script (a direct transpile of `src/`, no type-checking), so `allowBuilds` only has to cover this package itself. With no ref the install tracks the head of `main`; a version ref like `#v0.1.24-beta.4` pins the content, and a semver range like `#semver:*` always resolves to the latest tag.
+- **GitHub**: delivers source code, built automatically during `add` by the package's own `prepare` script (a direct transpile of `src/`, no type-checking), so `allowBuilds` only has to cover this package itself. With no ref the install tracks the head of `main`; a version ref like `#v0.1.24-beta.5` pins the content, and a semver range like `#semver:*` always resolves to the latest tag.
 - **From source**: pnpm `link:` to a local checkout whose dependencies are already installed in this repository — no `allowBuilds` needed; run `pnpm build` first to produce `lib/` (not tracked by Git).
 
 When running DSH from a source checkout, `dsh` is not on PATH — use `pnpm dsh` in the commands instead.
