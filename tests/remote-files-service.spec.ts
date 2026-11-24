@@ -7,7 +7,13 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { createFixtureWorkspace, type FixtureWorkspace } from './support/temp-workspace.ts'
 import { mountRemoteTools, registerRemote, type RemoteToolsWorld } from './support/remote-tools.ts'
 import { RemoteFilesService, type RemoteFilesManager, type RemoteFilesRegistry } from '../src/remote/files-service.ts'
-import { RemoteFilesError, REMOTE_FILES_LIMITS, type RemoteFilesListing } from '../src/remote/files-contract.ts'
+import {
+  RemoteFilesError,
+  REMOTE_FILES_LIMITS,
+  remoteFilesListRequest,
+  validRemoteRelativePath,
+  type RemoteFilesListing,
+} from '../src/remote/files-contract.ts'
 import { SftpConnectionLost, type SftpClient } from '../src/remote/sftp.ts'
 import type { DeploymentManifest } from '../src/remote/manifest.ts'
 import type { SftpEnvironment } from '../src/remote/ssh-environment.ts'
@@ -399,5 +405,235 @@ describe('remoteFiles.list admission', () => {
     const answer = await world!.panel('remoteFiles.list', request({ authorization: await authorization() }) as never)
     expect(answer.ok).toBe(false)
     expect(answer.error?.code).toBe('invalid-listing')
+  })
+
+  it('bounds the relative path in UTF-8 bytes, not characters', () => {
+    const base = { sessionId: 's', environmentId: 'device', rootId: 'out', authorization: 'a'.repeat(64) }
+    // A short multibyte path parses — names are byte-counted, not rejected.
+    const multi = `uni-${'目'.repeat(8)}录/deep`
+    expect(validRemoteRelativePath(multi)).toBe(true)
+    expect(remoteFilesListRequest.safeParse({ ...base, relativePath: multi }).success).toBe(true)
+    // 64 otherwise-legal multibyte segments (93 bytes each, all under the
+    // per-segment 255-byte cap and the 64-segment cap, under the 4096-char
+    // schema max) still total over 4096 UTF-8 bytes: the byte floor is the
+    // only rule that refuses this path.
+    const segment = '段'.repeat(31)
+    const oversized = Array.from({ length: 64 }, () => segment).join('/')
+    expect(oversized.length).toBeLessThanOrEqual(4096)
+    expect(new TextEncoder().encode(oversized).byteLength).toBeGreaterThan(REMOTE_FILES_LIMITS.pathBytes)
+    expect(validRemoteRelativePath(oversized)).toBe(false)
+    expect(remoteFilesListRequest.safeParse({ ...base, relativePath: oversized }).success).toBe(false)
+  })
+
+  it('an over-byte path through the panel is refused with zero channel opens', async () => {
+    await mount({ seed: { device: { '/srv/root/a.txt': 'a' } } })
+    await registerRemote(world!, 'device', 'out')
+    const token = await authorization()
+    const segment = '段'.repeat(31)
+    const oversized = Array.from({ length: 64 }, () => segment).join('/')
+    const answer = await world!.panel('remoteFiles.list', { ...request({ authorization: token }), relativePath: oversized })
+    expect(answer.ok).toBe(false)
+    expect(answer.error?.code).toBe('panel/bad-request')
+    expect(manager.opens).toBe(0)
+  })
+})
+
+describe('remoteFiles.wait authorization lease', () => {
+  const lease = (over: Record<string, unknown> = {}) => ({
+    sessionId: world!.session.id as string, environmentId: 'device', rootId: 'out',
+    authorization: '', ...over,
+  })
+
+  it('an unchanged grant resolves only after the 15s lease expires, with zero channel opens', async () => {
+    await mount({ seed: { device: { '/srv/root/x.txt': 'x' } } })
+    await registerRemote(world!, 'device', 'out')
+    const token = await authorization()
+    vi.useFakeTimers()
+    try {
+      let settled = false
+      const pending = service!.waitForAuthorizationChange(lease({ authorization: token }) as never)
+        .then(() => { settled = true; return 'unchanged' as const }, (error: RemoteFilesError) => error.code)
+      await vi.advanceTimersByTimeAsync(REMOTE_FILES_LIMITS.waitLeaseMs - 1)
+      expect(settled).toBe(false)
+      await vi.advanceTimersByTimeAsync(1)
+      expect(await pending).toBe('unchanged')
+      expect(manager.opens).toBe(0)
+    } finally { vi.useRealTimers() }
+  })
+
+  it('an unrelated remote mutation keeps the lease pending', async () => {
+    await mount()
+    await registerRemote(world!, 'device', 'out')
+    const controller = new AbortController()
+    let settled = false
+    const pending = service!.waitForAuthorizationChange(lease({ authorization: await authorization() }) as never, controller.signal)
+      .then(() => { settled = true; return 'unchanged' as const }, (error: RemoteFilesError) => error.code)
+    await new Promise(resolve => setTimeout(resolve, 30))
+    // An unrelated change reaches the lease only as a notification: the
+    // recheck re-admits, matches, and the lease waits on. (A real addRemote
+    // write races the endpoint snapshot's rebuild — the notifier is poked
+    // directly to keep the recheck deterministic.)
+    const registry = world!.stack.registry as unknown as { notifyRemoteChange(): void }
+    registry.notifyRemoteChange()
+    await new Promise(resolve => setTimeout(resolve, 50))
+    registry.notifyRemoteChange()
+    await new Promise(resolve => setTimeout(resolve, 50))
+    expect(settled).toBe(false)
+    controller.abort()
+    expect(await pending).toBe('cancelled')
+    expect(manager.opens).toBe(0)
+  })
+
+  it('a removed grant aborts the lease with the auth code, not a network loss', async () => {
+    await mount()
+    await registerRemote(world!, 'device', 'out')
+    const pending = service!.waitForAuthorizationChange(lease({ authorization: await authorization() }) as never)
+      .then(() => 'unchanged' as const, (error: RemoteFilesError) => error.code)
+    await new Promise(resolve => setTimeout(resolve, 30))
+    await world!.stack.registry.removeRemote(world!.session.header.cwd!, { environmentId: 'device', rootId: 'out' })
+    expect(await pending).toBe('root-unregistered')
+    expect(manager.opens).toBe(0)
+  })
+
+  it('a re-granted token aborts the old lease as authorization-changed', async () => {
+    await mount()
+    await registerRemote(world!, 'device', 'out')
+    const token = await authorization()
+    const pending = service!.waitForAuthorizationChange(lease({ authorization: token }) as never)
+      .then(() => 'unchanged' as const, (error: RemoteFilesError) => error.code)
+    await new Promise(resolve => setTimeout(resolve, 30))
+    await world!.stack.registry.removeRemote(world!.session.header.cwd!, { environmentId: 'device', rootId: 'out' })
+    await registerRemote(world!, 'device', 'out')
+    const outcome = await pending
+    expect(['root-unregistered', 'binding-changed', 'root-identity-changed', 'environment-changed']).toContain(outcome)
+    // A re-grant mints a different token: the new lease identity is not the old one.
+    expect(await authorization()).not.toBe(token)
+    expect(manager.opens).toBe(0)
+  })
+
+  it('a pre-aborted lease never claims a slot nor reaches admission', async () => {
+    await mount()
+    await registerRemote(world!, 'device', 'out')
+    let admissions = 0
+    const countingRegistry: RemoteFilesRegistry = {
+      get remoteManifest() { return world!.stack.registry.remoteManifest },
+      onRemoteChange: listener => world!.stack.registry.onRemoteChange(listener),
+      withRemoteFilesRead: (sessionId, endpoint, body) => {
+        admissions++
+        return world!.stack.registry.withRemoteFilesRead(sessionId, endpoint, body)
+      },
+    }
+    const counting = new RemoteFilesService(countingRegistry, manager, world!.ctx.logger)
+    try {
+      const controller = new AbortController()
+      controller.abort()
+      await expect(counting.waitForAuthorizationChange(lease({ authorization: await authorization() }) as never, controller.signal))
+        .rejects.toMatchObject({ code: 'cancelled' })
+      expect(admissions).toBe(0)
+      expect(manager.opens).toBe(0)
+    } finally { await counting.dispose() }
+  })
+
+  it('a stalled admission is bounded by the 4s admission timer', async () => {
+    await mount()
+    await registerRemote(world!, 'device', 'out')
+    // The admission parks: the caller still gets the bounded answer, but the
+    // lease's slot is held until the parked engine task is drained — release
+    // it before dispose, which waits every tracked job.
+    let releaseAdmission: (() => void) | undefined
+    const hangingRegistry: RemoteFilesRegistry = {
+      get remoteManifest() { return world!.stack.registry.remoteManifest },
+      onRemoteChange: listener => world!.stack.registry.onRemoteChange(listener),
+      withRemoteFilesRead: () => new Promise<never>((_resolve, reject) => {
+        releaseAdmission = () => { reject(new RemoteFilesError('root-unregistered')) }
+      }),
+    }
+    const hanging = new RemoteFilesService(hangingRegistry, manager, world!.ctx.logger)
+    vi.useFakeTimers()
+    try {
+      const pending = hanging.waitForAuthorizationChange(lease({ authorization: await authorization() }) as never)
+        .then(() => 'unchanged' as const, (error: RemoteFilesError) => error.code)
+      await vi.advanceTimersByTimeAsync(REMOTE_FILES_LIMITS.waitAdmissionMs)
+      expect(await pending).toBe('timeout')
+      expect(manager.opens).toBe(0)
+    } finally { vi.useRealTimers(); releaseAdmission?.(); await hanging.dispose() }
+  })
+
+  it('admits 16 leases and rejects the seventeenth with no queue', async () => {
+    await mount()
+    await registerRemote(world!, 'device', 'out')
+    const token = await authorization()
+    const controllers = Array.from({ length: REMOTE_FILES_LIMITS.waitConcurrent }, () => new AbortController())
+    const pending = controllers.map(controller =>
+      service!.waitForAuthorizationChange(lease({ authorization: token }) as never, controller.signal)
+        .then(() => 'unchanged' as const, (error: RemoteFilesError) => error instanceof RemoteFilesError ? error.code : `OTHER:${String(error)}`))
+    await new Promise(resolve => setTimeout(resolve, 30))
+    await expect(service!.waitForAuthorizationChange(lease({ authorization: token }) as never))
+      .rejects.toMatchObject({ code: 'resource-budget' })
+    for (const controller of controllers) controller.abort()
+    const outcomes = await Promise.all(pending)
+    expect(outcomes.every(code => code === 'cancelled')).toBe(true)
+    expect(manager.opens).toBe(0)
+  })
+
+  it('a cancelled lease keeps its slot until the underlying admission unwinds', async () => {
+    await mount()
+    await registerRemote(world!, 'device', 'out')
+    // Every admission parks: the lease's bounded race returns on caller
+    // abort, but the engine call keeps running — the slot must too.
+    const releaseAdmissions: (() => void)[] = []
+    const hangingRegistry: RemoteFilesRegistry = {
+      get remoteManifest() { return world!.stack.registry.remoteManifest },
+      onRemoteChange: listener => world!.stack.registry.onRemoteChange(listener),
+      withRemoteFilesRead: () => new Promise<never>((_resolve, reject) => {
+        releaseAdmissions.push(() => { reject(new RemoteFilesError('root-unregistered')) })
+      }),
+    }
+    const hanging = new RemoteFilesService(hangingRegistry, manager, world!.ctx.logger)
+    try {
+      const token = await authorization()
+      const controllers = Array.from({ length: REMOTE_FILES_LIMITS.waitConcurrent }, () => new AbortController())
+      const pending = controllers.map(controller =>
+        hanging.waitForAuthorizationChange(lease({ authorization: token }) as never, controller.signal)
+          .then(() => 'unchanged' as const, (error: RemoteFilesError) => error.code))
+      await new Promise(resolve => setTimeout(resolve, 30))
+      for (const controller of controllers) controller.abort()
+      expect(await Promise.all(pending)).toEqual(Array.from({ length: REMOTE_FILES_LIMITS.waitConcurrent }, () => 'cancelled'))
+      // The callers returned promptly, yet a fresh lease still meets the
+      // cap: cancel + resubmit cannot sneak past the budget while the
+      // raced admissions have not unwound.
+      await expect(hanging.waitForAuthorizationChange(lease({ authorization: token }) as never))
+        .rejects.toMatchObject({ code: 'resource-budget' })
+      // Draining the parked engine tasks is what frees the slots; a late
+      // admission result publishes no lease answer and opens no channel.
+      for (const release of releaseAdmissions.splice(0)) release()
+      await new Promise(resolve => setTimeout(resolve, 50))
+      expect((hanging as unknown as { waits: number }).waits).toBe(0)
+      expect(manager.opens).toBe(0)
+    } finally { await hanging.dispose() }
+  })
+
+  it('the panel endpoint answers {unchanged:true} after the lease and rejects malformed payloads', async () => {
+    await mount()
+    await registerRemote(world!, 'device', 'out')
+    const token = await authorization()
+    vi.useFakeTimers()
+    try {
+      const pending = world!.panel('remotes.waitForAuthorizationChange', lease({ authorization: token }) as never)
+      await vi.advanceTimersByTimeAsync(REMOTE_FILES_LIMITS.waitLeaseMs)
+      const answer = await pending
+      expect(answer.ok).toBe(true)
+      expect(answer.value).toEqual({ unchanged: true })
+    } finally { vi.useRealTimers() }
+    for (const bad of [
+      { ...lease({ authorization: token }), authorization: 'short' },
+      { ...lease({ authorization: token }), relativePath: 'a' },
+      { ...lease({ authorization: token }), extra: 1 },
+    ]) {
+      const answer = await world!.panel('remotes.waitForAuthorizationChange', bad)
+      expect(answer.ok).toBe(false)
+      expect(answer.error?.code).toBe('panel/bad-request')
+    }
+    expect(manager.opens).toBe(0)
   })
 })

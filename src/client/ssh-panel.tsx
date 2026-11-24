@@ -1200,6 +1200,7 @@ export function SshWorkspaceBindingsDialog(props: SshWorkspaceBindingsDialogProp
       read: binding.actions.includes('read'), write: binding.actions.includes('write'), exec: binding.actions.includes('exec'),
       imports: new Set(binding.transfers?.filter(transfer => transfer.direction === 'import').map(transfer => transfer.peer.rootId)),
       exports: new Set(binding.transfers?.filter(transfer => transfer.direction === 'export').map(transfer => transfer.peer.rootId)),
+      directoryListing: binding.directoryListing === 'stable-path',
     })
   }
   const save = async (value: BindingDraft): Promise<BindingSaveResult> =>
@@ -1323,6 +1324,22 @@ export function SshWorkspaceBindingsDialog(props: SshWorkspaceBindingsDialogProp
                       onChange={() => setDraft({ ...draft, exports: togglePeer(draft.exports, peer.id) })} />
                   </div>
                 ))}
+              </section>
+            )}
+            {/* The stable-SFTP-path Files browsing opt-in (ADR-0052): offered
+                only on a helper-less environment, whose transport is SFTP — a
+                Helper environment's transport can never honor the field, and
+                the host's manifest validation stays authoritative either way.
+                Toggling it changes the binding's identity, so the existing
+                re-registration flow applies after saving. */}
+            {environment === undefined || environment.helper !== null ? null : (
+              <section className="mrfw-wizSection" aria-label={t('ssh.binding.directoryListing')}>
+                <div className="mrfw-wizCheckRow">
+                  <WizardCheckbox checked={draft.directoryListing} disabled={busy}
+                    label={t('ssh.binding.directoryListing')}
+                    onChange={next => setDraft({ ...draft, directoryListing: next })} />
+                </div>
+                <p className="mrfw-note">{t('ssh.binding.directoryListingHint')}</p>
               </section>
             )}
             {pending?.kind === 'save' ? <StatusLine state="ongoing">{t('ssh.pending.bindingSave')}</StatusLine> : null}

@@ -27,6 +27,7 @@ import { remoteFilesAuthorization } from './files-authorization.ts'
 import {
   RemoteFilesError,
   REMOTE_FILES_LIMITS,
+  type RemoteFilesAuthorizationRequest,
   type RemoteFilesFailureCode,
   type RemoteFilesListRequest,
   type RemoteFilesListing,
@@ -63,6 +64,12 @@ export interface RemoteFilesRegistry {
 /** The connection surface the service needs — satisfied by SshEnvironmentManager. */
 export interface RemoteFilesManager {
   readonly deployment: DeploymentManifest
+  /**
+   * The host's SSH capability verdict (`SshEnvironmentManager.capability`):
+   * a manager that lost its gate may not advertise browse support. Absent
+   * on test doubles, which then count as ungated.
+   */
+  readonly capability?: { readonly eligible: boolean } | undefined
   openFilesSftp(environmentId: string, signal: AbortSignal, expectedDigest: string): Promise<SftpEnvironment & { live(): boolean }>
 }
 
@@ -106,6 +113,7 @@ function environmentCode(code: string): RemoteFilesFailureCode {
 
 export class RemoteFilesService {
   private active = 0
+  private waits = 0
   private live = true
   private readonly jobs = new Set<Promise<void>>()
   private readonly shutdown = new AbortController()
@@ -116,9 +124,10 @@ export class RemoteFilesService {
     private readonly logger: { debug(message: string): void; warn(message: string): void },
   ) {}
 
-  /** Whether one binding may be browsed RIGHT NOW — the opt-in and transport check. */
+  /** Whether one binding may be browsed RIGHT NOW — the opt-in, transport and live capability gate. */
   supports(environmentId: string, binding: RemoteBinding): boolean {
     if (!this.live || typeof this.manager.openFilesSftp !== 'function') return false
+    if (this.manager.capability !== undefined && !this.manager.capability.eligible) return false
     const environment = this.registry.remoteManifest?.environments.find(entry => entry.environmentId === environmentId)
     return environment?.transport === 'sftp' && binding.directoryListing === 'stable-path'
   }
@@ -185,6 +194,176 @@ export class RemoteFilesService {
   }
 
   /**
+   * One authorization lease (ADR-0052 P4): an authenticated metadata wait on
+   * the grant's live identity — NOT a filesystem watch. It resolves only when
+   * the 15s window expires AFTER a final admission still matches; any drift in
+   * this endpoint's hashed identity rejects with the same fixed vocabulary a
+   * listing would report, so the browser retires the tree instead of drawing a
+   * stale one. There is no SSH probing, no file data, and no auto-relist —
+   * only the control plane answers, and the lease ends on caller abort,
+   * disconnect, service unmount or the cap.
+   */
+  async waitForAuthorizationChange(request: RemoteFilesAuthorizationRequest, callerSignal?: AbortSignal): Promise<void> {
+    if (!this.live) throw new RemoteFilesError('provider-unavailable')
+    // 0 waiting, and independent of the listing pool.
+    if (this.waits >= REMOTE_FILES_LIMITS.waitConcurrent) throw new RemoteFilesError('resource-budget')
+    const stateAbort = new AbortController()
+    const signal = AbortSignal.any(
+      callerSignal === undefined
+        ? [this.shutdown.signal, stateAbort.signal]
+        : [this.shutdown.signal, stateAbort.signal, callerSignal],
+    )
+    const aborted = Promise.withResolvers<never>()
+    const onAbort = (): void => {
+      aborted.reject(signal.reason instanceof Error ? signal.reason : new RemoteFilesError('cancelled'))
+    }
+    // A pre-aborted lease never claims a slot nor reaches admission.
+    if (signal.aborted) throw this.normalize(signal.reason, undefined, stateAbort, callerSignal)
+    this.waits++
+    const job = Promise.withResolvers<void>()
+    this.jobs.add(job.promise)
+    try {
+      signal.addEventListener('abort', onAbort, { once: true })
+      const run = this.wait(request, signal, stateAbort).finally(() => {
+        // The lease slot is released only when the body actually unwinds.
+        this.waits--
+        this.jobs.delete(job.promise)
+        job.resolve()
+      })
+      try {
+        await Promise.race([run, aborted.promise])
+        signal.throwIfAborted()
+      } catch (error) {
+        throw this.normalize(error, undefined, stateAbort, callerSignal)
+      }
+    } finally {
+      signal.removeEventListener('abort', onAbort)
+    }
+  }
+
+  /**
+   * One lease end to end: the change listener installs BEFORE the first
+   * admission (a drift between them cannot slip), notifications coalesce
+   * through a dirty flag while one re-admission is pending, and the lease
+   * timer's answer requires a final matching admission. Every admission is
+   * bounded by {@link REMOTE_FILES_LIMITS.waitAdmissionMs} so an ordered-owner
+   * stall — an expired session, a stuck manifest read — cannot outlive the
+   * lease.
+   */
+  private async wait(request: RemoteFilesAuthorizationRequest, signal: AbortSignal, stateAbort: AbortController): Promise<void> {
+    signal.throwIfAborted()
+    // Every engine task this lease started — tracked so the caller's slot
+    // stays claimed until the LAST underlying admission actually settles:
+    // a cancelled race does not free the budget while the ordered registry
+    // call still runs, so cancel+resubmit can never bypass the cap.
+    const pending = new Set<Promise<AdmittedGrant>>()
+    // At most one admission engine call runs per lease at a time: a
+    // recheck for the SAME token reuses the in-flight admission instead of
+    // stacking another ordered call behind it.
+    let inFlight: { readonly token: string | undefined; readonly promise: Promise<AdmittedGrant> } | undefined
+    const admitBounded = async (expectedToken?: string): Promise<AdmittedGrant> => {
+      // A dead lease never starts the timer nor the ordered engine call.
+      signal.throwIfAborted()
+      const bound = new AbortController()
+      const timer = setTimeout(() => bound.abort(new RemoteFilesError('timeout')), REMOTE_FILES_LIMITS.waitAdmissionMs)
+      timer.unref()
+      const combined = AbortSignal.any([signal, bound.signal])
+      const failed = Promise.withResolvers<never>()
+      const onAbort = (): void => {
+        failed.reject(combined.reason instanceof Error ? combined.reason : new RemoteFilesError('timeout'))
+      }
+      try {
+        // Checked BEFORE launching: an aborted lease creates no engine task.
+        combined.throwIfAborted()
+        let admission: Promise<AdmittedGrant> | undefined
+        if (inFlight !== undefined && inFlight.token === expectedToken) {
+          admission = inFlight.promise
+        } else {
+          const created = this.admit(request, expectedToken).finally(() => {
+            pending.delete(created)
+            if (inFlight?.promise === created) inFlight = undefined
+          })
+          admission = created
+          pending.add(created)
+          inFlight = { token: expectedToken, promise: created }
+        }
+        combined.addEventListener('abort', onAbort, { once: true })
+        // An abort landing between creation and listener registration is
+        // still honored — the engine task stays tracked in `pending` and is
+        // drained by the lease's own finally.
+        combined.throwIfAborted()
+        return await Promise.race([admission, failed.promise])
+      } finally {
+        clearTimeout(timer)
+        combined.removeEventListener('abort', onAbort)
+      }
+    }
+    let done = false
+    let dirty = false
+    let rechecking: Promise<void> | undefined
+    let admitted: AdmittedGrant | undefined
+    const unsubscribe = this.registry.onRemoteChange(() => {
+      if (done) return
+      if (rechecking !== undefined) { dirty = true; return }
+      rechecking = (async () => {
+        try {
+          do {
+            dirty = false
+            await admitBounded(admitted?.token)
+          } while (dirty && !done)
+        } catch (error: unknown) {
+          if (!done) stateAbort.abort(error)
+        } finally {
+          rechecking = undefined
+        }
+      })()
+    })
+    try {
+      admitted = await admitBounded()
+      await new Promise<void>((resolve, reject) => {
+        const bail = (): void => {
+          clearTimeout(timer)
+          reject(signal.reason instanceof Error ? signal.reason : new RemoteFilesError('cancelled'))
+        }
+        const timer = setTimeout(() => {
+          signal.removeEventListener('abort', bail)
+          resolve()
+        }, REMOTE_FILES_LIMITS.waitLeaseMs)
+        timer.unref()
+        if (signal.aborted) bail()
+        else signal.addEventListener('abort', bail, { once: true })
+      })
+      // A lease may only answer "unchanged" after a FINAL admission still
+      // matches — never a blind timer success. The expiry sequence is
+      // deliberate: stop accepting notifications, let any in-flight re-
+      // admission unwind, then require a NEW ordered admission — a pending
+      // recheck that ordered BEFORE a newer revoke must never stand in for
+      // the final proof.
+      done = true
+      unsubscribe()
+      if (rechecking !== undefined) await rechecking
+      signal.throwIfAborted()
+      inFlight = undefined
+      await admitBounded(admitted.token)
+      signal.throwIfAborted()
+    } catch (error) {
+      // Wake the caller's race BEFORE draining engine tasks — but only for
+      // a real coded failure: a reason that is merely the abort artifact
+      // (caller/shutdown cancellation already fired, and it wins) changes
+      // nothing and would pollute normalization.
+      if (!signal.aborted && !stateAbort.signal.aborted
+        && (error instanceof RemoteFilesError || error instanceof RemoteAdmissionError)) {
+        stateAbort.abort(error)
+      }
+      throw error
+    } finally {
+      done = true
+      unsubscribe()
+      await Promise.allSettled([...pending])
+    }
+  }
+
+  /**
    * One listing end to end: admit → verify → owned channel → canonical probes
    * → bounded OPENDIR/READDIR → probes again → re-admit → bytes. Network I/O
    * always happens OUTSIDE the registry's ordered admission; the re-admission
@@ -242,6 +421,13 @@ export class RemoteFilesService {
       signal.addEventListener('abort', close, { once: true })
       try {
         signal.throwIfAborted()
+        // The computed absolute lookup path is bounded BEFORE the channel
+        // opens: binding root + '/' + relative must fit `absolutePathBytes`
+        // — the manifest bound each piece separately, so the assembly is
+        // refused here, without spending an SFTP open on it.
+        if (Buffer.byteLength(`${admitted.path}/${request.relativePath}`, 'utf8') > REMOTE_FILES_LIMITS.absolutePathBytes) {
+          throw new RemoteFilesError('invalid-request')
+        }
         env = await this.manager.openFilesSftp(request.environmentId, signal, admitted.environmentDigest)
           .then(acquired => {
             // Assign BEFORE resolving envReady so a close racing the open
@@ -285,7 +471,10 @@ export class RemoteFilesService {
    * phase needs. With `expectedToken` this is the re-admission: any drift in
    * the hashed identity fails the listing before its bytes are trusted.
    */
-  private async admit(request: RemoteFilesListRequest, expectedToken?: string): Promise<AdmittedGrant> {
+  private async admit(
+    request: { readonly sessionId: string; readonly environmentId: string; readonly rootId: string; readonly authorization: string },
+    expectedToken?: string,
+  ): Promise<AdmittedGrant> {
     return await this.registry.withRemoteFilesRead(
       request.sessionId,
       { environmentId: request.environmentId, rootId: request.rootId },
@@ -319,7 +508,12 @@ export class RemoteFilesService {
           || endpoint.displayPath !== binding.path || endpoint.verifiedTarget.value !== binding.path) {
           throw new RemoteFilesError('binding-changed')
         }
-        if (environment.transport !== 'sftp' || binding.directoryListing !== 'stable-path') {
+        // Same gate `supports` announces: a manager that lost eligibility
+        // (Helper-less channel gone, broker demoted) may not announce a
+        // matching token — listings AND authorization waits fail identically.
+        // Manager-shaped fixtures without `capability` stay admitted.
+        if (environment.transport !== 'sftp' || binding.directoryListing !== 'stable-path'
+          || this.manager.capability?.eligible === false) {
           throw new RemoteFilesError('capability-unsupported')
         }
         return { path: binding.path, environmentDigest: endpoint.environmentDigest, token }
@@ -381,7 +575,7 @@ export class RemoteFilesService {
   }
 
   /** Everything leaving this service is a vocabulary entry — never raw error text. */
-  private normalize(error: unknown, deadline: AbortController, stateAbort: AbortController, callerSignal: AbortSignal | undefined): RemoteFilesError {
+  private normalize(error: unknown, deadline: AbortController | undefined, stateAbort: AbortController, callerSignal: AbortSignal | undefined): RemoteFilesError {
     // Abort-state checks come FIRST: an abort racing a coded failure reports
     // the abort's own classification, not whichever error landed alongside.
     if (stateAbort.signal.aborted) {
@@ -395,7 +589,7 @@ export class RemoteFilesService {
       return new RemoteFilesError('root-identity-changed')
     }
     if (callerSignal?.aborted) return new RemoteFilesError('cancelled')
-    if (deadline.signal.aborted) return new RemoteFilesError('timeout')
+    if (deadline?.signal.aborted === true) return new RemoteFilesError('timeout')
     if (this.shutdown.signal.aborted || !this.live) return new RemoteFilesError('provider-unavailable')
     if (error instanceof RemoteFilesError) return error
     if (error instanceof RemoteAdmissionError) return new RemoteFilesError(ADMISSION_CODES[error.code] ?? 'provider-unavailable')

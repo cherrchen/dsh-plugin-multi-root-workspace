@@ -202,11 +202,13 @@ export interface BindingDraft {
   exec: boolean
   imports: ReadonlySet<string>
   exports: ReadonlySet<string>
+  /** The stable-SFTP-path Files browsing opt-in (ADR-0052); off by default. */
+  directoryListing: boolean
 }
 
 export const blankBinding = (environmentId: string | undefined): BindingDraft => ({
   environmentId: environmentId ?? '', path: '', read: true, write: false, exec: false,
-  imports: new Set(), exports: new Set(),
+  imports: new Set(), exports: new Set(), directoryListing: false,
 })
 
 /** The `sshBindingSave` wire object for one draft. */
@@ -218,6 +220,7 @@ export function bindingDraftOf(value: BindingDraft): SshBindingDraft {
   ]
   return {
     environmentId: value.environmentId, path: value.path.trim(), actions,
+    ...(value.directoryListing ? { directoryListing: 'stable-path' as const } : {}),
     ...(value.rootId === undefined ? {} : { rootId: value.rootId }),
     ...(transfers.length === 0 ? {} : { transfers }),
   }

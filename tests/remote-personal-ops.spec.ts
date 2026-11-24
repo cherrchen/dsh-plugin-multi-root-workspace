@@ -1117,6 +1117,7 @@ describe.skipIf(process.platform === 'win32')('the remote tools row waits for th
       configureRemote: vi.fn(async () => undefined),
       onRemoteChange: (listener: () => void) => { listeners.add(listener); return () => { listeners.delete(listener) } },
       setRemoteEndpointVerifier: setVerifier,
+      setRemoteFilesService: vi.fn(() => () => {}),
     }
     // The report's release must equal the version the SSH packages actually
     // resolve to here — the SSH dev pin floats inside its floor, so a

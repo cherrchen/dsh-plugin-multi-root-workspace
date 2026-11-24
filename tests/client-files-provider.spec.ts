@@ -28,6 +28,9 @@ import {
   type WorkspaceRootRef,
 } from '../src/client/files-tree/provider.ts'
 import { createLocalWorkspaceProvider } from '../src/client/files-tree/providers/local.ts'
+import { createSshWorkspaceProvider } from '../src/client/files-tree/providers/ssh.ts'
+import { RemoteFilesError, type RemoteFilesListing } from '../src/remote/files-contract.ts'
+import type { RemoteFilesClient } from '../src/client/remote-files-client.ts'
 
 const SESSION = 'session-1' as SessionId
 const OWNER = 'pane-1' as TabId
@@ -289,5 +292,75 @@ describe('the local provider admission fence', () => {
     expect(open).toHaveBeenCalledWith(address, { replaceTab: 'tab-9' })
     // The open-in-app port offers the trusted local path, never a synthetic key.
     expect(provider.openInApp?.(ref)).toBe(`${ROOT}/notes.md`)
+  })
+})
+
+describe('the ssh provider cancellation fence', () => {
+  const id: FilesProviderIdentity = {
+    sessionId: SESSION,
+    root: { kind: 'remote', environmentId: 'device', rootId: 'out' },
+    incarnation: 'a'.repeat(64),
+  }
+  const ref: WorkspaceResourceRef = { root: id.root, relativePath: 'deep' }
+  const ssh = (client: RemoteFilesClient, invalidated = vi.fn()) => ({
+    provider: createSshWorkspaceProvider(id, client, code => `localized:${code}`, invalidated),
+    invalidated,
+  })
+
+  it('an abort landing before a late invalidating failure never evicts the current record', async () => {
+    const deferred = Promise.withResolvers<never>()
+    const client: RemoteFilesClient = { list: vi.fn(() => deferred.promise), wait: vi.fn(async () => {}) }
+    const { provider, invalidated } = ssh(client)
+    const controller = new AbortController()
+    const pending = provider.listDirectory(ref, controller.signal)
+    // A->B->A with the same key: this directory's signal dies while the
+    // wire call is still unanswered; the late authorization failure that
+    // follows must not invalidate the record the new hold already owns.
+    controller.abort()
+    deferred.reject(new RemoteFilesError('binding-changed'))
+    const result = await pending
+    expect(invalidated).not.toHaveBeenCalled()
+    expect(result.ok).toBe(false)
+    expect(result.ok === false ? result.error.code : undefined).toBe('gateway/internal')
+  })
+
+  it('an abort landing before a late success reports cancelled, not rows', async () => {
+    const deferred = Promise.withResolvers<RemoteFilesListing>()
+    const client: RemoteFilesClient = { list: vi.fn(() => deferred.promise), wait: vi.fn(async () => {}) }
+    const { provider, invalidated } = ssh(client)
+    const controller = new AbortController()
+    const pending = provider.listDirectory(ref, controller.signal)
+    controller.abort()
+    deferred.resolve({ entries: [{ name: 'leaf.txt', type: 'file' }], truncated: false })
+    const result = await pending
+    expect(invalidated).not.toHaveBeenCalled()
+    expect(result.ok).toBe(false)
+  })
+
+  it('a live request still invalidates on an authorization failure', async () => {
+    const client: RemoteFilesClient = {
+      list: vi.fn(async () => { throw new RemoteFilesError('root-identity-changed') }),
+      wait: vi.fn(async () => {}),
+    }
+    const { provider, invalidated } = ssh(client)
+    const result = await provider.listDirectory(ref, new AbortController().signal)
+    expect(result.ok).toBe(false)
+    expect(invalidated).toHaveBeenCalledTimes(1)
+    expect(invalidated).toHaveBeenCalledWith('root-identity-changed')
+  })
+
+  it('a non-coded wire error localizes the connection group, never a raw message', async () => {
+    const client: RemoteFilesClient = {
+      list: vi.fn(async () => { throw new Error('socket hang up at 10.0.0.1:22') }),
+      wait: vi.fn(async () => {}),
+    }
+    const { provider } = ssh(client)
+    const result = await provider.listDirectory(ref, new AbortController().signal)
+    expect(result.ok).toBe(false)
+    if (result.ok === false) {
+      expect(result.error.code).toBe('gateway/internal')
+      expect(result.error.message).toBe('localized:connection-failed')
+      expect(result.error.message).not.toContain('10.0.0.1')
+    }
   })
 })

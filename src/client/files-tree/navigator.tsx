@@ -319,7 +319,10 @@ export function NavigatorRetarget(props: NavigatorRetargetProps): ReactNode {
     const known = providerCache.current.get(key)
     if (known !== undefined) return known
     const created = filesTree.resolveProvider(selection)
-    providerCache.current.set(key, created)
+    // A remote-kind selection can resolve to `undefined` (no browse channel);
+    // this navigator only ever passes local selections, but the type no
+    // longer promises a provider — cache only a real one.
+    if (created !== undefined) providerCache.current.set(key, created)
     return created
   }, [root, filesTree])
   const pKey = provider === undefined ? undefined : providerKey(provider.identity)

@@ -41,7 +41,7 @@ import { searchAdditionalRoot } from './files-search.ts'
 import type { CommandInvocation, CommandResult } from '@deepseek-ai/dsh-commands'
 import { effectiveRootAccess } from './contract.ts'
 import { RemoteAdmissionError } from './remote/contract.ts'
-import { REMOTE_FILES_FAILURES, REMOTE_FILES_LIST, RemoteFilesError, remoteFilesListRequest, remoteFilesListing } from './remote/files-contract.ts'
+import { REMOTE_FILES_AUTHORIZATION_WAIT, REMOTE_FILES_FAILURES, REMOTE_FILES_LIST, RemoteFilesError, remoteFilesAuthorizationRequest, remoteFilesListRequest, remoteFilesListing } from './remote/files-contract.ts'
 import { remoteFilesAuthorization } from './remote/files-authorization.ts'
 import { environmentDigest, ManifestError, type RemoteEnvironment } from './remote/manifest.ts'
 import { CredentialError } from './remote/personal/credentials.ts'
@@ -794,8 +794,10 @@ async function remotesViewOf(
     primaryRoot: canonicalRoot(primaryRoot), mode, custodyMode: registry.remoteMode, status,
     ...(registry.remoteEnabled && registry.remoteMode === 'personal' ? { dependencies: inspectSshProfile(ctx).view } : {}),
   }
-  const manifest = registry.remoteManifest
-  if (manifest === undefined || status.state !== 'ready') {
+  // Availability is checked BEFORE the async list, but the manifest itself
+  // is re-read AFTER it: a rebind landing during remoteList would otherwise
+  // mint browse tokens against bindings the live manifest no longer holds.
+  if (registry.remoteManifest === undefined || status.state !== 'ready') {
     return { ...base, endpoints: [] }
   }
   const key = primaryKey(primaryRoot)
@@ -808,8 +810,12 @@ async function remotesViewOf(
   // The snapshot and the manifest must describe the same moment: a manifest
   // rebind landing after remoteList makes any minted token stale, so nothing
   // in this view is browsable.
-  const browsable = snapshot.manifestDigest === registry.remoteManifestDigest
+  const manifest = registry.remoteManifest
+  const browsable = manifest !== undefined && snapshot.manifestDigest === registry.remoteManifestDigest
     ? registry.remoteFilesService : undefined
+  if (manifest === undefined) {
+    return { ...base, endpoints: [] }
+  }
   // Personal environments keep the resolved user@host:port in their own
   // config; the converted manifest only carries the managed alias. Read it
   // after remoteList refreshed the file, and fall back to the manifest's
@@ -989,6 +995,32 @@ async function dispatchPanelRequest(
       } catch (error: unknown) {
         // Only vocabulary entries reach the browser — never raw error text
         // or SSH facts; anything else rethrows through the channel.
+        if (error instanceof RemoteFilesError) {
+          return { ok: false, error: { code: error.code, message: error.message, details: { retryable: error.retryable } } }
+        }
+        throw error
+      }
+    }
+    // The authorization lease is its own read-only endpoint beside the
+    // listing: an authenticated metadata wait (never a filesystem watch),
+    // same strict-before-touch discipline and the same fixed vocabulary.
+    if (endpoint === REMOTE_FILES_AUTHORIZATION_WAIT) {
+      const parsedWait = remoteFilesAuthorizationRequest.safeParse(payload)
+      if (!parsedWait.success) {
+        return { ok: false, error: { code: 'panel/bad-request', message: 'invalid remotes.waitForAuthorizationChange request', details: {} } }
+      }
+      panelSessionId = parsedWait.data.sessionId
+      const service = ctx.multiRootRegistry.remoteFilesService
+      if (service === undefined) {
+        return {
+          ok: false,
+          error: { code: 'provider-unavailable', message: 'the remote listing service is not mounted', details: { retryable: true } },
+        }
+      }
+      try {
+        await service.waitForAuthorizationChange(parsedWait.data, signal)
+        return { ok: true, value: { unchanged: true } }
+      } catch (error: unknown) {
         if (error instanceof RemoteFilesError) {
           return { ok: false, error: { code: error.code, message: error.message, details: { retryable: error.retryable } } }
         }

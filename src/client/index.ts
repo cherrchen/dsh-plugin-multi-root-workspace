@@ -35,6 +35,7 @@ import { createPanelClient, type PanelClient } from './panel-client.ts'
 import { createWorktreeClient } from './worktree-client.ts'
 import { WorktreePrompt } from './WorktreePrompt.tsx'
 import { createRemotesClient, type RemotesClient } from './remotes-client.ts'
+import { createRemoteFilesClient } from './remote-files-client.ts'
 import { createSshClient, createSshSettingsClient, type SshClient } from './ssh-client.ts'
 import { DICTIONARIES, NS } from './locales.ts'
 import { STYLES } from './styles.ts'
@@ -246,7 +247,11 @@ export function apply(ctx: ClientContext): void {
   // Files registration makes, plus the session-bound open route. The fork
   // binds upstream's `sidebarFiles` namespace so its rows say exactly what
   // the native tree says.
-  const filesTreeSeats = createFilesTreeSeats(ctx, { panel, preferences: createSearchPreferenceBook(readBrowserStorage()) })
+  const filesTreeSeats = createFilesTreeSeats(ctx, {
+    panel,
+    remoteFiles: connectionHandle === undefined ? undefined : createRemoteFilesClient(connectionHandle),
+    preferences: createSearchPreferenceBook(readBrowserStorage()),
+  })
   const filesTreeT = ctx.locale.bind(FILES_TREE_NS)
 
   ctx.slots.inject('sidebar.footer.action', () => ctx.slots.register({

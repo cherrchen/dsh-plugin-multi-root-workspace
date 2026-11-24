@@ -11,6 +11,7 @@ import { dirname, isAbsolute } from 'node:path'
 import { z } from 'zod'
 import { canonicalPath } from '@deepseek-ai/dsh-sandbox'
 import { isCanonicallyUnder, primaryKey } from '../roots.ts'
+import { REMOTE_FILES_LIMITS } from './files-contract.ts'
 
 export class ManifestError extends Error {
   constructor(readonly code: string, message: string) {
@@ -239,6 +240,14 @@ export function parseDeploymentManifest(text: string, manifestPath: string, opti
     }
     if (binding.directoryListing !== undefined && environment.transport !== 'sftp') {
       throw new ManifestError('invalid-manifest', `binding "${binding.rootId}" declares directoryListing but environment "${environment.environmentId}" is not sftp`)
+    }
+    // The listing contract bounds the absolute lookup path: an opt-in root
+    // already past the byte floor is refused HERE, at declaration time —
+    // bindings without the opt-in are untouched (existing grants keep
+    // working; they simply never reach the listing service).
+    if (binding.directoryListing === 'stable-path'
+      && Buffer.byteLength(binding.path, 'utf8') > REMOTE_FILES_LIMITS.pathBytes) {
+      throw new ManifestError('invalid-manifest', `binding "${binding.rootId}" declares directoryListing but its root path exceeds ${REMOTE_FILES_LIMITS.pathBytes} bytes`)
     }
     const primary = primaryKey(binding.primary)
     const list = byPrimary.get(primary) ?? []

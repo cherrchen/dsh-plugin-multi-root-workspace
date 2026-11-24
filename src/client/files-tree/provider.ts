@@ -116,6 +116,13 @@ export interface WorkspaceFilesProvider {
   readonly rowMenu?: ((resource: WorkspaceResourceRef, kind: FilesRowKind) => FilesMenuTriggerProps | undefined) | undefined
   /** The path an open-in-app control should offer for this resource, if any. */
   readonly openInApp?: ((resource: WorkspaceResourceRef) => string | undefined) | undefined
+  /**
+   * Whether the owner's hold may keep listing data while its body is hidden.
+   * `false` ends the takeover on every hide — remote trees carry an
+   * authorization that cannot be re-proved while the owner is away, so the
+   * SSH provider sets this and the core UI never checks environment kinds.
+   */
+  readonly retainHiddenLevels?: boolean | undefined
 }
 
 /**

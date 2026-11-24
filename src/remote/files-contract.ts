@@ -10,12 +10,31 @@ import { z } from 'zod'
 
 export const REMOTE_FILES_LIST = 'remoteFiles.list'
 
+/**
+ * The authorization lease endpoint (ADR-0052 P4): an authenticated metadata
+ * wait that resolves when the grant's live identity no longer matches — or
+ * `{unchanged: true}` when one lease expires. This is NOT a filesystem
+ * watch: it observes the control plane (grant/digest drift), never remote
+ * file data, and there is no polling, no stream, and no auto-relist.
+ */
+export const REMOTE_FILES_AUTHORIZATION_WAIT = 'remotes.waitForAuthorizationChange'
+
 export const REMOTE_FILES_LIMITS = {
   entries: 1024,
   responseBytes: 128 * 1024,
   wireBytes: 512 * 1024,
   deadlineMs: 12_000,
   concurrent: 4,
+  /** Root-relative path bound in UTF-8 bytes (not characters). */
+  pathBytes: 4096,
+  /** Binding root + relative path combined bound in UTF-8 bytes. */
+  absolutePathBytes: 8192,
+  /** Concurrent authorization leases; a seventeenth request fails `resource-budget`. */
+  waitConcurrent: 16,
+  /** One lease's lifetime: it always answers inside this window. */
+  waitLeaseMs: 15_000,
+  /** Each ordered admission inside a lease is bounded so owner stalls cannot outlive it. */
+  waitAdmissionMs: 4_000,
 } as const
 
 /**
@@ -27,7 +46,10 @@ function wellFormed(text: string): boolean {
   const check = (text as { isWellFormed?: () => boolean }).isWellFormed
   if (typeof check === 'function') return check.call(text)
   try {
-    return new TextDecoder('utf-8', { fatal: true }).decode(new TextEncoder().encode(text)) === text
+    // `ignoreBOM: true` is the decode default on every spec runtime, but the
+    // flag makes the intent explicit across runtimes: a literal U+FEFF name
+    // mid-string decodes verbatim, so it still roundtrips correctly.
+    return new TextDecoder('utf-8', { fatal: true, ignoreBOM: true }).decode(new TextEncoder().encode(text)) === text
   } catch {
     return false
   }
@@ -42,11 +64,16 @@ const validSegment = (segment: string): boolean =>
 
 /**
  * A root-relative remote path: '' names the root itself; otherwise at most 64
- * slash-delimited segments that each satisfy {@link validSegment}. Literal
+ * slash-delimited segments that each satisfy {@link validSegment}, and the
+ * whole path fits {@link REMOTE_FILES_LIMITS.pathBytes} UTF-8 bytes. Literal
  * backslashes, spaces and valid Unicode are legal POSIX name bytes.
  */
 export function validRemoteRelativePath(path: string): boolean {
   if (path === '') return true
+  // The whole path is bounded in BYTES before segmentation — the cheap
+  // character check short-circuits the encoder for the common ASCII case,
+  // and the byte check binds multibyte names the same way the wire does.
+  if (path.length > REMOTE_FILES_LIMITS.pathBytes || utf8Length(path) > REMOTE_FILES_LIMITS.pathBytes) return false
   if (!wellFormed(path) || path.includes('\0')) return false
   const segments = path.split('/')
   return segments.length <= 64 && segments.every(validSegment)
@@ -80,6 +107,14 @@ export const remoteFilesListing = z.object({
 export type RemoteFilesListRequest = z.infer<typeof remoteFilesListRequest>
 export type RemoteEntry = z.infer<typeof remoteEntrySchema>
 export type RemoteFilesListing = z.infer<typeof remoteFilesListing>
+
+/** The authorization lease: the list request minus the directory operand. */
+export const remoteFilesAuthorizationRequest = remoteFilesListRequest.omit({ relativePath: true }).strict()
+export type RemoteFilesAuthorizationRequest = z.infer<typeof remoteFilesAuthorizationRequest>
+
+/** A lease that expired without an authorization change — the only success shape. */
+export const remoteFilesAuthorizationAnswer = z.object({ unchanged: z.literal(true) }).strict()
+export type RemoteFilesAuthorizationAnswer = z.infer<typeof remoteFilesAuthorizationAnswer>
 
 /**
  * The complete failure vocabulary of the listing service. Every code has one

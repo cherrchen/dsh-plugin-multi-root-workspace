@@ -115,6 +115,10 @@ const requestSchemas = {
       // Omit for creation. An explicit ID identifies an existing binding to edit.
       rootId: z.string().regex(/^[a-z0-9][a-z0-9-]{0,62}$/).optional(),
       path: z.string().min(1).max(4096),
+      // The operator's stable-SFTP-path browsing opt-in (ADR-0052): present
+      // only where the editor's checkbox set it; host manifest validation
+      // stays authoritative on the transport pairing.
+      directoryListing: z.literal('stable-path').optional(),
       actions: z.array(z.enum(['read', 'write', 'exec'])).min(1),
       transfers: z.array(z.object({
         direction: z.enum(['import', 'export']),
@@ -229,6 +233,8 @@ export interface SshBindingView {
   readonly environmentId: string
   readonly rootId: string
   readonly path: string
+  /** The stable-SFTP-path browsing opt-in; absent means unsupported and draws no rows. */
+  readonly directoryListing?: 'stable-path' | undefined
   readonly actions: readonly ('read' | 'write' | 'exec')[]
   readonly transfers?: readonly {
     readonly direction: 'import' | 'export'
@@ -276,6 +282,7 @@ const environmentViewSchema = z.object({
 
 const bindingViewSchema = z.object({
   environmentId: z.string(), rootId: z.string(), path: z.string(),
+  directoryListing: z.literal('stable-path').optional(),
   actions: z.array(z.enum(['read', 'write', 'exec'])),
   transfers: z.array(z.object({
     direction: z.enum(['import', 'export']),
