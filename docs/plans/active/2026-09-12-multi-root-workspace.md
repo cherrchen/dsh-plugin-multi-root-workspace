@@ -2389,4 +2389,10 @@ CI 现场（run `45035571607`，`9788acb`）：`releases`/`windows` 通过；20 
 
 **本机验证（macOS arm64 / Node `24.18.0` / pnpm `11.25.0`，DSH `0.2.3-alpha.2` 开发树）**：定向测试 instructions 59 / instruction-activity 19 / ops-instruction-activity 22 / workspace-routing 32 全部通过。全量 vitest **2636 通过 / 214 跳过 / 23 失败**（178 个文件：153 通过 / 12 失败 / 13 跳过）加 1 条同源 unhandled rejection：失败集合与上一轮记录完全一致（8 个 Registry lease/follower 文件 + 4 个 SSH `remote-*` 文件，均为「Host 自身被沙箱化、共享 IPC 拒绝 sandboxed peer」环境类），相比上一轮 2632 通过新增的 4 个通过即本次回归。`compat:check`、`docs:check`（0/0）、`licenses:check`、`lint`（0/0，503 文件）、双端 `typecheck`、`build`、`pack:check`、`auto-review:fork` 全部通过；冒烟 compose **58/58**、behavior **96 通过 / 8 跳过**、journey **91 通过 / 2 跳过**（跳过项仍为无内核 runner 与共享 IPC）。
 
-**边界**：`stateVersion` 只作为**结构**证据（投影注册表公开的 schema 版本），运行时不做 DSH 发布字符串比较；版本不可读时回退旧链—终点比对，因此没有投影注册表的测试栈与旧组合行为不变。投影版本只在本进程首次需要时读取一次（按 registry 缓存），不进入每次 snapshot 的热路径。
+**边界**：`stateVersion` 是投影注册表公开的结构证据。版本不可读时才考虑两条事件链的终点。
+
+### 目录语义优先级与旧版 CI 夹具（2026-11-24，`f3f5fc2` 复审）
+
+[该提交的 CI](https://github.com/cherrchen/dsh-plugin-multi-root-workspace/actions/runs/45361257750) 中，DSH `0.1.*` 至 `0.2.1` 的失败日志报告 `handle.stateOf is not a function`。夹具已兼容返回清理函数和返回投影 handle 的注册表。目录语义优先级、失败重试和缓存边界见[接口审查](../../reference/dsh-0.2.3-migration.md#含旧目录事件的快照)。
+
+本机定向验证覆盖 `0.1.5-rc.2`（79 通过）、`0.2.2-rc.5`（104 通过、1 跳过）和 `0.2.3-alpha.2`（264 通过、5 跳过）。开发安装树仍为 `0.2.3-alpha.2`。支持合同包含原有 27 个精确发布。

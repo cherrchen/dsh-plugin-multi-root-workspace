@@ -59,9 +59,6 @@ interface ProjectionCheckpointRegistry {
   checkpoint(session: Session): Record<string, { readonly ver?: unknown } | undefined>
 }
 
-/** Per-registry memo; `null` records a Host that exposes no working-directory unit. */
-const workingDirectoryVersions = new WeakMap<object, number | null>()
-
 /**
  * The `stateVersion` the installed Host registers its working-directory
  * projection at.
@@ -75,25 +72,17 @@ const workingDirectoryVersions = new WeakMap<object, number | null>()
  * returned, where both candidate chains end at the same directory.
  * @param ctx - host context carrying the projection registry.
  * @param session - an attached Session the registry can checkpoint.
- * @returns the registered version, or `undefined` when the Host exposes no
- *   working-directory projection (early harnesses, bare compositions).
+ * @returns a recognized version, or `undefined` when the Host cannot provide one.
  */
-export function workingDirectoryStateVersion(ctx: Context, session: Session): number | undefined {
+export function workingDirectoryStateVersion(ctx: Context, session: Session): 1 | 3 | undefined {
   const registry = ctx.get('sessionProjections' as never) as ProjectionCheckpointRegistry | undefined
   if (registry === undefined || typeof registry.checkpoint !== 'function') return undefined
-  const cached = workingDirectoryVersions.get(registry)
-  if (cached !== undefined) return cached ?? undefined
-  let version: number | undefined
   try {
-    const row = registry.checkpoint(session)['workingDirectory']
-    version = typeof row?.ver === 'number' && Number.isSafeInteger(row.ver) ? row.ver : undefined
+    const version = registry.checkpoint(session)['workingDirectory']?.ver
+    return version === 1 || version === 3 ? version : undefined
   } catch {
-    // A registry that cannot checkpoint this Session has not answered the
-    // question; the chain comparison stays the fallback evidence. Cache the
-    // refusal so later snapshots do not retry registry work.
-    workingDirectoryVersions.set(registry, null)
+    // Checkpointing can fail for this Session or for an unrelated projection.
+    // The caller can use the chain comparison and retry the probe later.
     return undefined
   }
-  workingDirectoryVersions.set(registry, version ?? null)
-  return version
 }

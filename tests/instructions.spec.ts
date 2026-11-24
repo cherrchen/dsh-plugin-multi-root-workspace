@@ -176,7 +176,6 @@ async function mountWorld(config: Instructions.Config = {}, roots: readonly stri
   }
 }
 
-
 /**
  * Register the Host's own working-directory projection at one stateVersion and
  * expose it as the `workingDirectory` service, exactly as a Host does: the
@@ -187,10 +186,12 @@ async function mountWorld(config: Instructions.Config = {}, roots: readonly stri
  *   the 0.2.2 line, 3 from 0.2.3).
  */
 async function mountWorkingDirectoryProjection(world: World, stateVersion: number): Promise<void> {
+  type ProjectionHandle = { stateOf(session: Session): string | null }
   const registry = world.ctx.get('sessionProjections' as never) as {
-    register(definition: unknown): Promise<{ stateOf(session: Session): string | null }>
+    register(definition: unknown): (() => void) | Promise<ProjectionHandle>
+    stateOf(session: Session, key: 'workingDirectory'): string | null | undefined
   }
-  const handle = await registry.register({
+  const registration = await registry.register({
     key: 'workingDirectory',
     stateVersion,
     stateSchema: { parse: (value: unknown) => value },
@@ -200,8 +201,12 @@ async function mountWorkingDirectoryProjection(world: World, stateVersion: numbe
       return event.type === applied ? event.data?.cwd ?? state : state
     },
   })
+  // Older registries return a disposer and expose state on the registry.
+  const read = typeof registration === 'function'
+    ? (session: Session) => registry.stateOf(session, 'workingDirectory')
+    : (session: Session) => registration.stateOf(session)
   await world.ctx.plugin({ name: `working-directory-${stateVersion}`, apply(ctx: Context) {
-    ctx.provide('workingDirectory' as never, { get: () => handle.stateOf(world.session) } as never)
+    ctx.provide('workingDirectory' as never, { get: (session: Session) => read(session) ?? fixture.workspace } as never)
   } })
 }
 
@@ -320,31 +325,41 @@ describe('with additional roots', () => {
   })
 
   it.each([
-    { stateVersion: 1, expected: true, label: '0.2.2-line projection' },
-    { stateVersion: 3, expected: false, label: '0.2.3 projection' },
-  ])('uses the working-directory projection stateVersion when both chain ends coincide ($label)', async ({ stateVersion, expected }) => {
+    { stateVersion: 1, hasOrigin: true, expected: true, label: 'legacy projection' },
+    { stateVersion: 3, hasOrigin: true, expected: false, label: 'current projection' },
+    { stateVersion: 3, hasOrigin: false, expected: false, label: 'current projection with only a deployment default' },
+  ])('uses and caches the working-directory projection stateVersion ($label)', async ({ stateVersion, hasOrigin, expected }) => {
     const nested = join(repoB, 'sub')
     mkdirSync(join(nested, 'nested'), { recursive: true })
     writeFileSync(join(nested, 'nested', 'probe.txt'), 'probe')
     writeFileSync(join(nested, 'AGENTS.md'), '# nested rules')
     const world = await mountWorld({}, [repoB])
-    // Enter the additional root, read relatively, then return to the origin:
-    // both candidate chains end at the origin, so only the projection's
-    // stateVersion proves which generation resolved the middle read.
+    const session = hasOrigin ? world.session : world.ctx.sessions.create(SessionId('resume-without-origin'))
+    // With an origin, both chains end there. Without one, only the legacy
+    // chain matches the deployment default, which is not a recorded cwd.
     const seed = [
       { type: 'working-directory/change', data: { cwd: canonicalPath(nested) } },
       { type: 'tool/call', data: { turn: 1, step: 1, callId: 'returned', name: 'read', arguments: JSON.stringify({ file_path: 'nested/probe.txt' }) } },
       { type: 'tool/result', data: { turn: 1, step: 1, message: { source: { callId: 'returned' }, content: [], isError: false } } },
       { type: 'working-directory/change', data: { cwd: fixture.workspace } },
     ]
-    vi.spyOn(world.session, 'snapshotEvents').mockImplementation(() => seed)
+    vi.spyOn(session, 'snapshotEvents').mockImplementation(() => seed)
     await mountWorkingDirectoryProjection(world, stateVersion)
-    const entries = await world.ctx.multiRootInstructions.snapshot(
-      { session: world.session } as never, [repoB], undefined, new AbortController().signal,
-    )
-    const text = entries.map(entry => entry.text).join('\n')
-    if (expected) expect(text).toContain('# nested rules')
-    else expect(text).not.toContain('# nested rules')
+    const checkpoint = vi.spyOn(SessionProjectionRegistry.prototype, 'checkpoint')
+    const snapshotText = async (): Promise<string> => {
+      const entries = await world.ctx.multiRootInstructions.snapshot(
+        { session } as never, [repoB], undefined, new AbortController().signal,
+      )
+      return entries.map(entry => entry.text).join('\n')
+    }
+    if (!hasOrigin) {
+      checkpoint.mockImplementationOnce(() => { throw new Error('checkpoint temporarily unavailable') })
+      expect(await snapshotText()).not.toContain('# nested rules')
+    }
+    const text = await snapshotText()
+    expect(text.includes('# nested rules')).toBe(expected)
+    expect(await snapshotText()).toBe(text)
+    expect(checkpoint).toHaveBeenCalledTimes(hasOrigin ? 1 : 2)
   })
 
   it('names each file by its absolute path, so two roots\' AGENTS.md are distinguishable', async () => {

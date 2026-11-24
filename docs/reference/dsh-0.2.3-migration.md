@@ -121,6 +121,12 @@ CI 的 alpha.1 lane 另有 typert `ctx[Context.root].reflect` 未定义等 125 �
 
 边界：`stateVersion` 只作为**结构**证据（投影注册表公开的 schema 版本），不做 DSH 发布字符串比较；版本不可读时回退旧链—终点比对，因此没有投影注册表的测试栈/裸组合行为不变。
 
+### 含旧目录事件的快照
+
+日志含 `working-directory/change` 时，Auto Review 先读取宿主的目录投影版本。已验证的 `1` 与 `3` 分别对应旧版与新版事件语义。版本缺失或无法识别时，才比较具有已记录起点或目录变更的事件链。缺少 `header.cwd` 且新版事件链没有目录记录时，部署默认目录与旧链终点相同也无法证明旧事件生效。
+
+`checkpoint()` 会复制会话的所有投影状态。Cordis 的服务查询返回新的代理，因此已识别的版本缓存于指令服务的挂载周期内。读取失败的后续快照仍可重试。回归夹具按 `register()` 的返回形状选择读取入口：旧版通过注册表读取，返回投影 handle 的版本通过 handle 读取。适用的 DSH 发布以[精确支持合同](../../src/compat/dsh-version.ts)为准。
+
 ## 证据边界
 
 本文只记录上游源码与发布元数据对照。本机与 CI 的执行证据（含 `0.2.3-alpha.2` 车道的 Auto Review 联合冒烟、三 OS 矩阵与实机目检）只记[路线账本](../plans/active/2026-09-12-multi-root-workspace.md)。

@@ -545,6 +545,9 @@ export function apply(ctx: Context, config: Config = {}): void {
   })
 
   ctx.inject(['fs'], (scope: Context) => {
+    // Cordis wraps service lookups in fresh proxies. Keep the successful probe
+    // with this mounted service and let an unavailable checkpoint be retried.
+    let directoryStateVersion: ReturnType<typeof workingDirectoryStateVersion>
     scope.provide('multiRootInstructions', {
       knownRoots(session) { return [...(states.get(session)?.provenanceRoots ?? [])] },
       async snapshot(agent, roots, target, signal, pending) {
@@ -591,15 +594,12 @@ export function apply(ctx: Context, config: Config = {}): void {
         const seedEvents = agent.session.snapshotEvents()
         const boundary = Math.max(0, seedEvents.length - (liveEventCounts.get(agent.session) ?? 0))
         const effectiveCwd = effectiveDirectory(scope, agent.session)
-        const chainSemantics = workingDirectorySemantics(seedEvents, agent.session.header.cwd, effectiveCwd)
         // Only a log that actually carries the deprecated spelling can be
         // ambiguous; every other log attributes from agreeing chains, so the
         // registry probe stays off the common path.
-        const legacySpelling = chainSemantics === 'unknown'
-          && seedEvents.some(event => (event as { readonly type?: unknown }).type === 'working-directory/change')
-        const workingDirectory = legacySpelling
-          ? workingDirectorySemantics(seedEvents, agent.session.header.cwd, effectiveCwd, workingDirectoryStateVersion(scope, agent.session))
-          : chainSemantics
+        const legacySpelling = seedEvents.some(event => (event as { readonly type?: unknown }).type === 'working-directory/change')
+        if (legacySpelling) directoryStateVersion ??= workingDirectoryStateVersion(scope, agent.session)
+        const workingDirectory = workingDirectorySemantics(seedEvents, agent.session.header.cwd, effectiveCwd, directoryStateVersion)
         for (const path of replayedInstructionTargets(seedEvents, agent.session.header.cwd,
           modeToken === undefined ? undefined : existing?.liveOpsEvidence,
           modeToken === undefined ? undefined : pending,

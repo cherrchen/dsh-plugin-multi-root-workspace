@@ -125,7 +125,8 @@ export function workingDirectorySemantics(
   // event; 0.2.3 raised it to 3 for the renamed event. The registered version
   // answers even when a Session entered another directory and returned, where
   // both interpreted chains end at the same directory.
-  if (projectionStateVersion !== undefined) return projectionStateVersion >= 3 ? 'ignore-legacy' : 'honor-legacy'
+  if (projectionStateVersion === 1) return 'honor-legacy'
+  if (projectionStateVersion === 3) return 'ignore-legacy'
   let hostCwd = origin
   let legacyCwd = origin
   let movedByWorkspaceRoot = false
@@ -141,7 +142,9 @@ export function workingDirectorySemantics(
       legacyCwd = cwd
     }
   }
-  if (legacyCwd === hostCwd || effective === undefined) return 'unknown'
+  // Without a recorded cwd in the current chain, get() can report the Host's
+  // deployment default. Its equality to a legacy event proves nothing.
+  if (hostCwd === undefined || legacyCwd === hostCwd || effective === undefined) return 'unknown'
   if (effective === legacyCwd) return 'honor-legacy'
   if (effective === hostCwd) return 'ignore-legacy'
   return 'unknown'
