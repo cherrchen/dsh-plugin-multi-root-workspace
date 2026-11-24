@@ -8,6 +8,21 @@ English: [CHANGELOG.en.md](./CHANGELOG.en.md)
 - 安装方式、受支持的上游运行时与已知限制见 [README](./README.md)。
 - 每个版本的实施证据、编号口径与发布状态见[路线图 §进度总账](./docs/plans/active/2026-09-12-multi-root-workspace.md#进度总账)；GitHub Release 的正文由 `scripts/release-notes.mjs` 从 commit 历史生成，是本文件之外的完整原始清单。
 
+## [0.1.24-beta.6] - 2026-11-24
+
+本版是 `0.1.24` 线的第六个 beta，把开发树与精确支持合同推进到 DSH `0.2.3-alpha.2`（27 个精确发布），并适配上游新的 Session workspace root：插件以 Session 的原始目录作为全部 Registry/scope 身份，不再跟随有效工作目录；同时同步 Files 页头与 open-in-app 的客户端复刻、为 Auto Review 增加双 cordis 根探测，并为 0.2.3 线启用 Node `24.22.3` 车道。`0.2.3-alpha.1` 不受支持：其已发布版本无法启动。已保存的 SSH 连接与配置沿用原样，SSH 仍为实验性、默认关闭。
+
+### Changed
+
+- **精确支持 DSH `0.2.3-alpha.2`**：支持合同、全部 DSH peer、开发 pin、SSH 地板与 Auto Review 联合合同（12 个精确发布）一并前移到 alpha.2；上游 `engines` 要求 Node `^24.22.3 || >=26.13.1`，0.2.3 车道改用 Node `24.22.3`。`0.2.3-alpha.1` 排除在合同之外：其发布包仍 pin cordis 4.1 / loader 1.1，而源码已使用 4.2 根符号与 loader 1.2 导出，`dsh --version` 会因缺少 `EntryValidationError` 导出而退出；alpha.2 补上 vendor 4.2 升级后才可启动。alpha.2 相对 `0.2.2-rc.5` 的 `src` 差异只在 app-boot profile resolver、boot/hmr manifest 与 ptc-runtime-node vm-modules 三处不涉及插件接缝的行，全部服务端接缝差异来自 `rc.5 → alpha.1` 源码，两个 tag 共用一份适配。
+- **Session 原始目录是唯一身份**：从 `0.2.3-alpha.1` 起上游把 sandbox policy 的 `workspaceRoot` 解析为有效工作目录。Registry 键、scope 授权、指令发现、Review 上下文、命令主根、Files 路由与进程围栏改用 `session.header.cwd`（`originDirectory` / `policyOriginRoot`），`policy.workspaceRoot` 只保留为上游执行边界与路径基。进入附加根后，已登记的只读根不会因有效目录而获得写权限，`toolAccess` 上限也不会消失。
+- **客户端复刻与 resume 归因**：同步 Files 页头与 open-in-app 的上游客户端改动，Files 页头路径跟随页面的有效目录，管理对话框仍使用 Session 原始身份；resume 重放同时接受 `workspace-root/change`（stateVersion 3）与已弃用的 `working-directory/change`，Auto Review 指令来源按 Host 注册的工作目录投影 `stateVersion` 结构性判定事件代际，证据不足的旧相对活动跳过而不误归因。
+- **Auto Review 双 cordis 根探测**：cordis 4.2 移除 `ctx.root` 并改用 `Context.root` 符号，而真实的 alpha.1 Host 安装 cordis 4.1；新增 `src/compat/cordis-root.ts` 结构化探测，遇到未知 API 直接失败，fork 差分门禁新增第 9 项拒绝直接拼写任一 API。
+
+### Fixed
+
+- **有效目录切换后的附加根边界**：Files 的 `list` 与目录 `changes` 回退分支同时拒绝请求拼写与解析后的规范目标落在登记但被扣留的根下；存储 Session 的 wire root 来自投影缓存时，以持久 header 的 `cwd` 作为身份；Registry 权威不可用时，进程夹紧与 Files wire-origin 回退同样使用 Session 原始目录。
+
 ## [0.1.24-beta.5] - 2026-11-24
 
 本版是 `0.1.24` 线的第五个 beta，收紧个人 SSH 两个远端工具的参数、失败文案与输出预算：`remote_copy` 的两端使用同一份定义，只有省略 `environmentId` 才表示本机，结构错误在任何 Registry 准入与 SSH/SFTP I/O 之前以带字段位置的 `invalid-arguments` 结束；可诊断的失败补充有界 `message`/`hint`，端点类错误列出与对端匹配的候选；`remote_bash` 默认每路只预览 64 KiB 输出，JSON 转义同样受该预算约束，结果逐流报告可证实的字节计数。没有配置或协议层面的不兼容变更，已保存的 SSH 连接沿用原配置；SSH 仍为实验性、默认关闭。
@@ -418,7 +433,8 @@ English: [CHANGELOG.en.md](./CHANGELOG.en.md)
 
 - 发布前外部评审提出的 8 项发现（其中 3 项发布阻断）全部修复，每项各带一个回归测试：登记目录被替换为符号链接后授权转移（引入 `recordedPath`，**重新解析路径不等于重新授权**）、并发修改注册表丢写或复活已撤销的授权（每个主根的变更串行）、刷新不重新检查目录、手输路径被目录选择器覆盖、`reveal` 的应答契约与失败码、重复 id 未校验、主根未纳入嵌套校验、CI 先测后构建。
 
-[Unreleased]: https://github.com/cherrchen/dsh-plugin-multi-root-workspace/compare/v0.1.24-beta.5...HEAD
+[Unreleased]: https://github.com/cherrchen/dsh-plugin-multi-root-workspace/compare/v0.1.24-beta.6...HEAD
+[0.1.24-beta.6]: https://github.com/cherrchen/dsh-plugin-multi-root-workspace/compare/v0.1.24-beta.5...v0.1.24-beta.6
 [0.1.24-beta.5]: https://github.com/cherrchen/dsh-plugin-multi-root-workspace/compare/v0.1.24-beta.4...v0.1.24-beta.5
 [0.1.24-beta.4]: https://github.com/cherrchen/dsh-plugin-multi-root-workspace/compare/v0.1.24-beta.3...v0.1.24-beta.4
 [0.1.24-beta.3]: https://github.com/cherrchen/dsh-plugin-multi-root-workspace/compare/v0.1.24-beta.2...v0.1.24-beta.3

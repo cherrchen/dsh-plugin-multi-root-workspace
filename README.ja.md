@@ -28,7 +28,7 @@
 - **SSH リモート環境（実験的、既定では無効）**：プラグインの詳細画面で個人用 SSH を有効にすると、登録済みのリモートディレクトリに対して `remote_copy` と `remote_bash` を利用できます。接続とワークスペースのバインドは別々に管理され、呼び出しごとに Registry が許可を判定します。
 - **未登録なら未インストール時と同じ**：追加ルートが 1 つも登録されていなければ、動作はプラグイン未インストール時と完全に同じです。設定に誤りがあればエラーを報告し、黙って機能を落とすことはありません。
 
-最新のリリースは beta プレリリース `v0.1.24-beta.5` です。npm の `latest` タグは引き続き安定版 `v0.1.23` を指すため、beta は `@beta` を明示してインストールします。各バージョンのユーザーに見える変更は [CHANGELOG](./CHANGELOG.en.md)、進捗とリリース状態は[ロードマップ §進捗台帳](./docs/plans/active/2026-09-12-multi-root-workspace.md#进度总账)を参照してください。
+最新のリリースは beta プレリリース `v0.1.24-beta.6` です。npm の `latest` タグは引き続き安定版 `v0.1.23` を指すため、beta は `@beta` を明示してインストールします。各バージョンのユーザーに見える変更は [CHANGELOG](./CHANGELOG.en.md)、進捗とリリース状態は[ロードマップ §進捗台帳](./docs/plans/active/2026-09-12-multi-root-workspace.md#进度总账)を参照してください。
 
 ## クイックスタート
 
@@ -90,7 +90,7 @@ DSH のバージョンが表にない場合、または `@deepseek-ai/dsh-*` 各
 dsh plugin --profile web add @dsh-electron/dsh-plugin-multi-root-workspace
 ```
 
-現在 `latest` は安定版 `v0.1.23` です。beta プレリリース（今回は `v0.1.24-beta.5`）をインストールするには `@beta` を明示します：
+現在 `latest` は安定版 `v0.1.23` です。beta プレリリース（今回は `v0.1.24-beta.6`）をインストールするには `@beta` を明示します：
 
 ```sh
 dsh plugin --profile web add @dsh-electron/dsh-plugin-multi-root-workspace@beta
@@ -101,8 +101,8 @@ dsh plugin --profile web add @dsh-electron/dsh-plugin-multi-root-workspace@beta
 ```sh
 pnpm pack @dsh-electron/dsh-plugin-multi-root-workspace
 # または GitHub Release のアセットからダウンロード（例）：
-# https://github.com/cherrchen/dsh-plugin-multi-root-workspace/releases/download/v0.1.24-beta.5/dsh-electron-dsh-plugin-multi-root-workspace-0.1.24-beta.5.tgz
-dsh plugin --profile web add ./dsh-electron-dsh-plugin-multi-root-workspace-0.1.24-beta.5.tgz
+# https://github.com/cherrchen/dsh-plugin-multi-root-workspace/releases/download/v0.1.24-beta.6/dsh-electron-dsh-plugin-multi-root-workspace-0.1.24-beta.6.tgz
+dsh plugin --profile web add ./dsh-electron-dsh-plugin-multi-root-workspace-0.1.24-beta.6.tgz
 ```
 
 こちらもビルド済みで、社内ネットワークやオフライン環境への配布に適しています。
@@ -122,10 +122,10 @@ allowBuilds:
   '@dsh-electron/dsh-plugin-multi-root-workspace@github:cherrchen/dsh-plugin-multi-root-workspace#<commit>': true
 ```
 
-バージョンを固定する（例：`#v0.1.24-beta.5`）ことを推奨します。後からの push によって実際に動作する内容が黙って変わるのを防げます。
+バージョンを固定する（例：`#v0.1.24-beta.6`）ことを推奨します。後からの push によって実際に動作する内容が黙って変わるのを防げます。
 
 ```sh
-dsh plugin --profile web add github:cherrchen/dsh-plugin-multi-root-workspace#v0.1.24-beta.5
+dsh plugin --profile web add github:cherrchen/dsh-plugin-multi-root-workspace#v0.1.24-beta.6
 ```
 
 #### ローカルソースからインストール
@@ -219,12 +219,12 @@ DeepSeek Harness Desktop では、アプリケーションメニューの「dsh 
 1. トレイアイコンを含め、Desktop を完全に終了します。
 2. 新規インストール：
    ```sh
-   dsh plugin --profile desktop add @dsh-electron/dsh-plugin-multi-root-workspace@0.1.24-beta.5
+   dsh plugin --profile desktop add @dsh-electron/dsh-plugin-multi-root-workspace@0.1.24-beta.6
    ```
 3. インストール済みだが bundle 登録がない場合：`remove` してから `add` します（`add` だけを再実行しても登録は補われません）。
    ```sh
    dsh plugin --profile desktop remove @dsh-electron/dsh-plugin-multi-root-workspace
-   dsh plugin --profile desktop add @dsh-electron/dsh-plugin-multi-root-workspace@0.1.24-beta.5
+   dsh plugin --profile desktop add @dsh-electron/dsh-plugin-multi-root-workspace@0.1.24-beta.6
    ```
 4. `$DSH_HOME/profiles/desktop/package.json`（`DSH_HOME` が未設定の場合は通常 `~/.dsh/profiles/desktop/package.json`）を開き、`dsh.profile.bundles` に本パッケージが含まれていることを確認します。
 5. Desktop を再度起動します（コールドスタート）。
