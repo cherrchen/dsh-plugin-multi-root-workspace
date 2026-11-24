@@ -16,6 +16,7 @@ declare module '@deepseek-ai/dsh-llm/types' {
 
 import { autoReviewRequestIdentity, requireAutoReviewRelease } from '../../compat/auto-review-contract.ts'
 import { assertForkPackages } from '../../compat/auto-review-packages.ts'
+import { rootContext } from '../../compat/cordis-root.ts'
 import { partitionInstructions } from '../partition.ts'
 import type { ReviewContext } from '../../review-context.ts'
 import type {} from '@deepseek-ai/dsh-tool-executor-ptc/types'
@@ -44,6 +45,7 @@ import {
   type ToolExecution,
 } from '@deepseek-ai/dsh-tools'
 import { deniedDisplayReason } from './locales.ts'
+
 
 /** Structured error name persisted for every final reviewer denial. */
 const AUTO_REVIEW_DENIED_ERROR_NAME = 'AutoReviewDeniedError'
@@ -852,7 +854,7 @@ export function apply(ctx: Context): void {
       accepting = false
       try {
         // Root unload begins before child cleanup; only live plugin removal changes Session policy.
-        if (ctx.root.fiber.state === 2 /* FiberState.ACTIVE (const enum; the published cordis has no runtime value) */) {
+        if (rootContext(ctx).fiber.state === 2 /* FiberState.ACTIVE (const enum; the published cordis has no runtime value) */) {
           for (const session of ctx.sessions.list()) {
             if (permissionPresets.current(session) !== AUTO_PRESET) continue
             permissionPresets.set(session, 'danger-full-access')

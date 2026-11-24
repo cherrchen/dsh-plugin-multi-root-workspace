@@ -5,7 +5,7 @@
  * Every confined execution in this composition funnels through `confine()` —
  * the bash executor wraps `['bash','-c',command]`, and the terminal backend
  * wraps its PTY spawn argv — so widening the grant here is what gives bash, PTY,
- * and the fs fence one and the same root set (requirement §13). The bash
+ * and the fs fence one and the same root set (requirement `13). The bash
  * executor itself is therefore left upstream: it never computes roots.
  *
  * POSIX widening lives in `./dialects.ts`, Windows capabilities in
@@ -100,7 +100,7 @@ export class MultiRootSandboxProvider extends LocalSandboxProvider {
       : policy.mode === 'read-only' ? 'read-only' : policy.mode === 'workspace-write' ? 'clamped' : 'ambient')
     const remember = (facts: ConfinedArgv): ConfinedArgv => { this.ctx.multiRootScope.rememberProfile(facts.argv, mint); return facts }
     if (policy.mode === 'workspace-write' && scope.authority === 'unavailable') {
-      const prefix = this.clampedExecution(policy, scope.deniedRoots, signal)
+      const prefix = this.clampedExecution(policy, scope.deniedRoots, signal, scope.primaryRoot)
       return widenConfined(() => prefix, facts => remember({ ...facts, argv: [...facts.argv, ...argv] }), argv, policy, signal)
     }
     const base = super.confine as unknown as ConfineCall
@@ -145,7 +145,10 @@ export class MultiRootSandboxProvider extends LocalSandboxProvider {
     try {
       const shape = splitConfined(confined.argv, argv)
       if (shape.dialect === 'windows-acl') {
-        return { ...confined, argv: [...widenWindowsProfile(shape.profileArgs, writable, denied, scope.primaryRoot), '--', ...argv] }
+        // The cross-check parameter is the workspace the UPSTREAM profile was
+        // built for: the effective policy root. The Registry identity stays on
+        // `scope.primaryRoot`; only the profile expects the moved spelling.
+        return { ...confined, argv: [...widenWindowsProfile(shape.profileArgs, writable, denied, canonicalPath(policy.workspaceRoot)), '--', ...argv] }
       }
       const widened = policy.mode === 'workspace-write'
         ? widenProfileArgs(shape.dialect, shape.profileArgs, policy, writable)
@@ -250,12 +253,14 @@ export class MultiRootSandboxProvider extends LocalSandboxProvider {
    * @param policy - the caller's execution policy.
    * @param deniedRoots - known negative boundaries, including protected home.
    * @param signal - cancellation forwarded to upstream.
+   * @param clampRoot - the primary root already resolved for this operation.
    * @returns the confined prefix ending at `--`, without the caller's command.
    */
   clampedExecution(
     policy: SandboxExecutionPolicy,
     deniedRoots: readonly string[],
     signal?: AbortSignal,
+    clampRoot = this.ctx.multiRootScope.resolve(policy).primaryRoot,
   ): UpstreamConfined {
     const probePolicy: SandboxPolicy = {
       mode: 'read-only',
@@ -265,15 +270,20 @@ export class MultiRootSandboxProvider extends LocalSandboxProvider {
     const mint = this.ctx.multiRootScope.captureMint('clamped')
     const base = super.confine as unknown as ConfineCall
     const probe = base.call(this, ['true'], probePolicy, signal)
+    // The upstream probe profile is built for the effective policy root, but
+    // the clamp grant is the Session origin: under an unavailable authority the
+    // file fence (src/fs.ts) keeps only `scope.primaryRoot`, and a moved Session
+    // must never turn its effective directory into a second writable root.
     const clamp = (confined: ConfinedArgv): ConfinedArgv => {
       try {
         const shape = splitConfined(confined.argv, ['true'])
         const profileArgs = shape.dialect === 'windows-acl'
-          // `widenWindowsProfile` cross-checks the profile's workspace against
-          // the canonical primary root, matching the widenForScope call site.
-          ? widenWindowsProfile(shape.profileArgs, [canonicalPath(policy.workspaceRoot)], deniedRoots, canonicalPath(policy.workspaceRoot))
+          // The cross-check parameter is the workspace the UPSTREAM profile was
+          // built for (the effective policy root); the grafted grant stays on
+          // the origin, matching the widenForScope call site.
+          ? widenWindowsProfile(shape.profileArgs, [clampRoot], deniedRoots, canonicalPath(policy.workspaceRoot))
           : denyProfileArgs(shape.dialect,
-            graftProfileArgs(shape.dialect, shape.profileArgs, [canonicalPath(policy.workspaceRoot)]), deniedRoots)
+            graftProfileArgs(shape.dialect, shape.profileArgs, [clampRoot]), deniedRoots)
         return { ...confined, argv: [...profileArgs, '--'] }
       } catch (error: unknown) {
         if (!(error instanceof DialectUnrecognizedError)) throw error

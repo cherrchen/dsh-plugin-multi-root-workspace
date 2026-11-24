@@ -5,14 +5,14 @@ import { LocalFileSystem } from '@deepseek-ai/dsh-fs-local'
 import { Lsp, LspProviderId } from '@deepseek-ai/dsh-lsp'
 import { WorkspaceFiles } from '@deepseek-ai/dsh-api-workspace-files'
 import { canonicalPath } from '@deepseek-ai/dsh-sandbox'
-import { afterEach, beforeEach, describe, expect, it } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import * as LspRouting from '../src/lsp.ts'
 import * as FilesRouting from '../src/workspace-files.ts'
 import { MultiRootScopeService } from '../src/scope.ts'
 import { mountCompat } from './support/compat.ts'
 import { mountProviderGate } from './support/providers.ts'
 import { createFixtureWorkspace, symlinkUnsupportedReason, type FixtureWorkspace } from './support/temp-workspace.ts'
-import { adaptPathWatch } from '../src/compat/workspace-files.ts'
+import { adaptPathWatch, usesEffectiveWorkspaceFileRoot } from '../src/compat/workspace-files.ts'
 
 let ctx: Context
 let fixture: FixtureWorkspace
@@ -123,6 +123,61 @@ describe('workspace-files isolation', () => {
     await expect(service.list(scope, fixture.base, new AbortController().signal)).rejects.toMatchObject({ code: 'workspace-file/outside-workspace' })
     const foreign = join(fixture.base, 'foreign'); mkdirSync(foreign)
     await expect(service.list({ ...scope, workspaceRoot: foreign }, fixture.outside, new AbortController().signal)).rejects.toMatchObject({ code: 'workspace-file/outside-workspace' })
+  })
+  it('keys a stored Session by its durable header origin, not the moved wire root', async () => {
+    const moved = join(fixture.base, 'moved'); mkdirSync(moved)
+    // Upstream's stored-session scope takes the projection cache's working
+    // directory as the wire root; the Registry identity is still the header.
+    ctx.provide('sessionPersistence', {
+      stat: async () => ({ header: { cwd: fixture.workspace } }),
+    } as never)
+    const { service } = await files()
+    const cold = { sessionId: 'cold' as never, workspaceRoot: moved }
+    // The additional root is granted for the header origin; a fallback to the
+    // moved wire root would find no registration and hand the call to upstream,
+    // which rejects `outside` as outside the (moved) workspace.
+    const listing = await service.list(cold, fixture.outside, new AbortController().signal)
+    expect(listing.path).toBe('')
+    expect(listing.entries.map(entry => entry.name)).toContain('same.ts')
+  })
+  it('keeps the old Files fallback and retries a failed lookup on effective-root hosts', async () => {
+    const stat = vi.fn()
+      .mockRejectedValueOnce(new Error('session storage unavailable'))
+      .mockResolvedValue({ header: { cwd: fixture.workspace } })
+    ctx.provide('sessionPersistence', { stat } as never)
+    const { service, scope } = await files()
+    const signal = new AbortController().signal
+    if (usesEffectiveWorkspaceFileRoot(service)) {
+      const request = { ...scope, workspaceRoot: fixture.outside }
+      const list = () => service.list(request, '.', signal)
+      await expect(list()).rejects.toThrow('session storage unavailable')
+      await expect(list()).resolves.toMatchObject({ entries: [expect.objectContaining({ name: 'same.ts' })] })
+      expect(stat).toHaveBeenCalledTimes(2)
+    } else {
+      await expect(service.list(scope, '.', signal)).resolves.toMatchObject({ entries: [expect.objectContaining({ name: 'same.ts' })] })
+    }
+  })
+  it('rejects an effective Files scope whose Session header is no longer available', async () => {
+    const { service, scope } = await files()
+    if (!usesEffectiveWorkspaceFileRoot(service)) return
+    ctx.provide('sessionPersistence', { stat: async () => undefined } as never)
+    const request = { ...scope, workspaceRoot: fixture.outside }
+    await expect(service.list(request, '.', new AbortController().signal))
+      .rejects.toMatchObject({ code: 'workspace-file/outside-workspace' })
+  })
+  it('bounds listings to the captured origin while the shared Registry is unavailable', async () => {
+    const { service, scope } = await files()
+    ctx.provide('sessions', { get: () => ({ header: { cwd: fixture.workspace } }) } as never)
+    ctx.multiRootScope.setAdditionalRoots(fixture.workspace, [])
+    ctx.multiRootScope.setRegistryAuthority(false)
+    ctx.provide('multiRootRegistry', {
+      shared: true, list: () => [],
+      withOperation: async (_policy: unknown, _kind: string, body: () => Promise<unknown>) => body(),
+    } as never)
+    const signal = new AbortController().signal
+    await expect(service.list({ ...scope, workspaceRoot: fixture.outside }, '.', signal))
+      .rejects.toMatchObject({ code: 'workspace-file/outside-workspace' })
+    await expect(service.list(scope, '.', signal)).resolves.toMatchObject({ entries: [expect.objectContaining({ name: 'same.ts' })] })
   })
   it('rejects removed roots and restores upstream confinement on unload', async () => {
     const { service, scope, fiber } = await files()
@@ -302,6 +357,29 @@ describe('workspace-files isolation', () => {
     expect(searches).toBe(0)
   })
 
+  it.skipIf(!hasUpstreamSearch)('bounds native search to the captured origin while the shared Registry is unavailable', async () => {
+    const raw = new WorkspaceFiles(ctx, { maxBytes: 1024, maxFileBytes: 1024, maxLines: 5000, maxEntries: 1 })
+    const result = { matches: [], truncated: false, incomplete: false }
+    const search = vi.fn(async () => result)
+    Object.defineProperty(raw, 'search', { configurable: true, writable: true, value: search })
+    await ctx.plugin(FilesRouting)
+    ctx.provide('sessions', { get: () => ({ header: { cwd: fixture.workspace } }) } as never)
+    ctx.multiRootScope.setAdditionalRoots(fixture.workspace, [])
+    ctx.multiRootScope.setRegistryAuthority(false)
+    ctx.provide('multiRootRegistry', {
+      shared: true, list: () => [],
+      withOperation: async (_policy: unknown, _kind: string, body: () => Promise<unknown>) => body(),
+    } as never)
+    const sessionId = 's' as never
+    const query = { query: 'x', excludedPaths: [], includeHidden: false, respectGitignore: false }
+    const signal = new AbortController().signal
+    await expect(ctx.workspaceFiles.search({ sessionId, workspaceRoot: fixture.outside }, query, signal))
+      .rejects.toMatchObject({ code: 'workspace-file/outside-workspace' })
+    expect(search).not.toHaveBeenCalled()
+    await expect(ctx.workspaceFiles.search({ sessionId, workspaceRoot: fixture.workspace }, query, signal)).resolves.toEqual(result)
+    expect(search).toHaveBeenCalledTimes(1)
+  })
+
   it.skipIf(!hasUpstreamSearch || symlinkUnsupportedReason() !== undefined)('keeps a search root that resolves outside the registration it is lexically spelled under', async () => {
     const withheld = join(fixture.base, 'withheld')
     const elsewhere = join(fixture.base, 'elsewhere')
@@ -339,6 +417,70 @@ describe('workspace-files isolation', () => {
     } as never)
     await expect(service.list({ sessionId: 's' as never, workspaceRoot: linked }, linked, new AbortController().signal))
       .rejects.toMatchObject({ code: 'workspace-file/outside-workspace' })
+  })
+
+  it('refuses a list fallback whose selected directory sits in a withheld registration', async () => {
+    const moved = join(fixture.base, 'moved')
+    const secret = join(moved, 'secret')
+    mkdirSync(secret, { recursive: true })
+    writeFileSync(join(secret, 'hidden.txt'), 'hidden')
+    // The Session origin still registers `secret` (withheld: the grant is
+    // absent), while the effective wire root is its ancestor. The selected path
+    // is under upstream's own workspace root, so only the plugin's withheld
+    // check can refuse it once routing finds no grant.
+    ctx.provide('sessions', { get: (id: string) => id === 's' ? { header: { cwd: fixture.workspace } } : undefined } as never)
+    const { service } = await files()
+    ctx.provide('multiRootRegistry', {
+      list: (primary: string) => primary === fixture.workspace ? [withheldRegistration(secret)] : [],
+    } as never)
+    await expect(service.list({ sessionId: 's' as never, workspaceRoot: moved }, secret, new AbortController().signal))
+      .rejects.toMatchObject({ code: 'workspace-file/outside-workspace' })
+  })
+
+  it.skipIf(symlinkUnsupportedReason() !== undefined)('refuses a list fallback whose canonical selected directory sits in a withheld registration', async () => {
+    const moved = join(fixture.base, 'moved')
+    const withheld = join(moved, 'secret')
+    mkdirSync(join(withheld, 'sub'), { recursive: true })
+    writeFileSync(join(withheld, 'sub', 'hidden.txt'), 'hidden')
+    // The selected path is spelled inside the effective wire root and upstream's
+    // own canonical containment admits it — only its canonical target, inside
+    // the registered-but-withheld directory, proves it must be refused.
+    const link = join(moved, 'link')
+    symlinkSync(join(withheld, 'sub'), link, 'dir')
+    ctx.provide('sessions', { get: (id: string) => id === 's' ? { header: { cwd: fixture.workspace } } : undefined } as never)
+    const { service } = await files()
+    ctx.provide('multiRootRegistry', {
+      list: (primary: string) => primary === fixture.workspace ? [withheldRegistration(canonicalPath(withheld))] : [],
+    } as never)
+    await expect(service.list({ sessionId: 's' as never, workspaceRoot: moved }, link, new AbortController().signal))
+      .rejects.toMatchObject({ code: 'workspace-file/outside-workspace' })
+  })
+
+  it.skipIf(!hasPathWatchSignature || symlinkUnsupportedReason() !== undefined)('refuses a path watch whose canonical selected directory sits in a withheld registration', async () => {
+    const moved = join(fixture.base, 'moved')
+    const withheld = join(moved, 'secret')
+    mkdirSync(join(withheld, 'sub'), { recursive: true })
+    writeFileSync(join(withheld, 'sub', 'hidden.txt'), 'hidden')
+    const link = join(moved, 'link')
+    symlinkSync(join(withheld, 'sub'), link, 'dir')
+    ctx.provide('sessions', { get: (id: string) => id === 's' ? { header: { cwd: fixture.workspace } } : undefined } as never)
+    const raw = new WorkspaceFiles(ctx, { maxBytes: 1024, maxFileBytes: 1024, maxLines: 5000, maxEntries: 1 })
+    let watched = 0
+    Object.defineProperty(raw, 'changes', {
+      configurable: true,
+      writable: true,
+      value: async function*(_request: unknown, _path: string, _signal: AbortSignal) {
+        watched += 1
+        yield { kind: 'ready' }
+      },
+    })
+    await ctx.plugin(FilesRouting)
+    ctx.provide('multiRootRegistry', {
+      list: (primary: string) => primary === fixture.workspace ? [withheldRegistration(canonicalPath(withheld))] : [],
+    } as never)
+    const stream = ctx.workspaceFiles.changes({ sessionId: 's' as never, workspaceRoot: moved }, link, new AbortController().signal)[Symbol.asyncIterator]()
+    await expect(stream.next()).rejects.toMatchObject({ code: 'workspace-file/outside-workspace' })
+    expect(watched).toBe(0)
   })
 
   it.skipIf(!hasPathWatchSignature || symlinkUnsupportedReason() !== undefined)('refuses a path watch whose canonical root sits in a withheld registration', async () => {

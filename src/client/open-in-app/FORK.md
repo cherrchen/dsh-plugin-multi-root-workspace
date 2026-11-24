@@ -7,10 +7,11 @@ native one shows — because the upstream occupant always receives the primary
 root through its slot props and cannot be re-pointed.
 
 - **Source**: `deepseek-harness/packages/client/ui-open-in-app/src/client/`
-- **Revision**: `ddac96760b` (release `0.2.2-rc.2`, 2026-11-11). The dev pin
-  and the `@deepseek-ai/dsh-host-open-in-app` devDependency have since moved to
-  `0.2.2-rc.5`; `0.2.2-rc.3` through `0.2.2-rc.5` changed no file under the upstream
-  `src/client/` tree, so the fork base stays at this revision.
+- **Revision**: `4b399c39a6` (release `0.2.3-alpha.2`, 2026-11-22). The
+  upstream `src/client/` files last moved in `0.2.3-alpha.1`
+  (`d98f5d6851`); `0.2.3-alpha.2` changes only package versions, so one sync
+  covers both releases. The dev pin and the
+  `@deepseek-ai/dsh-host-open-in-app` devDependency are `0.2.3-alpha.2`.
   Between `0.2.1-rc.3` (`1f81c047fc`) and `0.2.2-alpha.2` the upstream
   `src/client/` tree moved gesture feedback off the control and onto a
   `shell.overlay` seat: `OpenTargetButton` takes a `report` prop
@@ -28,7 +29,15 @@ root through its slot props and cannot be re-pointed.
   The six forked files changed only in comments from rc.1 through rc.2
   (`OpenInAppAction.tsx` and `controller.ts`), and `locales.ts` gained the
   `menu.openIn` key; alpha.3 adds context-menu features and locale keys
-  outside this directory control.
+  outside this directory control. From `0.2.2-rc.2` (`ddac96760b`, this fork's
+  previous base) to `0.2.3-alpha.2` two forked files moved and nothing else:
+  `controller.ts` grew the `readAppsPayload()` helper (same behavior — a
+  non-OK reply publishes no apps and a rejected read is swallowed) and
+  `OpenTargetButton.module.css` renamed its header comment, gave both compact
+  halves `min-width: 24px`, and added the borderless
+  `.split[data-size='compact']` inset ring. `styles.ts`'s `mrfw-open*` block is
+  re-copied from the new file; it also picks up the `@media (hover: hover)`
+  wrapper its `0.2.1-alpha.2` copy had missed.
 
 ## Verbatim files (copy-diff must stay empty)
 

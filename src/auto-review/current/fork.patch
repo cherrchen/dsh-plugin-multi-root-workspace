@@ -1,11 +1,12 @@
---- upstream.ts	2026-11-14 13:14:57
-+++ fork.ts	2026-11-14 13:21:50
-@@ -14,9 +14,13 @@
+--- src/auto-review/current/upstream.ts	2026-11-14 23:30:17
++++ src/auto-review/current/fork.ts	2026-11-22 21:06:31
+@@ -14,9 +14,14 @@
    }
  }
  
 +import { autoReviewRequestIdentity, requireAutoReviewRelease } from '../../compat/auto-review-contract.ts'
 +import { assertForkPackages } from '../../compat/auto-review-packages.ts'
++import { rootContext } from '../../compat/cordis-root.ts'
 +import { partitionInstructions } from '../partition.ts'
 +import type { ReviewContext } from '../../review-context.ts'
  import type {} from '@deepseek-ai/dsh-tool-executor-ptc/types'
@@ -15,7 +16,15 @@
  import type { Agent } from '@deepseek-ai/dsh-agent'
  import type {} from '@deepseek-ai/dsh-agent-instructions'
  import {
-@@ -128,6 +132,7 @@
+@@ -41,6 +46,7 @@
+ } from '@deepseek-ai/dsh-tools'
+ import { deniedDisplayReason } from './locales.ts'
+ 
++
+ /** Structured error name persisted for every final reviewer denial. */
+ const AUTO_REVIEW_DENIED_ERROR_NAME = 'AutoReviewDeniedError'
+ /** Structured error code persisted for every final reviewer denial. */
+@@ -128,6 +134,7 @@
    readonly provider: string
    readonly model: string
    readonly cwd: string
@@ -23,7 +32,7 @@
    /** Retained items in Session order, ending with the pending call. */
    readonly history: readonly HistoricalEntry[]
    /** Mode-qualified scoped key and schema of the pending call. */
-@@ -148,9 +153,9 @@
+@@ -148,9 +155,9 @@
  }
  
  /** Cordis plugin name used by loader diagnostics. */
@@ -35,7 +44,7 @@
  
  /** Return JSON text for one immutable logged value. */
  function json(value: unknown): string {
-@@ -396,6 +401,7 @@
+@@ -396,6 +403,7 @@
   * @param exec - immutable pending execution.
   * @param cwd - the Session's current working directory.
   * @param shown - schemas earlier reviews of this Session showed.
@@ -43,7 +52,7 @@
   * @returns the exact route, environment, and history ending with the pending call.
   */
  function snapshotAutoReview(
-@@ -403,6 +409,7 @@
+@@ -403,6 +411,7 @@
    exec: ToolExecution,
    cwd: string,
    shown: ReadonlyMap<string, HistoricalToolSchema>,
@@ -51,7 +60,7 @@
  ): ReviewSnapshot {
    const { session } = agent
    // The reviewer's risk inputs are the whole action history: earlier native calls
-@@ -569,6 +576,7 @@
+@@ -569,6 +578,7 @@
      provider: header.config.provider,
      model: header.config.model,
      cwd,
@@ -59,7 +68,7 @@
      history,
      pending,
    })
-@@ -582,9 +590,25 @@
+@@ -582,9 +592,25 @@
   * can therefore reuse earlier history, not only the policy.
   */
  function reviewMessages(snapshot: ReviewSnapshot): RequestMessage[] {
@@ -87,7 +96,7 @@
    ].map(text => ({ role: 'user', content: [{ type: 'text', text }] }))
  }
  
-@@ -673,23 +697,30 @@
+@@ -673,23 +699,30 @@
    exec: ToolExecution,
    signal: AbortSignal,
    shown: ShownSchemas,
@@ -124,7 +133,7 @@
  }
  
  /** Materialize the fixed model-facing final Auto denial plus optional UI detail. */
-@@ -730,13 +761,44 @@
+@@ -730,13 +763,44 @@
  
  /** Install the Auto preset and its review gate; preserve Session selection on application shutdown. */
  export function apply(ctx: Context): void {
@@ -169,7 +178,7 @@
    ctx.effect(function* () {
      const stopListener = ctx.on('tools/pre-execute', async (exec, next): Promise<PreToolDecision> => {
        const agent = exec.agent
-@@ -760,18 +822,20 @@
+@@ -760,18 +824,20 @@
            shownBySession.set(agent.session, shown)
          }
          const review = await classifyRisk(ctx, agent, exec, signal, shown).then(
@@ -192,12 +201,12 @@
          if (decision.decision === 'allow' || downstream.kind !== 'allow') return downstream
          return askUser(exec, decision.reason)
        } finally {
-@@ -788,7 +852,7 @@
+@@ -788,7 +854,7 @@
        accepting = false
        try {
          // Root unload begins before child cleanup; only live plugin removal changes Session policy.
 -        if (ctx.root.fiber.state === FiberState.ACTIVE) {
-+        if (ctx.root.fiber.state === 2 /* FiberState.ACTIVE (const enum; the published cordis has no runtime value) */) {
++        if (rootContext(ctx).fiber.state === 2 /* FiberState.ACTIVE (const enum; the published cordis has no runtime value) */) {
            for (const session of ctx.sessions.list()) {
              if (permissionPresets.current(session) !== AUTO_PRESET) continue
              permissionPresets.set(session, 'danger-full-access')

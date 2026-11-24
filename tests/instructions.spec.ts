@@ -24,7 +24,7 @@ import { createUserMessage } from '@deepseek-ai/dsh-llm'
 import type { UserMessage } from '@deepseek-ai/dsh-llm'
 import { canonicalPath } from '@deepseek-ai/dsh-sandbox'
 import SandboxPolicyService from '@deepseek-ai/dsh-sandbox-policy'
-import { Session, SessionId, SESSION_FORMAT_VERSION } from '@deepseek-ai/dsh-session'
+import Sessions, { Session, SessionId, SESSION_FORMAT_VERSION } from '@deepseek-ai/dsh-session'
 import SessionProjectionRegistry from '@deepseek-ai/dsh-session-projection'
 import { MultiRootFileSystem } from '../src/fs.ts'
 import * as Instructions from '../src/instructions.ts'
@@ -91,6 +91,10 @@ async function mountWorld(config: Instructions.Config = {}, roots: readonly stri
   const ctx = new Context()
   fibers.push(
     await ctx.plugin(SessionProjectionRegistry),
+    // The row keys its Registry lookups on the live Session's origin, so the
+    // stack carries the real Session store: a fake workingDirectory can move
+    // the effective policy root, but never the identity.
+    await ctx.plugin(Sessions),
     await ctx.plugin(SandboxPolicyService, { mode: 'workspace-write', workspaceRoot: fixture.workspace }),
     await ctx.plugin(MultiRootScopeService),
   )
@@ -101,16 +105,10 @@ async function mountWorld(config: Instructions.Config = {}, roots: readonly stri
   await mountProviderGate(ctx)
   fibers.push(await ctx.plugin(Instructions, config))
 
-  // A real Session, because `ctx.sandboxPolicy.resolve({ session })` reads the
-  // session projection, not just the header.
-  const sessionId = SessionId(`sess-instructions-${counter += 1}`)
-  const session = Session.create(sessionId, undefined, {
-    version: SESSION_FORMAT_VERSION,
-    id: sessionId,
-    createdAt: 0,
-    isSeeded: false,
-    cwd: fixture.workspace,
-  })
+  // A real, live Session in the store: `ctx.sandboxPolicy.resolve({ session })`
+  // reads the session projection, and the Registry identity is the live
+  // Session's header cwd.
+  const session = ctx.sessions.create(SessionId(`sess-instructions-${counter += 1}`), { meta: { cwd: fixture.workspace } })
   const agent = { session } as unknown as Agent
   const setRoots = (paths: readonly string[]): void => {
     ctx.multiRootScope.setAdditionalRoots(
@@ -178,6 +176,40 @@ async function mountWorld(config: Instructions.Config = {}, roots: readonly stri
   }
 }
 
+/**
+ * Register the Host's own working-directory projection at one stateVersion and
+ * expose it as the `workingDirectory` service, exactly as a Host does: the
+ * service reads the unit's folded state, so the projection version is the only
+ * structural evidence of which directory-event generation this Host applies.
+ * @param world - the mounted composition.
+ * @param stateVersion - the version the Host registers its unit at (1 through
+ *   the 0.2.2 line, 3 from 0.2.3).
+ */
+async function mountWorkingDirectoryProjection(world: World, stateVersion: number): Promise<void> {
+  type ProjectionHandle = { stateOf(session: Session): string | null }
+  const registry = world.ctx.get('sessionProjections' as never) as {
+    register(definition: unknown): (() => void) | Promise<ProjectionHandle>
+    stateOf(session: Session, key: 'workingDirectory'): string | null | undefined
+  }
+  const registration = await registry.register({
+    key: 'workingDirectory',
+    stateVersion,
+    stateSchema: { parse: (value: unknown) => value },
+    init: (header: { readonly cwd?: string }) => header.cwd ?? null,
+    apply: (state: unknown, event: { readonly type: string; readonly data?: { readonly cwd?: string } }) => {
+      const applied = stateVersion >= 3 ? 'workspace-root/change' : 'working-directory/change'
+      return event.type === applied ? event.data?.cwd ?? state : state
+    },
+  })
+  // Older registries return a disposer and expose state on the registry.
+  const read = typeof registration === 'function'
+    ? (session: Session) => registry.stateOf(session, 'workingDirectory')
+    : (session: Session) => registration.stateOf(session)
+  await world.ctx.plugin({ name: `working-directory-${stateVersion}`, apply(ctx: Context) {
+    ctx.provide('workingDirectory' as never, { get: (session: Session) => read(session) ?? fixture.workspace } as never)
+  } })
+}
+
 /** A message standing in for one the loop claimed from the inbox. */
 function claimedMessage(text: string): UserMessage {
   return createUserMessage({ content: [{ type: 'text', text }], source: { kind: 'user' } })
@@ -208,6 +240,126 @@ describe('with additional roots', () => {
     const text = textOf(await world.step())
     expect(text).toContain('# repo-a rules')
     expect(text).toContain('# repo-b rules')
+  })
+
+  it('does not replay post-resume activity through a superseded legacy cwd', async () => {
+    const nested = join(repoB, 'sub')
+    mkdirSync(join(nested, 'nested'), { recursive: true })
+    writeFileSync(join(nested, 'nested', 'probe.txt'), 'probe')
+    writeFileSync(join(nested, 'AGENTS.md'), '# nested rules')
+    const world = await mountWorld({}, [repoB])
+    // The durable seed log moved the Session under repoB/sub with the legacy
+    // event a pre-0.2.3 model could write. A 0.2.3 Host ignores that event and
+    // resumes at the origin; live relative activity must follow the Host.
+    const seed = [
+      { type: 'working-directory/change', data: { cwd: canonicalPath(nested) } },
+    ]
+    const live: unknown[] = []
+    vi.spyOn(world.session, 'snapshotEvents').mockImplementation(() => [...seed, ...live])
+    const snapshot = async (): Promise<string> => {
+      const entries = await world.ctx.multiRootInstructions.snapshot(
+        { session: world.session } as never, [repoB], undefined, new AbortController().signal,
+      )
+      return entries.map(entry => entry.text).join('\n')
+    }
+    expect(await snapshot()).toBe('')
+    const finish = world.touch('nested/probe.txt', { tool: 'read' })
+    live.push(
+      { type: 'tool/call', data: { turn: 1, step: 1, callId: 'live-relative', name: 'read', arguments: JSON.stringify({ file_path: 'nested/probe.txt' }) } },
+      { type: 'tool/result', data: { message: { source: { callId: 'live-relative' }, content: [], isError: false } } },
+    )
+    finish()
+    // Regression: a second snapshot used to replay the live pair through the
+    // legacy cwd (repoB/sub), discovering repoB/sub/AGENTS.md even though the
+    // live dispatch resolved the relative path under the origin.
+    expect(await snapshot()).not.toContain('nested rules')
+  })
+
+  it('does not replay a relative operation from an earlier alpha.2 run through the legacy cwd on a later resume', async () => {
+    const nested = join(repoB, 'sub')
+    mkdirSync(join(nested, 'nested'), { recursive: true })
+    writeFileSync(join(nested, 'nested', 'probe.txt'), 'probe')
+    writeFileSync(join(nested, 'AGENTS.md'), '# nested rules')
+    const world = await mountWorld({}, [repoB])
+    // The durable log after a second recovery: an old host's legacy directory
+    // move plus the pair a previous alpha.2 run appended as live activity. That
+    // run resolved the relative path at the origin (the 0.2.3 host ignores the
+    // deprecated event), so replaying the pair through the legacy chain would
+    // attribute it to repoB/sub and discover its nested AGENTS.md.
+    const seed = [
+      { type: 'working-directory/change', data: { cwd: canonicalPath(nested) } },
+      { type: 'tool/call', data: { turn: 1, step: 1, callId: 'previous-live', name: 'read', arguments: JSON.stringify({ file_path: 'nested/probe.txt' }) } },
+      { type: 'tool/result', data: { turn: 1, step: 1, message: { source: { callId: 'previous-live' }, content: [], isError: false } } },
+    ]
+    vi.spyOn(world.session, 'snapshotEvents').mockImplementation(() => seed)
+    const snapshot = async (): Promise<string> => {
+      const entries = await world.ctx.multiRootInstructions.snapshot(
+        { session: world.session } as never, [repoB], undefined, new AbortController().signal,
+      )
+      return entries.map(entry => entry.text).join('\n')
+    }
+    expect(await snapshot()).not.toContain('nested rules')
+  })
+  it('replays a relative operation through the legacy cwd when the Host projection still applies it', async () => {
+    const nested = join(repoB, 'sub')
+    mkdirSync(join(nested, 'nested'), { recursive: true })
+    writeFileSync(join(nested, 'nested', 'probe.txt'), 'probe')
+    writeFileSync(join(nested, 'AGENTS.md'), '# nested rules')
+    const world = await mountWorld({}, [repoB])
+    // A 0.2.2-line Host rebuilds its working-directory projection from the
+    // legacy event, so the projection proves that generation resolved the
+    // relative operation there. Replay must keep attributing it, not drop it.
+    await world.ctx.plugin({ name: 'legacy-directory-fixture', apply(ctx: Context) {
+      ctx.provide('workingDirectory' as never, { get: () => canonicalPath(nested) } as never)
+    } })
+    const seed = [
+      { type: 'working-directory/change', data: { cwd: canonicalPath(nested) } },
+      { type: 'tool/call', data: { turn: 1, step: 1, callId: 'legacy-live', name: 'read', arguments: JSON.stringify({ file_path: 'nested/probe.txt' }) } },
+      { type: 'tool/result', data: { turn: 1, step: 1, message: { source: { callId: 'legacy-live' }, content: [], isError: false } } },
+    ]
+    vi.spyOn(world.session, 'snapshotEvents').mockImplementation(() => seed)
+    const entries = await world.ctx.multiRootInstructions.snapshot(
+      { session: world.session } as never, [repoB], undefined, new AbortController().signal,
+    )
+    expect(entries.map(entry => entry.text).join('\n')).toContain('# nested rules')
+  })
+
+  it.each([
+    { stateVersion: 1, hasOrigin: true, expected: true, label: 'legacy projection' },
+    { stateVersion: 3, hasOrigin: true, expected: false, label: 'current projection' },
+    { stateVersion: 3, hasOrigin: false, expected: false, label: 'current projection with only a deployment default' },
+  ])('uses and caches the working-directory projection stateVersion ($label)', async ({ stateVersion, hasOrigin, expected }) => {
+    const nested = join(repoB, 'sub')
+    mkdirSync(join(nested, 'nested'), { recursive: true })
+    writeFileSync(join(nested, 'nested', 'probe.txt'), 'probe')
+    writeFileSync(join(nested, 'AGENTS.md'), '# nested rules')
+    const world = await mountWorld({}, [repoB])
+    const session = hasOrigin ? world.session : world.ctx.sessions.create(SessionId('resume-without-origin'))
+    // With an origin, both chains end there. Without one, only the legacy
+    // chain matches the deployment default, which is not a recorded cwd.
+    const seed = [
+      { type: 'working-directory/change', data: { cwd: canonicalPath(nested) } },
+      { type: 'tool/call', data: { turn: 1, step: 1, callId: 'returned', name: 'read', arguments: JSON.stringify({ file_path: 'nested/probe.txt' }) } },
+      { type: 'tool/result', data: { turn: 1, step: 1, message: { source: { callId: 'returned' }, content: [], isError: false } } },
+      { type: 'working-directory/change', data: { cwd: fixture.workspace } },
+    ]
+    vi.spyOn(session, 'snapshotEvents').mockImplementation(() => seed)
+    await mountWorkingDirectoryProjection(world, stateVersion)
+    const checkpoint = vi.spyOn(SessionProjectionRegistry.prototype, 'checkpoint')
+    const snapshotText = async (): Promise<string> => {
+      const entries = await world.ctx.multiRootInstructions.snapshot(
+        { session } as never, [repoB], undefined, new AbortController().signal,
+      )
+      return entries.map(entry => entry.text).join('\n')
+    }
+    if (!hasOrigin) {
+      checkpoint.mockImplementationOnce(() => { throw new Error('checkpoint temporarily unavailable') })
+      expect(await snapshotText()).not.toContain('# nested rules')
+    }
+    const text = await snapshotText()
+    expect(text.includes('# nested rules')).toBe(expected)
+    expect(await snapshotText()).toBe(text)
+    expect(checkpoint).toHaveBeenCalledTimes(hasOrigin ? 1 : 2)
   })
 
   it('names each file by its absolute path, so two roots\' AGENTS.md are distinguishable', async () => {

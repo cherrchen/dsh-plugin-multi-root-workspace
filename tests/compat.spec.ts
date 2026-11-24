@@ -212,7 +212,7 @@ describe('shared upstream packages resolve through the host, never a shipped cop
     // produced issue #30. The union names each alpha line the allowlisted
     // releases resolve, the same shape the cordis peer already uses.
     expect(manifest.peerDependencies['@deepseek-ai/schemastery'])
-      .toBe('>=3.18.2 <4.0.0 || 3.18.5-alpha.1 || 3.18.5-alpha.2 || 3.18.6-alpha.1 || 3.18.6-alpha.2')
+      .toBe('>=3.18.2 <4.0.0 || 3.18.5-alpha.1 || 3.18.5-alpha.2 || 3.18.6-alpha.1 || 3.18.6-alpha.2 || 3.20.0-alpha.1')
     expect(manifest.peerDependencies['@deepseek-ai/node-addon-system']).toBe('^0.1.2')
   })
 

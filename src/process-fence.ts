@@ -214,7 +214,7 @@ export function apply(ctx: Context): void {
     if (policy.mode !== 'danger-full-access') return undefined
     const scope = ctx.multiRootScope.resolve(policy)
     if (scope.authority === 'unavailable') {
-      return (ctx.sandbox as MultiRootSandboxProvider).clampedExecution(policy, scope.deniedRoots, signal)
+      return (ctx.sandbox as MultiRootSandboxProvider).clampedExecution(policy, scope.deniedRoots, signal, scope.primaryRoot)
     }
     if (scope.deniedRoots.length === 0) return undefined
     return (ctx.sandbox as MultiRootSandboxProvider).restrictedExecution(policy, scope.deniedRoots, signal, scope.protectedHome)

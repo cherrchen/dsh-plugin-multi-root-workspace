@@ -25,16 +25,33 @@ export const AUTO_REVIEW_LEGACY_RELEASES = ['0.2.1-rc.2', '0.2.1-rc.3', '0.2.1-r
 /**
  * Releases served by the current fork of the frozen `0.2.2-alpha.3` reviewer
  * source generation. The reviewer input model was rewritten at
- * `0.2.2-alpha.2`; `alpha.3` to `rc.5` share its source, and the one
- * behavioral difference (`alpha.2` predates the request-purpose map) is
- * selected by {@link autoReviewRequestIdentity}.
+ * `0.2.2-alpha.2`; `alpha.3` through `0.2.2-rc.5` serve the committed
+ * `current/upstream.ts` verbatim, and the one behavioral difference
+ * (`alpha.2` predates the request-purpose map) is selected by
+ * {@link autoReviewRequestIdentity}.
+ *
+ * The `0.2.3-alpha.2` release belongs to this generation although its official
+ * source moves two lines: the `Context`/`FiberState` import order and the root
+ * context spelling (`ctx.root` to `ctx[Context.root]`, cordis 4.2). Both
+ * lines are replaced by the reviewed fork patch, and `current/locales.ts` is
+ * byte-identical, so this is a host API rename rather than a reviewer
+ * input-model change: the fork resolves the root structurally
+ * (`src/compat/cordis-root.ts`) and the baseline runs on cordis 4.1 (the
+ * `0.2.2` line) and 4.2 (`0.2.3-alpha.2`) alike. `0.2.3-alpha.1` has the same
+ * source but its published release cannot launch (vendor pins lag the source),
+ * so it is not in this set. Do not swap `current/upstream.ts` to the alpha
+ * bytes: seven of the eight releases still serve the committed copy verbatim,
+ * and the audit delta is exactly the two patch-replaced lines.
  */
-export const AUTO_REVIEW_CURRENT_RELEASES = ['0.2.2-alpha.2', '0.2.2-alpha.3', '0.2.2-rc.1', '0.2.2-rc.2', '0.2.2-rc.3', '0.2.2-rc.4', '0.2.2-rc.5'] as const
+export const AUTO_REVIEW_CURRENT_RELEASES = ['0.2.2-alpha.2', '0.2.2-alpha.3', '0.2.2-rc.1', '0.2.2-rc.2', '0.2.2-rc.3', '0.2.2-rc.4', '0.2.2-rc.5', '0.2.3-alpha.2'] as const
 
 /**
  * One frozen upstream reviewer source generation. Each baseline keeps one
  * verbatim upstream copy, one reviewed fork and one compile pin; a release is
  * supported only while it is a member of exactly one baseline's release list.
+ * A release may serve a baseline while its official source differs only inside
+ * lines the reviewed patch replaces; that drift is recorded in the baseline's
+ * `FORK.md` row rather than by swapping the frozen copy.
  */
 export type AutoReviewBaseline = '0.2.1' | '0.2.2'
 
@@ -42,7 +59,7 @@ export type AutoReviewBaseline = '0.2.1' | '0.2.2'
 export const AUTO_REVIEW_LEGACY_COMPILE_PIN = '0.2.1-rc.5'
 
 /** The release whose declarations typecheck the `0.2.2` fork implementation. */
-export const AUTO_REVIEW_CURRENT_COMPILE_PIN = '0.2.2-rc.5'
+export const AUTO_REVIEW_CURRENT_COMPILE_PIN = '0.2.3-alpha.2'
 
 /** Every release the optional integration is jointly verified against, in order. */
 export const AUTO_REVIEW_RELEASES = [...AUTO_REVIEW_LEGACY_RELEASES, ...AUTO_REVIEW_CURRENT_RELEASES] as const

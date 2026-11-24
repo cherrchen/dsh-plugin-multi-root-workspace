@@ -33,6 +33,7 @@ import {
   currentRegistryOperation, operationFrameState, rememberOperationProfile, operationPermitsProfile,
 } from './registry-operation.ts'
 import { aroundTool } from './compat/tool-context.ts'
+import { policyOriginRoot } from './compat/session-directory.ts'
 import { createOpsProtectionState, opsDispatchBarrier, opsSpawnPermitted } from './compat/ops-tools.ts'
 import type { OpsProtectionState } from './compat/ops-tools.ts'
 import { opsCompatibilityToken } from './compat/ops-settings.ts'
@@ -91,12 +92,13 @@ export interface ScopeRoot {
 }
 
 /**
- * The resolved scope of one confined call. `primaryRoot` equals the policy's
- * workspace root; `additionalRoots` are canonical, deduplicated, never equal
- * to the primary root.
+ * The resolved scope of one confined call. `primaryRoot` is the Session
+ * origin, which may differ from the policy's (effective) workspace root;
+ * `additionalRoots` are canonical, deduplicated, never equal to the primary
+ * root.
  */
 export interface FilesystemScope {
-  /** The session's workspace root (`session.header.cwd`, canonical). */
+  /** The Session origin (`session.header.cwd`, canonical), never the effective cwd. */
   primaryRoot: string
   /** Every granted member — ANY access level — canonical, in registry order. */
   additionalRoots: readonly string[]
@@ -689,9 +691,8 @@ export class MultiRootScopeService extends Service {
   }
 
   /**
-   * Resolve the scope of one confined call.
-   * @param policy - the upstream policy whose workspace root is the primary root.
-   * @returns the canonical scope; `additionalRoots` is empty when none are registered.
+   * Declare the registry admission proof this call runs under.
+   * @param proof - the operation's admission proof object.
    */
   requireAdmission(proof: object): void { this.admissionProof = proof }
 
@@ -778,16 +779,29 @@ export class MultiRootScopeService extends Service {
   hasAdmission(): boolean { return this.admissionProof === undefined || currentRegistryOperation(this.admissionProof) !== undefined }
 
   /** Trusted display/review projection, never an execution permit. */
-  snapshot(policy: SandboxExecutionPolicy): FilesystemScope { return this.project(policy, this.capped()) }
-
-  resolveSnapshot(policy: SandboxExecutionPolicy, roots: readonly AdditionalWorkspaceRoot[], available: boolean): FilesystemScope {
-    return this.project(policy, this.capped(), roots, available ? 'available' : 'unavailable')
+  snapshot(policy: SandboxExecutionPolicy): FilesystemScope {
+    return this.project(policy.mode, policyOriginRoot(this.ctx, policy), this.capped())
   }
 
+  resolveSnapshot(mode: SandboxMode, origin: string, roots: readonly AdditionalWorkspaceRoot[], available: boolean): FilesystemScope {
+    return this.project(mode, origin, this.capped(), roots, available ? 'available' : 'unavailable')
+  }
+
+  /**
+   * Resolve the scope of one confined call.
+   * @param policy - the per-call policy; its workspace root is the upstream
+   *   enforcement boundary, while the Session origin supplies the root table
+   *   (ADR-0012).
+   * @returns the canonical scope; `additionalRoots` is empty when none are registered.
+   */
   resolve(policy: SandboxExecutionPolicy): FilesystemScope {
-    if (this.admissionProof === undefined) return this.project(policy, this.capped())
+    if (this.admissionProof === undefined) return this.snapshot(policy)
     const operation = currentRegistryOperation(this.admissionProof)
-    if (operation !== undefined && operation.identity.mode === policy.mode && operation.scope.primaryRoot === canonicalPath(policy.workspaceRoot)) {
+    // A Session-bound admission already captured the origin. A concurrent
+    // detach must not change its scope to the policy's effective root.
+    if (operation !== undefined && operation.identity.mode === policy.mode
+      && operation.identity.sessionId === policy.sessionId
+      && (policy.sessionId !== undefined || operation.scope.primaryRoot === canonicalPath(policy.workspaceRoot))) {
       const snapshot = operation.scope
       // The snapshot is already intersected with this Host's mode/tool cap.
       // Never widen it after admission; nested dispatch may only remove writes.
@@ -798,12 +812,12 @@ export class MultiRootScopeService extends Service {
         ? { ...snapshot, writableRoots: [], deniedRoots: [...new Set([...snapshot.deniedRoots, ...snapshot.additionalRoots])] }
         : snapshot
     }
-    return this.project(policy, true, undefined, 'unavailable')
+    return this.project(policy.mode, policyOriginRoot(this.ctx, policy), true, undefined, 'unavailable')
   }
 
   /** Read-only pending-dispatch projection. Does not mint an ALS execution grant. */
   previewForTool(policy: SandboxExecutionPolicy, toolName: string): FilesystemScope {
-    return this.project(policy, this.capForTool(toolName))
+    return this.project(policy.mode, policyOriginRoot(this.ctx, policy), this.capForTool(toolName))
   }
 
   /**
@@ -861,12 +875,14 @@ export class MultiRootScopeService extends Service {
     return this.capsInvalid || toolCapStore.getStore()?.capped === true || this.caps[toolName] === 'read-only'
   }
 
-  private project(policy: SandboxExecutionPolicy, capped: boolean, recorded?: readonly AdditionalWorkspaceRoot[], authority = this.registryAuthority): FilesystemScope {
-    // The upstream workspace spelling is the Registry key (primaryKey never
-    // re-resolves it); the canonical form stays geometry — it is what the
-    // sanitized member check and the returned `primaryRoot` compare against.
-    const primaryRoot = canonicalPath(policy.workspaceRoot)
-    const registered = recorded ?? this.rootsByPrimary.get(primaryKey(policy.workspaceRoot)) ?? []
+  private project(mode: SandboxMode, origin: string, capped: boolean, recorded?: readonly AdditionalWorkspaceRoot[], authority = this.registryAuthority): FilesystemScope {
+    // The Session origin is the Registry key (primaryKey never re-resolves it);
+    // the canonical form stays geometry — it is what the sanitized member check
+    // and the returned `primaryRoot` compare against. Upstream's policy root
+    // moved onto the effective working directory, so it is only the enforcement
+    // boundary and never identity (ADR-0012).
+    const primaryRoot = canonicalPath(origin)
+    const registered = recorded ?? this.rootsByPrimary.get(primaryKey(origin)) ?? []
     const roots = authority === 'unavailable' ? [] : sanitizeMembers(primaryRoot, registered)
     // The approved one-shot escalation (ADR-0036): the user granted THIS call
     // `danger-full-access`, so the root-access and per-tool refusals lift for
@@ -874,11 +890,11 @@ export class MultiRootScopeService extends Service {
     // store cannot prove its registrations — and never drops the protected
     // home boundary.
     const override = authority !== 'unavailable'
-      && policy.mode === 'danger-full-access'
+      && mode === 'danger-full-access'
       && toolCapStore.getStore()?.approvedFullAccess === true
     const writable = capped && !override || authority === 'unavailable'
       ? []
-      : roots.filter(root => override || effectivelyWritable(policy.mode, root.access)).map(root => root.path)
+      : roots.filter(root => override || effectivelyWritable(mode, root.access)).map(root => root.path)
     // Use the recorded spelling, never re-resolve it into a replacement grant.
     // A disappeared directory must not become writable merely because it left
     // membership; explicit removal is what withdraws the negative boundary.
@@ -889,7 +905,7 @@ export class MultiRootScopeService extends Service {
     // home boundary keys on below.
     const baseDenied = registered.filter(root => typeof root.recordedPath === 'string'
       && root.recordedPath !== ''
-      && (capped || !effectivelyWritable(policy.mode, root.access)))
+      && (capped || !effectivelyWritable(mode, root.access)))
       .map(root => root.recordedPath)
     const deniedRoots = override ? [] : [...new Set(baseDenied)]
     // The DSH home joins the deny set only while restrictions apply under
@@ -901,7 +917,7 @@ export class MultiRootScopeService extends Service {
     // the deny wins — the workspace is unwritable under Full-access rather
     // than the boundary silently dropped.
     let protectedHome: string | undefined
-    if (this.dshHome !== undefined && policy.mode === 'danger-full-access'
+    if (this.dshHome !== undefined && mode === 'danger-full-access'
       && (baseDenied.length > 0 || authority === 'unavailable')) {
       const home = canonicalPath(this.dshHome)
       if (!deniedRoots.includes(home)) {

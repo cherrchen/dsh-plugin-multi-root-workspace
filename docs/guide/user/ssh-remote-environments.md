@@ -7,7 +7,7 @@ English: [ssh-remote-environments.en.md](./ssh-remote-environments.en.md)
 > [!WARNING]
 > **平台与版本前提**：
 > - 仅支持 **Linux** 和 **macOS** 发起端，远端目标主机也仅支持 **Linux** 和 **macOS**（Windows 发起端和 Windows 目标目前均延后或不支持）。
-> - 需要 DSH 运行时在 SSH 支持矩阵内（当前为 `0.2.2-rc.1` ～ `0.2.2-rc.5`），且宿主安装有对应的四个官方 SSH 可选包（`@deepseek-ai/dsh-ssh`、`dsh-fs-ssh`、`dsh-subprocess-ssh`、`dsh-sandbox-ssh`）。
+> - 需要 DSH 运行时在 SSH 支持矩阵内（当前为 `0.2.2-rc.1` ～ `0.2.3-alpha.2`），且宿主安装有对应的四个官方 SSH 可选包（`@deepseek-ai/dsh-ssh`、`dsh-fs-ssh`、`dsh-subprocess-ssh`、`dsh-sandbox-ssh`）。
 
 ## 远端访问边界
 

@@ -61,10 +61,11 @@ Nach der Installation fügen Sie in einer Sitzung eine zusätzliche Wurzel hinzu
 | `0.2.0` | `0.2.0-rc.1`, `0.2.0-rc.2` |
 | `0.2.1` | `0.2.1-alpha.1`, `0.2.1-alpha.2`, `0.2.1-alpha.3`, `0.2.1-alpha.4`, `0.2.1-alpha.5`, `0.2.1-rc.1`, `0.2.1-rc.2`, `0.2.1-rc.3`, `0.2.1-rc.4`, `0.2.1-rc.5` |
 | `0.2.2` | `0.2.2-alpha.2`, `0.2.2-alpha.3`, `0.2.2-rc.1`, `0.2.2-rc.2`, `0.2.2-rc.3`, `0.2.2-rc.4`, `0.2.2-rc.5` |
+| `0.2.3` | `0.2.3-alpha.2` |
 
 Steht die DSH-Version nicht in der Tabelle oder stimmen die Versionen der `@deepseek-ai/dsh-*`-Pakete nicht überein, startet das Plugin nicht und verhält sich wie nicht installiert.
 
-**Aus dem Quellcode bauen / mitwirken**: Node.js `^22.19.0 || >=24`, pnpm `11.25.0` (Aktivierung über corepack empfohlen); die für die Entwicklung gepinnte DSH-Version ist `0.2.2-rc.5` (Node ≥24.9).
+**Aus dem Quellcode bauen / mitwirken**: Node.js `^22.19.0 || >=24`, pnpm `11.25.0` (Aktivierung über corepack empfohlen); die für die Entwicklung gepinnte DSH-Version ist `0.2.3-alpha.2` (Node ≥24.22.3).
 
 **Plattformen**: macOS (Seatbelt), Linux (bwrap / Landlock), Windows (root-set-ACL-Runner).
 

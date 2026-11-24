@@ -36,7 +36,7 @@ jobs:
           echo "commit=$commit" >> "$GITHUB_OUTPUT"
       - uses: actions/setup-node@v4
         with:
-          node-version: 22.19.0
+          node-version: 24.22.3
       - name: Wait for the exact main push CI and its gate
         run: node scripts/verify-release-ci.mjs "$TAG_COMMIT"
         env:
@@ -60,7 +60,7 @@ jobs:
           version: 11.25.0
       - uses: actions/setup-node@v4
         with:
-          node-version: 22.19.0
+          node-version: 24.22.3
           cache: pnpm
 
       - name: Check that the tag matches package.json

@@ -24,7 +24,7 @@ Thanks for improving `@dsh-electron/dsh-plugin-multi-root-workspace`. This repos
 
 ## Development environment
 
-- Node.js `^22.19.0 || >=24`; the `0.2.2` lanes require `>=24.9`.
+- Node.js `^22.19.0 || >=24`; the `0.2.2` lanes require `>=24.9`, and `0.2.3` and later lanes require `>=24.22.3`.
 - pnpm `11.25.0` (corepack is recommended).
 - The development pin is DSH `0.2.2-rc.4`. Supported releases are an [exact allowlist](./src/compat/dsh-version.ts), not a range.
 
