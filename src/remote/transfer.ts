@@ -141,12 +141,15 @@ const PENDING_GRACE_MS = 1_000
 /** One total I/O budget, plus a bounded, cancellation-independent cleanup window. */
 class TransferIO {
   private readonly deadline: number
-  private cleanupDeadline: number | undefined
   constructor(timeoutMs: number, private readonly signal: AbortSignal) { this.deadline = Date.now() + timeoutMs }
 
   async run<T>(action: () => Promise<T>, onInterrupt?: (reason: 'cancelled' | 'transfer-timeout') => void, cleanup = false): Promise<T> {
-    if (cleanup) this.cleanupDeadline ??= Date.now() + 1_000
-    const remaining = (cleanup ? this.cleanupDeadline! : this.deadline) - Date.now()
+    // Each cleanup-path call gets its own bounded second. A single window
+    // shared from the FIRST cleanupClient call starves real-WAN cleanup: the
+    // staging close inside finish() and the closes inside verify() consume it
+    // long before publish() runs, so remove() sees `remaining <= 0` and the
+    // staging object leaks as `residual` despite a committed copy.
+    const remaining = (cleanup ? Date.now() + 1_000 : this.deadline) - Date.now()
     const aborted = () => !cleanup && this.signal.aborted
     const failure = () => new RemoteCopyError(aborted() ? 'cancelled' : 'transfer-timeout', 'transfer I/O interrupted')
     if (aborted() || remaining <= 0) throw failure()
