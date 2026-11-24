@@ -64,6 +64,21 @@ describe('workingDirectorySemantics — durable Host evidence for replay', () =>
     expect(workingDirectorySemantics([legacyChange], origin, undefined)).toBe('unknown')
     expect(workingDirectorySemantics([legacyChange], origin, resolve('elsewhere'))).toBe('unknown')
   })
+
+  it('uses the projection stateVersion as structural evidence even when both chains end together', () => {
+    const returned = [legacyChange, { type: 'working-directory/change', data: { cwd: origin } }]
+    expect(workingDirectorySemantics(returned, origin, origin)).toBe('unknown')
+    expect(workingDirectorySemantics(returned, origin, origin, 1)).toBe('honor-legacy')
+    expect(workingDirectorySemantics(returned, origin, origin, 2)).toBe('honor-legacy')
+    expect(workingDirectorySemantics(returned, origin, origin, 3)).toBe('ignore-legacy')
+  })
+  it('attributes a relative operation inside a root the session returned from when the legacy semantics is proven', () => {
+    const returned = [legacyChange, ...relativePair, { type: 'working-directory/change', data: { cwd: origin } }]
+    expect(replayedInstructionTargets(returned, origin, undefined, undefined, { workingDirectory: 'honor-legacy' }))
+      .toEqual([resolve(legacy, 'a')])
+    expect(replayedInstructionTargets(returned, origin, undefined, undefined, { workingDirectory: 'ignore-legacy' })).toEqual([])
+  })
+
   it('honors the legacy chain only for a Host that still applies it', () => {
     expect(replayedInstructionTargets([legacyChange, ...relativePair], origin, undefined, undefined, { workingDirectory: 'honor-legacy' }))
       .toEqual([resolve(legacy, 'a')])

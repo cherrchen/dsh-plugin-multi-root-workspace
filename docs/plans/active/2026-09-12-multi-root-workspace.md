@@ -2377,3 +2377,16 @@ CI 现场（run `45035571607`，`9788acb`）：`releases`/`windows` 通过；20 
 **本机验证（macOS arm64 / Node `24.18.0` / pnpm `11.25.0`，DSH `0.2.3-alpha.2` 开发树）**：`compat:check`（27 个精确发布；SSH floor 6 个；Auto Review 联合 12 个；allowlist / peers / 开发 pin / 安装树一致）、`docs:check` 0 错误 0 警告、`licenses:check` current、`lint` 0 警告 0 错误（503 个文件）、双端 `typecheck`、`build`、`pack:check`（打包产物完整）、`auto-review:fork` 全部通过。全量 vitest **2632 通过 / 214 跳过 / 23 失败**（178 个文件：153 通过 / 12 失败 / 13 跳过）加 1 条同源 unhandled rejection：23 个失败与合入 `bc39529` 后的复验记录同集合（8 个 Registry lease/follower 文件 + 4 个 SSH `remote-*` 文件），全部是「Host 自身被沙箱化、共享 IPC 拒绝 sandboxed peer」环境类；相比该基线（2621 通过）新增的 11 个通过即本次回归。冒烟：compose **58/58**、behavior **96 通过 / 8 跳过**、journey **91 通过 / 2 跳过**，跳过项仍为无内核 runner 与共享 IPC。`kernel:probe` 在本会话仍报告无可用内核 runner（Seatbelt `sandbox_apply: Operation not permitted`），按设计跳过。
 
 **边界**：P2-1 / P2-2 都是「证据不足时拒绝或跳过」：不新增读取 ACL，也不把版本字符串比较引入运行时（语义判定只读 Host 投影状态这一结构事实）；P2-2 的保守跳过只影响无法证明目录的旧相对历史——可能少注入一条旧嵌套指令，但不会把指令注入到操作从未到达的目录。
+
+### 复审补正与修复（2026-11-24，`b94d1e2`）
+
+对上一轮修复的复审确认 1 项 P2 回归与 1 项 P3 文档残留，均先复现（新增回归在修复前失败）后修复：
+
+| 审查项 | 复核结论 | 修复 | 回归 |
+|---|---|---|---|
+| P2 旧版会话进入附加根、成功读取、再回到主根后，恢复时丢失嵌套指令 | 成立：以 0.2.2 语义的宿主投影夹具复现——`working-directory/change` 进入附加根、相对读取、再回到主根，两条候选链终点相同，上一版判为 `unknown` 并跳过该读取，Auto Review 快照返回空约束。 | 宿主登记 working-directory 投影的 `stateVersion` 是目录代际的结构证据：`0.2.2` 线及更早为 `1`（折叠 `working-directory/change`），`0.2.3` 起为 `3`（折叠 `workspace-root/change`），经公开的投影 `checkpoint()` 读取并按 registry 缓存。`src/compat/session-directory.ts` 新增 `workingDirectoryStateVersion()`；`workingDirectorySemantics()` 优先采用该版本，读不到时才回退「投影目录与两条链终点」的比对；alpha.2 对归属不明相对活动的保守跳过保持不变。 | `tests/instructions.spec.ts` 同一「进入 → 读取 → 返回」日志按 stateVersion 1 / 3 各一条（1 发现嵌套指令、3 保守跳过）；`tests/instruction-activity.spec.ts` 两条语义/归因单测。修复前 2 条失败，修复后全绿。 |
+| P3 兼容笔记与实现冲突 | 成立：中文笔记仍把 `alpha.1` 写成有运行时测试与联合冒烟证据的车道；两份笔记仍称 Files 页头有效目录来自 `RootsView.effectiveCwd`。 | 中文笔记删除 alpha.1 车道/证据声明（alpha.1 不在合同内、无车道与运行时测试，仅作源码对照）；两份笔记改为 Files 页头路径、tooltip 与 open-in-app 使用 Files 槽位 owner 的 `absolutePath`（上游 `selectSessionDirectory` 解析的有效目录），`view.primaryRoot` 仅作 Registry 身份，`RootsView.effectiveCwd` 用于工作区菜单等其它展示；安静陷阱 9 改为投影 `stateVersion` 判定。 | `pnpm docs:check` 0 错误 0 警告。 |
+
+**本机验证（macOS arm64 / Node `24.18.0` / pnpm `11.25.0`，DSH `0.2.3-alpha.2` 开发树）**：定向测试 instructions 59 / instruction-activity 19 / ops-instruction-activity 22 / workspace-routing 32 全部通过。全量 vitest **2636 通过 / 214 跳过 / 23 失败**（178 个文件：153 通过 / 12 失败 / 13 跳过）加 1 条同源 unhandled rejection：失败集合与上一轮记录完全一致（8 个 Registry lease/follower 文件 + 4 个 SSH `remote-*` 文件，均为「Host 自身被沙箱化、共享 IPC 拒绝 sandboxed peer」环境类），相比上一轮 2632 通过新增的 4 个通过即本次回归。`compat:check`、`docs:check`（0/0）、`licenses:check`、`lint`（0/0，503 文件）、双端 `typecheck`、`build`、`pack:check`、`auto-review:fork` 全部通过；冒烟 compose **58/58**、behavior **96 通过 / 8 跳过**、journey **91 通过 / 2 跳过**（跳过项仍为无内核 runner 与共享 IPC）。
+
+**边界**：`stateVersion` 只作为**结构**证据（投影注册表公开的 schema 版本），运行时不做 DSH 发布字符串比较；版本不可读时回退旧链—终点比对，因此没有投影注册表的测试栈与旧组合行为不变。投影版本只在本进程首次需要时读取一次（按 registry 缓存），不进入每次 snapshot 的热路径。

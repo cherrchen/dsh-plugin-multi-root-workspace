@@ -65,7 +65,7 @@ import { instructionsApi } from './compat/agent-instructions.ts'
 import type { InstructionFile, InstructionsApi, LoadedInstructionFile } from './compat/agent-instructions.ts'
 import { createInstructionMessage } from './compat/llm-message.ts'
 import { toolResultFailed } from './compat/tool-result.ts'
-import { effectiveDirectory, originDirectory } from './compat/session-directory.ts'
+import { effectiveDirectory, originDirectory, workingDirectoryStateVersion } from './compat/session-directory.ts'
 import { aroundTool, type ToolCaller } from './compat/tool-context.ts'
 import { FILE_TOUCH_TOOL_NAMES, normalizeOpsFileActivity, opsActivityEvidenceKey, ptcFileActivity, replayedInstructionTargets, stableOpsJson, touchedPathOfToolCall, workingDirectorySemantics } from './compat/instruction-activity.ts'
 import { opsCompatibilityToken } from './compat/ops-settings.ts'
@@ -577,15 +577,29 @@ export function apply(ctx: Context, config: Config = {}): void {
         // re-deriving a live event's relative path through a superseded legacy
         // `working-directory/change` chain would misattribute it.
         // A later recovery has no in-process counter for an earlier run's live
-        // events, so the boundary must not be the only evidence: the Host's own
-        // working-directory projection state is rebuilt from this same durable
-        // log, and it proves whether the deprecated chain is still in force.
-        // Replay skips relative activity whose directory that evidence cannot
-        // settle instead of guessing a directory the operation may not have used.
+        // events, so the boundary must not be the only evidence: the version the
+        // Host registers its working-directory projection at names the
+        // directory-event generation structurally, and the projection state
+        // itself is rebuilt from this same durable log. The version wins
+        // whenever it is readable (a Session that entered another directory and
+        // returned leaves both interpreted chains at the same endpoint); the
+        // chain comparison remains the fallback evidence for compositions that
+        // expose no projection registry. Replay skips relative activity whose
+        // directory that evidence cannot settle instead of guessing a directory
+        // the operation may not have used.
         // oxlint-disable-next-line typescript/no-deprecated -- No public activity projection exists.
         const seedEvents = agent.session.snapshotEvents()
         const boundary = Math.max(0, seedEvents.length - (liveEventCounts.get(agent.session) ?? 0))
-        const workingDirectory = workingDirectorySemantics(seedEvents, agent.session.header.cwd, effectiveDirectory(scope, agent.session))
+        const effectiveCwd = effectiveDirectory(scope, agent.session)
+        const chainSemantics = workingDirectorySemantics(seedEvents, agent.session.header.cwd, effectiveCwd)
+        // Only a log that actually carries the deprecated spelling can be
+        // ambiguous; every other log attributes from agreeing chains, so the
+        // registry probe stays off the common path.
+        const legacySpelling = chainSemantics === 'unknown'
+          && seedEvents.some(event => (event as { readonly type?: unknown }).type === 'working-directory/change')
+        const workingDirectory = legacySpelling
+          ? workingDirectorySemantics(seedEvents, agent.session.header.cwd, effectiveCwd, workingDirectoryStateVersion(scope, agent.session))
+          : chainSemantics
         for (const path of replayedInstructionTargets(seedEvents, agent.session.header.cwd,
           modeToken === undefined ? undefined : existing?.liveOpsEvidence,
           modeToken === undefined ? undefined : pending,
@@ -598,8 +612,7 @@ export function apply(ctx: Context, config: Config = {}): void {
         // Native discovery can already cover this directory before any file
         // tool succeeds. Recollect that chain before replacing native frames,
         // without recording cwd as successful activity or delivery state.
-        const cwd = effectiveDirectory(scope, agent.session)
-        const reviewCwd = cwd === undefined ? undefined : canonicalPath(cwd)
+        const reviewCwd = effectiveCwd === undefined ? undefined : canonicalPath(effectiveCwd)
         const result: CurrentRootInstruction[] = []
         for (const root of roots) {
           const plan = await planRoot(scope, api, root, config, state, signal, true, reviewCwd)

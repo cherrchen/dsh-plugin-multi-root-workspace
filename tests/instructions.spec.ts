@@ -176,6 +176,35 @@ async function mountWorld(config: Instructions.Config = {}, roots: readonly stri
   }
 }
 
+
+/**
+ * Register the Host's own working-directory projection at one stateVersion and
+ * expose it as the `workingDirectory` service, exactly as a Host does: the
+ * service reads the unit's folded state, so the projection version is the only
+ * structural evidence of which directory-event generation this Host applies.
+ * @param world - the mounted composition.
+ * @param stateVersion - the version the Host registers its unit at (1 through
+ *   the 0.2.2 line, 3 from 0.2.3).
+ */
+async function mountWorkingDirectoryProjection(world: World, stateVersion: number): Promise<void> {
+  const registry = world.ctx.get('sessionProjections' as never) as {
+    register(definition: unknown): Promise<{ stateOf(session: Session): string | null }>
+  }
+  const handle = await registry.register({
+    key: 'workingDirectory',
+    stateVersion,
+    stateSchema: { parse: (value: unknown) => value },
+    init: (header: { readonly cwd?: string }) => header.cwd ?? null,
+    apply: (state: unknown, event: { readonly type: string; readonly data?: { readonly cwd?: string } }) => {
+      const applied = stateVersion >= 3 ? 'workspace-root/change' : 'working-directory/change'
+      return event.type === applied ? event.data?.cwd ?? state : state
+    },
+  })
+  await world.ctx.plugin({ name: `working-directory-${stateVersion}`, apply(ctx: Context) {
+    ctx.provide('workingDirectory' as never, { get: () => handle.stateOf(world.session) } as never)
+  } })
+}
+
 /** A message standing in for one the loop claimed from the inbox. */
 function claimedMessage(text: string): UserMessage {
   return createUserMessage({ content: [{ type: 'text', text }], source: { kind: 'user' } })
@@ -288,6 +317,34 @@ describe('with additional roots', () => {
       { session: world.session } as never, [repoB], undefined, new AbortController().signal,
     )
     expect(entries.map(entry => entry.text).join('\n')).toContain('# nested rules')
+  })
+
+  it.each([
+    { stateVersion: 1, expected: true, label: '0.2.2-line projection' },
+    { stateVersion: 3, expected: false, label: '0.2.3 projection' },
+  ])('uses the working-directory projection stateVersion when both chain ends coincide ($label)', async ({ stateVersion, expected }) => {
+    const nested = join(repoB, 'sub')
+    mkdirSync(join(nested, 'nested'), { recursive: true })
+    writeFileSync(join(nested, 'nested', 'probe.txt'), 'probe')
+    writeFileSync(join(nested, 'AGENTS.md'), '# nested rules')
+    const world = await mountWorld({}, [repoB])
+    // Enter the additional root, read relatively, then return to the origin:
+    // both candidate chains end at the origin, so only the projection's
+    // stateVersion proves which generation resolved the middle read.
+    const seed = [
+      { type: 'working-directory/change', data: { cwd: canonicalPath(nested) } },
+      { type: 'tool/call', data: { turn: 1, step: 1, callId: 'returned', name: 'read', arguments: JSON.stringify({ file_path: 'nested/probe.txt' }) } },
+      { type: 'tool/result', data: { turn: 1, step: 1, message: { source: { callId: 'returned' }, content: [], isError: false } } },
+      { type: 'working-directory/change', data: { cwd: fixture.workspace } },
+    ]
+    vi.spyOn(world.session, 'snapshotEvents').mockImplementation(() => seed)
+    await mountWorkingDirectoryProjection(world, stateVersion)
+    const entries = await world.ctx.multiRootInstructions.snapshot(
+      { session: world.session } as never, [repoB], undefined, new AbortController().signal,
+    )
+    const text = entries.map(entry => entry.text).join('\n')
+    if (expected) expect(text).toContain('# nested rules')
+    else expect(text).not.toContain('# nested rules')
   })
 
   it('names each file by its absolute path, so two roots\' AGENTS.md are distinguishable', async () => {

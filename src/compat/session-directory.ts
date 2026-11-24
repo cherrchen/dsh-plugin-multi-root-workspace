@@ -53,3 +53,47 @@ export function policyOriginRoot(ctx: Context, policy: SandboxExecutionPolicy): 
   if (session === undefined) return policy.workspaceRoot
   return originDirectory(ctx, session) ?? policy.workspaceRoot
 }
+
+/** The slice of the host projection registry this module reads. */
+interface ProjectionCheckpointRegistry {
+  checkpoint(session: Session): Record<string, { readonly ver?: unknown } | undefined>
+}
+
+/** Per-registry memo; `null` records a Host that exposes no working-directory unit. */
+const workingDirectoryVersions = new WeakMap<object, number | null>()
+
+/**
+ * The `stateVersion` the installed Host registers its working-directory
+ * projection at.
+ *
+ * The version is the structural marker of the event generation that unit folds:
+ * releases through the `0.2.2` line register it at `1` and apply the deprecated
+ * `working-directory/change`; `0.2.3` renamed the event and raised the version
+ * to `3`. Reading it from the public projection checkpoint keeps the probe
+ * structural — no DSH release string is compared — and it answers the case the
+ * chain comparison cannot: a Session that entered another directory and
+ * returned, where both candidate chains end at the same directory.
+ * @param ctx - host context carrying the projection registry.
+ * @param session - an attached Session the registry can checkpoint.
+ * @returns the registered version, or `undefined` when the Host exposes no
+ *   working-directory projection (early harnesses, bare compositions).
+ */
+export function workingDirectoryStateVersion(ctx: Context, session: Session): number | undefined {
+  const registry = ctx.get('sessionProjections' as never) as ProjectionCheckpointRegistry | undefined
+  if (registry === undefined || typeof registry.checkpoint !== 'function') return undefined
+  const cached = workingDirectoryVersions.get(registry)
+  if (cached !== undefined) return cached ?? undefined
+  let version: number | undefined
+  try {
+    const row = registry.checkpoint(session)['workingDirectory']
+    version = typeof row?.ver === 'number' && Number.isSafeInteger(row.ver) ? row.ver : undefined
+  } catch {
+    // A registry that cannot checkpoint this Session has not answered the
+    // question; the chain comparison stays the fallback evidence. Cache the
+    // refusal so later snapshots do not retry registry work.
+    workingDirectoryVersions.set(registry, null)
+    return undefined
+  }
+  workingDirectoryVersions.set(registry, version ?? null)
+  return version
+}

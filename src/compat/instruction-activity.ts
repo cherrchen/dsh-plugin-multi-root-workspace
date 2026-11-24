@@ -109,13 +109,23 @@ export type WorkingDirectorySemantics = 'honor-legacy' | 'ignore-legacy' | 'unkn
  * @param origin - the Session origin the log starts from.
  * @param effective - the Host projection's committed directory; `undefined` when
  *   no `workingDirectory` service answers for the Session.
+ * @param projectionStateVersion - the version the Host registers its
+ *   working-directory unit at, when the projection registry exposes it. It is
+ *   direct structural evidence of the fold generation and wins over the chain
+ *   comparison, which cannot decide when both chains end at the same directory.
  * @returns `honor-legacy` when the projection follows the deprecated events,
  *   `ignore-legacy` when it only follows `workspace-root/change`, and
  *   `unknown` when the two chains do not diverge or do not identify the host.
  */
 export function workingDirectorySemantics(
   events: readonly unknown[], origin: string | undefined, effective: string | undefined,
+  projectionStateVersion?: number,
 ): WorkingDirectorySemantics {
+  // Releases through 0.2.2 register the unit at 1 and fold the deprecated
+  // event; 0.2.3 raised it to 3 for the renamed event. The registered version
+  // answers even when a Session entered another directory and returned, where
+  // both interpreted chains end at the same directory.
+  if (projectionStateVersion !== undefined) return projectionStateVersion >= 3 ? 'ignore-legacy' : 'honor-legacy'
   let hostCwd = origin
   let legacyCwd = origin
   let movedByWorkspaceRoot = false
