@@ -196,6 +196,8 @@
 | 真实 SSH（loopback） | 用户态 OpenSSH `sshd`（127.0.0.1，一次性 host/user 密钥，不触碰 `~/.ssh`、不用外部主机），生产 `SftpClient` 经生成 `ssh_config`（`-F`）连接——即 `listRemoteDirectories` 对托管个人环境使用的同一机制；SFTP v3 握手、根/嵌套 `readdirBounded`、字面 POSIX 名（空格 / Unicode / 字面反斜杠）逐字节透传、`realpath`/`lstat` 一致 | `tests/ssh-loopback.e2e.ts`（`DSH_MULTI_ROOT_SSH_LOOPBACK=1` 门禁，默认 skip），1/1 通过 |
 | GUI 截图（真 Chromium） | 同一 `client.apply` + 真实 `RootSwitcher`/`FilesPane` 在 headless Chromium（vitest browser mode + Playwright）渲染：菜单远端行、远端树绘制（含 Unicode/反斜杠名）、展开产生第二条 `remoteFiles.list` RPC、`withheld` 行禁用态；Host 侧为录制 stub（文档化） | `tests/client-remote-tree.browser.tsx` + `vitest.remote-tree-browser.config.ts`；截图 `.dsh-smoke/gui/remote-*.png`（4 张） |
 | `ssh -G` 身份校验边界 | `SshEnvironmentManager.openFilesSftp` 的身份检查走 `ssh -G <alias>`，当前调用没有传入隔离配置；本次没有改用户配置，也没有用 loopback 覆盖这段生产路径 | 本次仅由进程内规格覆盖；`DSH_MULTI_ROOT_SSH_LIVE` 未执行 |
+| **真实宿主 GUI 端到端（P7 补证）** | 打包 tarball 装入隔离 scratch `DSH_HOME` 的 `web` profile（四个 SSH peer 包经 `dsh plugin add` 装入 profile 依赖树，与线上 install-ssh-deps 同一机制）→ 进程内启动真实 `dsh web`（0.2.2-rc.5）→ 真实 Google Chrome 驱动：侧边栏开真实会话 → 右侧栏 Workspace files → Files pane → Workspace Folders 对话框远端区列出两个种子端点 → 行菜单登记 sftp（`Registered`、`browseAuthorization: present:64`）与 helper（`Registered`、`browseAuthorization: absent`）→ RootSwitcher 菜单 sftp 行可用、helper 行置灰「not browsable」→ 远端树绘制全部 7 个夹具项（`literal\dir`/`space dir`/`uni-名字.md`/`alias.link` 原样）→ `deep/inner` 两级展开再发两次 `remoteFiles.list`。远端夹具 `/root/dsh-live-browse` 每次运行前创建、结束即删；`~/.dsh` 仅只读复制（凭据 root + 清单），测试侧全在 scratch 目录 | `DSH_LIVE_GUI=1 node scripts/live-remote-gui.mjs`，**9/9 通过**；证据 `.dsh-smoke/live-gui/evidence/`（截图 01–08、DOM dump、`evidence.json`、wire 日志） |
+| **真实 DSH↔SSH 全栈（P7 补证）** | 旧专用测试 VPS `64.118.149.252` 已在 SSH 层失联（TCP 通、banner 前断）；改用 `~/.dsh` 保存的真实 `ali` 环境（`8.137.81.239`，root，helper `/root/.dsh-helper/0.2.2-rc.5/helper-entry.mjs`）：`~/.dsh-ssh-test/` 新增 `live-ali.json`（复用清单里的 nodePath/helperPath/helperSha256/hostKey，`account`/`xfer*` 均 `root`、host 均 `dsh-ali`）并在其 `ssh_config` 追加 `dsh-ali` Host 块（IdentityFile/UserKnownHostsFile 引用受管路径，只读）+ `Host *` 补 `BatchMode yes`/`UpdateHostKeys no`（`parseSshConfig` 现行硬要求）。`remote_bash` 全组（注册/身份漂移/受限命令边界·截断·超时/中途撤权零 spawn/环境隔离与重开再生）、`remote_copy` 全组（sha256 校验、0B+1MiB 回环、既有目标/符号链接/多链接/源变更/撤权取消/并发单提交/下载/只读拒/relay/relay 变更/超预算拒/只读会话拒/未见证拒）全部实机通过 | `PATH=~/.dsh-ssh-test/bin:$PATH DSH_MULTI_ROOT_SSH_LIVE=~/.dsh-ssh-test/live-ali.json pnpm vitest run tests/remote-ssh.live.e2e.ts`，**19/19 通过**（38s）；夹具目录 `/root/dsh-live/{app,lib}`、`/root/dsh-live-outside/sentinel.txt`、`/import` 留在 VPS 供复跑 |
 
 ### 门禁（复审返工后重跑）
 
@@ -213,6 +215,9 @@
 | `pnpm lint`（最终补丁后） | 0 errors（同 2 条既有 require-yield warning） | 0 |
 | `pnpm docs:check`（最终补丁后） | 0 errors / 0 warnings | 0 |
 | `git diff --check`（最终补丁后） | 无空白错误 | 0 |
+| `DSH_LIVE_GUI=1 node scripts/live-remote-gui.mjs`（P7 补证） | 9/9：bundle 服务、对话框、两端点列出、sftp/helper 登记、helper 行禁用、远端树全量绘制、deep/inner 展开 | 0 |
+| `PATH=~/.dsh-ssh-test/bin:$PATH DSH_MULTI_ROOT_SSH_LIVE=~/.dsh-ssh-test/live-ali.json pnpm vitest run tests/remote-ssh.live.e2e.ts`（P7 补证） | 19/19 实机用例（remote_bash + remote_copy） | 0 |
+| `pnpm vitest run tests/remote-copy.spec.ts tests/remote-copy-local-link-classification.spec.ts tests/remote-local-transfer-admission.spec.ts tests/local-transfer-authority.spec.ts`（TransferIO 修复后） | 4 文件 61 用例全过 | 0 |
 
 全量门禁的原始关键行见[核验日志摘录](../../reference/file-browsing-verification-20261124.txt)。
 
@@ -221,15 +226,19 @@
 - `tests/remote-personal-ops.spec.ts` 的手写 registry stub 缺 `setRemoteFilesService` 端口 → `mountRemoteTools` 内 `ctx.effect` 抛 TypeError 连带取消 `ctx.tools.register` → stub 已补该端口（74/74）。
 - `locale-parity` 枚举的扫描类（`SshEnvironmentError`/`RemoteAdmissionError`）新增 `capability-unsupported`、`session-unavailable` 两个字面码（P3 引入、focus 清单未含该规格）→ 八语字典补 `error.*` 键（11/11）。
 
+### P7 补证期间新发现并已修的问题（真实 WAN 链路才暴露）
+
+- **`TransferIO` 清理窗口饥饿**：cleanup 路径共享的 1 秒窗口自**首次** `cleanupClient` 调用起算——`staging.finish()` 内的 `closeHandle` 与 `verify()` 内的 `close` 在 publish 的清理运行前就把窗口耗尽；本地/低延迟链路下各调用 <1ms 不会暴露，真实 VPS RTT 下 `verify`+`hardlink` 阶段轻易超过 1s，`remove()` 见到 `remaining <= 0` 即 `transfer-timeout` → 已提交的复制把 `.dsh-staging-<id>` 留成 `residual`。修复：cleanup 调用改为**逐次自有** 1 秒窗口（清理调用在结构上有限，逐次限界仍满足「有界、与取消无关」的设计意图）。`remote-copy` 系 4 份规格 61 用例回归通过；live e2e 11 个 residual 失败全部转通过。
+
 ### 未跑项与限制（诚实记录）
 
 - **全版本 × OS CI 矩阵未跑**：矩阵源 `SUPPORTED_DSH_RELEASES` 共 **26** 个精确发布、SSH 地板 `SUPPORTED_SSH_RELEASES` 共 **5** 个（`0.2.2-rc.1`–`rc.5`）。本次只在**本机真实安装的 `0.2.2-rc.5`（macOS arm64）**上跑过门禁；其余 25 个发布与 CI 的 macos/ubuntu/windows 车道全部未跑。`scripts/ci/run-group.mjs` 按 `process.versions.node === nodeForRelease(version)` 精确自检（`0.2.2-rc.5` 要求 Node `24.9.0`，本机 `24.18.0`），且需要逐版本安装全部 26 个上游 release 与 ubuntu/windows 镜像；属共享 CI 派发面，本机不可行，不推送不派发。
-- **远端 bash/copy 实机用例未跑**：loopback 只覆盖目录浏览的 SFTP stdio 面；`remote_bash`/`remote_copy` 的真实 SSH 用例仍属 `DSH_MULTI_ROOT_SSH_LIVE` e2e（本次未提供 live.json）。
 - **远端树仍为 list-only**：无 watch/search/preview/menu/open-in-app/内容读取；预览端口为 fake-port 结论、未接线。
-- **GUI 截图局限**：目检了远端目录展开和禁用行。截图使用真 Chromium、模拟 Host 和 DSH UI 替身，部分样式和文案以测试替身呈现；仅作为行为证据，不作为真实宿主的视觉对齐证据。
+- **live e2e 环境口径**：旧专用 VPS（`64.118.149.252`）SSH 层失联，本次以 `~/.dsh` 的 `ali` 环境承载 `remote-ssh.live.e2e.ts`（`live-ali.json` + `~/.dsh-ssh-test/ssh_config` 的 `dsh-ali`/`Host *` 块——均为测试环境文件，`~/.dsh` 本体未写）。四个 helper/sftp 环境共用一个 `root` 账号与同一台主机，账户/主机隔离语义弱于原双账号双别名夹具；`xfer` 的「托管 SFTP 账户」语义以同机同用户近似。旧 VPS 恢复后可用原 `live.json` 复跑。
+- **GUI 截图局限**：真实宿主 GUI 证据已由 `live-remote-gui` 驱动补齐（真实 `dsh web` + 真实 Chrome + 真实 VPS，见上表）；此前的 Chromium 替身截图仍只作行为证据。真实桌面壳（非 `dsh web` 浏览器面）未截图。
 - 既有 `require-yield` warning ×2（`face.ts`/`local.ts` 的 parked-forever 迭代器为契约所需）保持不变。
 - CHANGELOG 无 Unreleased 节且用户禁止发版动作——本批变更的发布叙述留在本文件，不写入已发布节、不 bump 版本。
 
 ### 最终结论
 
-**PARTIAL PASS**。实现及最终补丁已提交至 `ede0ee1`。定向单元/组件门禁通过，已取得真 Chromium 行为截图和用户态 `sshd` loopback 的 SFTP 传输证据。完整 DSH↔SSH 端到端、真实 DSH 宿主 GUI 视觉对齐、全版本×OS 矩阵均未验收，本计划保留 active。
+**PARTIAL PASS**。实现及最终补丁已提交至 `ede0ee1`（其后 P7 补证提交：live-gui 驱动脚本、`TransferIO` 清理窗口修复、本节证据更新）。P7 三项强制门禁已补齐两项：**真实 DSH↔SSH 端到端**（`remote-ssh.live.e2e.ts` 19/19 实机通过，remote_bash 经 helper 传输 + remote_copy 经 sftp 传输）与**真实宿主 GUI**（`live-remote-gui` 9/9，真实 `dsh web` 0.2.2-rc.5 + 真实 Chrome + 真实 `ali` VPS，远端树绘制/展开/登记/禁用态截图齐全）。仅剩**全版本×OS 矩阵**未验收，本计划保留 active。

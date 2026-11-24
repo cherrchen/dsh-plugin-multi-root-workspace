@@ -36,3 +36,46 @@ $ node scripts/verify-auto-review.mjs
 [auto-review] web-false: single row toggle, both bundle orders, repeated reload, owner drain and official restore passed
 [auto-review] headless-true: single row toggle, both bundle orders, repeated reload, owner drain and official restore passed
 [auto-review] headless-false: single row toggle, both bundle orders, repeated reload, owner drain and official restore passed
+
+=== P7 补证（2026-11-24 晚，真实宿主 + 真实 VPS） ===
+
+$ DSH_LIVE_GUI=1 node scripts/live-remote-gui.mjs
+[live-gui] scratch run dir: .dsh-smoke/live-gui
+[live-gui] packed dsh-electron-dsh-plugin-multi-root-workspace-0.1.24-beta.5.tgz
+[live-gui] scratch personal store seeded (ali verbatim + ali-sftp browsable; two bindings)
+[live-gui] fixture: 11 remote entries (/root/dsh-live-browse on 8.137.81.239, removed after run)
+[dsh-runtime] first `dsh plugin add <tgz>` exited 0 — no build-approval stop
+[live-gui] plugin tarball installed into the scratch web profile
+[live-gui] four SSH peers installed into the scratch web profile at 0.2.2-rc.5
+dsh web: http://127.0.0.1:<port>/?token=…
+[live-gui] session live-remote-gui created in workspace <uuid> on .dsh-smoke/live-gui/live-gui-workspace
+[live-gui] Preview Notice dismissed / session row clicked / right sidebar expanded
+[live-gui] remotes view: ready
+[live-gui] register: {"sftp":{"stateTitle":"Registered","rpcStatus":200,"viewState":"registered","browseAuthorization":"present:64"},
+                     "helper":{"stateTitle":"Registered","rpcStatus":200,"viewState":"registered","browseAuthorization":"absent"}}
+[live-gui] tree nodes: ["/mrfw/deep","/mrfw/literal\\dir","/mrfw/space dir","/mrfw/alias.link","/mrfw/readme.txt","/mrfw/uni-名字.md"]
+[live-gui] remote fixture /root/dsh-live-browse removed
+[smoke:live-gui] 9 passed, 0 failed, 0 skipped
+evidence: .dsh-smoke/live-gui/evidence/ — screenshots 01-boot … 08-remote-live-expanded, DOM dumps,
+          evidence.json (checks/remotesView/registerOutcomes/listings/wire), wire log captures /multi-root-workspace/* calls
+GUI 目检：远端行与本地根同处 RootSwitcher 菜单（helper-root 置灰 "not browsable"、live-browse 可选中）、
+          远端树复用 Files pane 原生行样式与图标，deep→inner→leaf.txt 两级展开渲染一致 —— 真实宿主视觉对齐成立。
+
+$ PATH=$HOME/.dsh-ssh-test/bin:$PATH DSH_MULTI_ROOT_SSH_LIVE=$HOME/.dsh-ssh-test/live-ali.json \
+    pnpm vitest run tests/remote-ssh.live.e2e.ts
+ Test Files  1 passed (1)
+      Tests  19 passed (19)
+   Duration 38.34s
+环境说明：旧专用 VPS 64.118.149.252 SSH 层失联（TCP 通、kex banner 前被断）；改用 ~/.dsh 保存的 ali 环境
+（8.137.81.239，root；helper /root/.dsh-helper/0.2.2-rc.5/helper-entry.mjs，nodePath /usr/bin/node）。
+~/.dsh-ssh-test/ 新增 live-ali.json（字段均取自 ~/.dsh 清单，只读），ssh_config 追加 dsh-ali Host 块
+（IdentityFile/UserKnownHostsFile 指向受管路径）与 Host *（BatchMode yes / UpdateHostKeys no，
+parseSshConfig 现行硬要求；~/.dsh-ssh-test 为测试环境目录，~/.dsh 未写）。
+VPS 夹具：/root/dsh-live/{app,lib}、/root/dsh-live-outside/sentinel.txt、/import（留存供复跑）。
+首次实机跑暴露真实 WAN 缺陷：TransferIO cleanupDeadline 自首个 cleanupClient 调用起算，
+1 秒窗口在 publish 清理前耗尽 → remove() transfer-timeout → .dsh-staging-* residual（11 例 cleanup 断言失败）。
+修复：cleanup 调用改为逐次自有 1 秒窗口（src/remote/transfer.ts TransferIO.run）。
+$ pnpm vitest run tests/remote-copy.spec.ts tests/remote-copy-local-link-classification.spec.ts \
+    tests/remote-local-transfer-admission.spec.ts tests/local-transfer-authority.spec.ts
+ Test Files  4 passed (4)
+      Tests  61 passed | 1 skipped (62)
