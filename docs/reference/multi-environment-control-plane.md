@@ -98,11 +98,11 @@ v1 线协议不变。远端请求走同一介质派生的**第二**监听端点 
 
 ## `remote_bash` 合同（G3，可选 broker 行挂载）
 
-`src/remote/exec.ts` 的 `runRemoteCommand` 与 `src/remote/exec-tool.ts` 的 `remoteBashTool` 由可选的 broker 证明行统一挂载（测试组合直接注册同一注册函数）。参数 `{environmentId, rootId, cwdRelative?, command, timeoutMs}`；工具名、Session 与取消信号只取自调度。后端（G4 以后由连接管理器提供，测试为 fake）声明部署控制的 shell、环境变量、时限与 stdout/stderr 上限，实现 `confine` / `currentGeneration` / 同步 `spawn`。
+`src/remote/exec.ts` 的 `runRemoteCommand` 与 `src/remote/exec-tool.ts` 的 `remoteBashTool` 由可选的 broker 证明行统一挂载（测试组合直接注册同一注册函数）。参数 `{environmentId, rootId, cwdRelative?, command, timeoutMs, maxOutputBytes?}`；工具名、Session 与取消信号只取自调度，模型参数里的同名字段被 execute 边界作为未知字段拒绝。后端（G4 以后由连接管理器提供，测试为 fake）声明部署控制的 shell、环境变量、时限与 stdout/stderr 上限，实现 `confine` / `currentGeneration` / 同步 `spawn`。
 
 1. **准入 A**：`purpose: exec` 的远端准入；校验后端存在（`backend-unavailable`）、`cwdRelative`（空或相对 POSIX，无 `.`/`..`/空段/NUL/反斜杠，`invalid-cwd`）与时限（`invalid-timeout`）；后端 `verifyCwd` 以只读探针复核活动根身份，与准入携带的 `verifiedTarget` 不符即 `endpoint-redirected`；以 `workspace-write`、端点 displayPath 和真实 sessionId 调用 `confine`，非 `full` 为 `sandbox-unverified`。
 2. **准入 B**：启动前再次探测远端根，再以同一请求重新准入，比对 epoch、授权指纹、端点身份（displayPath、bindingDigest、verifiedTarget）、有效模式与后端代次，任一不同为 `admission-changed` 并丢弃 argv；`spawn` 只在 B 的回调内调用。A、B 之间的撤权使 B 拒绝且不调用 `spawn`。根身份确认变化时将该登记代次持久标记为 withheld，显式重新登记后才可使用。子目录重定向仅拒绝本次请求。
-3. **结果**：`not-started{code}`；`admitted-may-start`（spawn 抛错或 `started` 失败）；`exited`（观察到直接退出、托管范围未确认）与 `scope-exited`（`waitForExit` 确认）；`unknown{reconcileId}`（启动后断线）。超时与取消各只 `terminate()` 一次并标 `termination`；输出按上限截断并标 `truncated`；从不重连或重跑。
+3. **结果**：`not-started{code, message?, hint?}` 表示命令未启动。`admitted-may-start` 表示启动未确认。`exited` 只确认直接进程退出，`scope-exited` 由 `waitForExit` 确认整个托管范围退出。`unknown{reconcileId, message?, hint?}` 表示远端结果未确认。超时、取消或撤权各只发起一次 `terminate()` 请求并标记 `termination`。直接进程退出后若托管范围仍未确认，提示会要求先核对后代进程状态。命令不会自动重连或重跑。输出字段见[个人 SSH 工具输出预算](ssh-remote-environments.md#模型工具参数结果与输出预算)。
 
 SSH 兼容门禁（`classifySshCapability`、`SUPPORTED_SSH_RELEASES`、宿主锚定的 `loadHostSshPackages`）的检查器落点见[基线参考](./multi-environment-baseline.md#ssh-兼容门禁落地清单)。
 
@@ -126,7 +126,9 @@ SSH 兼容门禁（`classifySshCapability`、`SUPPORTED_SSH_RELEASES`、宿主�
 
 **远端 → 远端。** 两边都是受管 SFTP 时，Host 只做有界中转：从源连接 `P_READ` 读 64 KiB 块，写入目标 staging，双方都不接触对端凭据；源读取与目标写入分别标记失联来源。源在发布前失联 ⇒ `failed`/`source-connection-lost` 并清理目标 staging；目标失联 ⇒ `unknown`/`destination-connection-lost`，staging `unknown`，不重放。
 
-结果仍为 `{status, code?, operationId, from, to, bytes, sha256, stage, staging}`，不带文件内容与凭据；`deps.onStage` 为测试钩子。`remoteCopyTool` 不在任何生产路径注册；`from.environmentId` 缺省为 `local`，`to.environmentId` 必填。
+结果仍为 `{status, code?, message?, hint?, operationId, from, to, bytes, sha256, stage, staging, reconcileId?}`，不带文件内容与凭据；`deps.onStage` 为测试钩子，`remoteCopyTool` 由远端工具行注册。`from` 与 `to` 使用同一定义 `{environmentId?, rootId, relativePath}`：仅**省略** `environmentId` 时取 `local`（`null` 与空串为参数错误），本地主根为 `local:primary`、附加根用 `aliasId`，远端端点必须显式给出环境 ID。工具层用同一份 schema 声明在 execute 边界拒绝缺字段、错误类型、未知字段与嵌套对象，早于准入与 I/O。
+
+**传输属性。** 当前复制只支持单个普通文件：源必须是普通文件（本地还要求 `nlink===1`），目录、符号链接与特殊文件拒绝；staging 与发布后的目标以 0600 请求创建（SFTP `OPEN`/本地 `open` 的 mode，服务端或本机 umask 只会进一步收紧），不保留源 mtime、不保留可执行位，目标已存在即 `target-exists`，从不覆盖。需要多文件时先在已授权根内打包，再把归档作为单文件复制；解包在目标端自行完成，插件不支持目录递归复制或解包。例如在已授权的构建机根内执行 `tar -cf dist/app.tar -C dist .`，把 `dist/app.tar` 用一次 `remote_copy` 复制到对端，再在目标端自行解包。后续单独评估：显式保留可执行位与 mtime 需要先在已绑定的 staging 对象上核验并应用元数据，按方向定义支持与失败行为（默认仍 0600）；覆盖需要显式替换授权并证明 `expectSha256` 在并发写入下的条件替换语义；目录递归或解包需要独立设计路径约束、预算与失败回收。
 
 **部署前提与已知限制。** 本地 sink 最终仍通过 Node 的路径型系统调用 `link(2)` 发布；父目录 dev/ino 与 realpath 的复核缩小了替换窗口，但不能证明同一 UID 的写者在最后一次检查与 `link` 之间不介入，因此本地目的根须没有不可信的 same-UID 写者。SFTP v3 的远端源同样没有 inode/link count，非同秒的 size/mtime 漂移可被发现，同秒同长改写不能；目标端 EXCL、服务端回读与 only-writer 部署前提是这一方向的安全基础。
 
@@ -244,7 +246,7 @@ Host <env-alias>
 
 **协议。** `src/remote/broker/protocol.ts` 是一行一个 JSON 的有界协议（`protocol: 3`，行 ≤ 2 MiB，二进制字段 ≤ 256 KiB，每连接最多 32 个在飞请求、8 个进程）。方法只有八个：`openSftp`、`sftp`（realpath/lstat/open/read/write/close/remove/hardlink/fsync/dispose）、`open`、`confine`、`spawn`、`wait`、`terminate`、`dispose`。没有读取/导出密钥、修改配置、选择主机或任意 ssh 的方法；未知方法、未知字段、越界与超长行直接断连。协议 3 与 2 不互通：`hello` 增加必填的 `sshCapability`（broker 账户自己的 SSH 能力判定，Host 不代替，缺席/为否/畸形即拒绝）；`confine` 的 policy 只收 `read-only`/`workspace-write`（`danger-full-access` 在 schema 层拒绝），仅 `full` 实施返回一次性 `confinementToken`——绑定环境、**返回后的**受限 argv、代次与 workspaceRoot，TTL 30 秒、每连接至多 256 张，`spawn` 校验 cwd 仍在受限根内且拒绝非空 `LD_*`/`DYLD_*`/`NODE_OPTIONS`/`NODE_PATH`，票据校验失败或成功使用都消耗该票据（并发上限与代次检查先于票据消耗）；每条 `sftp` 请求携带服务端代次，过期代次拒绝且不路由旧句柄。请求超时即销毁连接并拒绝所有在飞请求；发布类操作在应答丢失时由 Host 报 `unknown`+reconcileId，重放从不允许。
 
-托管部署的 `stdoutLimit` 与 `stderrLimit` 各至多 128 KiB。broker 为每个流保留最多两倍声明上限，Host 截断结果并报告相应标记。更大的预算在证明阶段返回 `broker-output-limit`。
+托管部署的 `stdoutLimit` 与 `stderrLimit` 各至多 128 KiB（broker 未发布，现有回退值复用 `DEFAULT_OUTPUT_PREVIEW_BYTES`）。broker 为每个流保留最多两倍声明上限，Host 按工具层预算截断结果并报告 `truncated`；broker 的采集读取器只提供文本（不带整体坐标），因此经 broker 的结果 `totalBytes` 与 `droppedBytes` 为 `null`。更大的预算在证明阶段返回 `broker-output-limit`。
 
 **准入（配额与吊销）。** 每个环境绑定请求先过部署级准入门，再做方法分派：清单 `revocations` 中被吊销的环境除 `dispose`/SFTP `dispose` 外一律拒绝 `environment-revoked`；随后 `RollingQuota` 对该请求计一次操作并预扣 `sftp read`/`write` 的载字节，顶层（broker 全局）与环境级滚动窗口各扣一次，任一窗口耗尽即 `quota-exceeded`——拒绝先于任何远端动作，被拒请求不扣预算，窗口按到达时间滚动恢复。配额与吊销都是 broker 进程内判定、只随清单重启更新；确定拒绝（`quota-exceeded`/`environment-revoked`/`generation-changed` 等）在 Host 侧按确定失败上报，`SftpConnectionLost` 仍只保留给真失联的 `unknown`+reconcileId 语义。
 

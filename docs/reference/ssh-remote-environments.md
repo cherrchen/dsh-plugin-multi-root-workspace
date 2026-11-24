@@ -153,7 +153,7 @@ GUI 入口有两处：
 **开关默认值**（GUI 勾选"允许命令执行"/"允许文件传输"时写入的完整节，见上文文件 schema）：
 
 ```jsonc
-// exec
+// exec（新草稿；已保存的连接保留它自己的上限）
 { "shell": ["/bin/sh", "-c"], "env": { "PATH": "/usr/local/bin:/usr/bin:/bin" },
   "maxTimeoutMs": 600000, "stdoutLimit": 1048576, "stderrLimit": 262144, "terminateGraceMs": 2000 }
 // transfer
@@ -163,6 +163,22 @@ GUI 入口有两处：
 所有变更请求携带当前 `revision`；`personal-config-conflict` 时前端先重取 `sshState` 再显示本地化冲突文案。服务端错误一律经 `error.*` 本地化渲染。
 
 exec 与 transfer 独立授权：执行前用 helper 的只读受限 stat/realpath 探针分别验证根与 cwd；无需 transfer 配置或 SFTP 发布扩展。重定向目录和越界 cwd 在命令准备前拒绝。
+
+## 模型工具：参数、结果与输出预算
+
+`remote_copy` 与 `remote_bash` 广告的 JSON Schema 与 execute 边界的实际校验来自同一份声明（`src/remote/tool-arguments.ts`）：缺字段、错误类型、未知字段与嵌套对象都在工具层以带字段位置的 `invalid-arguments` 结束，早于 Registry 准入与任何 SSH/SFTP I/O。
+
+**`remote_copy` 端点。** `from` 与 `to` 使用同一定义 `{environmentId?, rootId, relativePath}`，两侧规则相同：只有**省略** `environmentId` 才取 `local`，`null` 与空串是参数错误；远端端点必须显式给出环境 ID。本地主根写作 `environmentId: "local"` + `rootId: "primary"`（可省略 environmentId，即 `local:primary`），附加根使用登记的 `aliasId`。`relativePath` 是单个普通文件的规范化相对 POSIX 路径。上传示例 `{"from":{"rootId":"primary","relativePath":"dist/app.tar"},"to":{"environmentId":"build","rootId":"app","relativePath":"in/app.tar"}}`；下载示例 `{"from":{"environmentId":"build","rootId":"app","relativePath":"out/app.tar"},"to":{"rootId":"primary","relativePath":"dist/app.tar"}}`。
+
+**`remote_bash` 参数。** `environmentId` 必填且必须命名远端环境（`"local"` 是参数错误）；`rootId` 是登记的绑定根，`cwdRelative` 相对它（`""` 或省略表示根目录本身）；`timeoutMs` 是整数毫秒；`maxOutputBytes` 是可选单流预览上限。工具名与 Session 只取自调度上下文，模型参数里的同名字段作为未知字段被拒绝。
+
+**结果文案。** 两个工具保留既有 `status`/`code`/`stage`/`staging`/`operationId`/`reconcileId` 语义，并为可诊断的失败增加有界 `message` 与 `hint`：文案只由稳定错误码与安全字段（环境/根 ID、相对路径、已准入的 displayPath、候选列表）生成，不包含捕获到的异常文本、SSH 诊断原文或凭据路径。`invalid-cwd` 的提示说明 `cwdRelative` 为空表示已准入根目录（附 displayPath），否则必须是规范化相对路径；`destination-parent-missing` 指明缺失的是目标父目录；`local-root-unavailable` 说明 `primary` 与 `aliasId` 的写法。
+
+**端点候选。** 端点类错误可以附上每个方向最多 6 个 `environmentId:rootId`。候选读取当前 Session 主根对应的 Registry 快照（`remoteList`）与当前清单，筛选已登记且允许所需动作的远端。复制候选还要符合会话模式、工具上限与对端配对。两个远端之间必须同时有源的 `export` 和目的的 `import`。本地端可以是 `local:primary` 或可用的本地附加根，须被对应远端绑定列为对端，本地目的端须可写。读取不建连，也不消耗准入。快照不可用时仍返回原错误码与通用提示，每次重试走正式准入。
+
+**输出预算。** `remote_bash` 默认给 stdout 和 stderr 各 64 KiB 预览预算，原始窗口和 JSON 字符串内容分别受同一上限约束。默认最多传给模型 128 KiB 的两路 JSON 输出内容，另有结果字段开销。`maxOutputBytes` 可调节单流预算，受到该流的部署上限约束。新个人 SSH 连接保留 stdout 1 MiB、stderr 256 KiB 的部署上限，已保存连接沿用原配置。
+
+结果逐流报告 `truncated`、`totalBytes` 与 `droppedBytes`。`totalBytes` 是后端能证明的原始字节总数。`droppedBytes` 从该总数扣除实际进入预览的原始字节数，包含上游丢头、UTF-8 尾部舍弃及 JSON 预算裁剪。SSH 采集窗口含 U+FFFD 时，适配器保留上游文本，精确总数仍可返回，无法核实的丢弃量为 `null`。采集器未提供坐标时两项计数均为 `null`。大输出的处理示例见[用户指南](../guide/user/ssh-remote-environments.md#使用远端工具)。
 
 ## 在飞命令撤权与清理
 

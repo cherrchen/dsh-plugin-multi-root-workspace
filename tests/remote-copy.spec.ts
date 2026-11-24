@@ -127,7 +127,15 @@ function stack(opts: StackOptions = {}) {
   } as unknown as DeploymentManifest
   const generations: Record<string, string> = { 'vps-a': 'g1', 'vps-b': 'g1' }
   const admittedEndpoint = (ref: { environmentId: string; rootId: string }) => ref.environmentId === 'local'
-    ? { environmentId: 'local', rootId: ref.rootId, displayPath: ref.rootId, verifiedTarget: null, bindingDigest: null, environmentDigest: null, configVersion: null }
+    ? {
+        environmentId: 'local', rootId: ref.rootId, displayPath: ref.rootId, verifiedTarget: null, bindingDigest: null, environmentDigest: null, configVersion: null,
+        localRoot: {
+          rootId: ref.rootId,
+          path: ref.rootId === 'primary' ? fixture.workspace : ((opts.statuses ?? []).find(entry => entry.aliasId === ref.rootId)?.path ?? '/missing'),
+          access: ref.rootId === 'primary' ? 'primary' : 'inherit',
+          incarnation: 'inc-1',
+        },
+      }
     : {
         environmentId: ref.environmentId, rootId: ref.rootId, displayPath: displayPathOf(ref.environmentId, ref.rootId),
         verifiedTarget: { kind: 'path', value: displayPathOf(ref.environmentId, ref.rootId) },
@@ -214,7 +222,14 @@ describe.skipIf(process.platform === 'win32')('runRemoteCopy local → remote(sf
     mem.seed('/import/dest.txt', 'existing')
     const s = stack({ mems: { 'vps-a': mem, 'vps-b': new MemSftp() } })
     const result = await run(s, localToRemote())
-    expect(result).toMatchObject({ status: 'failed', code: 'target-exists', stage: 'preflight', staging: 'none' })
+    expect(result).toMatchObject({
+      status: 'failed',
+      code: 'target-exists',
+      stage: 'preflight',
+      staging: 'none',
+      message: expect.stringContaining('never overwrites'),
+      hint: expect.stringContaining('relativePath'),
+    })
     expect(s.mem.calls.filter(c => c.startsWith('open /import/.dsh-staging'))).toHaveLength(0)
     expect(s.mem.files.get('/import/dest.txt')!.data.toString()).toBe('existing')
   })
@@ -289,7 +304,13 @@ describe.skipIf(process.platform === 'win32')('runRemoteCopy local → remote(sf
     const mem = new MemSftp(); mem.loseOnHardlink = true
     const s = stack({ mems: { 'vps-a': mem, 'vps-b': new MemSftp() } })
     const result = await run(s, localToRemote())
-    expect(result).toMatchObject({ status: 'unknown', code: 'connection-lost', staging: 'unknown' })
+    expect(result).toMatchObject({
+      status: 'unknown',
+      code: 'connection-lost',
+      staging: 'unknown',
+      message: expect.stringContaining('unknown'),
+      hint: expect.stringContaining('reconcileId'),
+    })
     expect(result.reconcileId).toBeTruthy()
     expect(s.mem.hardlinkCalls).toBe(1)
   })
@@ -313,7 +334,14 @@ describe.skipIf(process.platform === 'win32')('runRemoteCopy local → remote(sf
     const s = stack({ deny: 'mode-denies' })
     s.manager.openSftp = async () => { opens++; return { client: s.mem.asClient(), generation: 'g1' } }
     const result = await run(s, localToRemote())
-    expect(result).toMatchObject({ status: 'failed', code: 'mode-denies', stage: 'admission' })
+    expect(result).toMatchObject({
+      status: 'failed',
+      code: 'mode-denies',
+      stage: 'admission',
+      message: expect.stringContaining('read-only'),
+      hint: expect.stringContaining('workspace-write'),
+    })
+    expect(result.message).not.toContain('denied')
     expect(opens).toBe(0)
   })
 })
@@ -341,6 +369,32 @@ describe.skipIf(process.platform === 'win32')('runRemoteCopy remote(sftp) → lo
     expect(result).toMatchObject({ status: 'failed', code: 'target-exists', stage: 'preflight', staging: 'none' })
     expect(readFileSync(join(fixture.workspace, 'downloaded.bin'), 'utf8')).toBe('keep-me')
     expect(s.mem.calls.filter(c => c.includes('.dsh-staging'))).toHaveLength(0)
+  })
+
+  it('names the missing destination parent and the admitted local root in the hint', async () => {
+    fixture = createFixtureWorkspace('remote-download')
+    const s = stack()
+    s.mem.seed('/import/source.txt', 'x')
+    const result = await run(s, remoteToLocal({ to: { environmentId: 'local', rootId: 'primary', relativePath: 'missing/down.bin' } }))
+    expect(result).toMatchObject({
+      status: 'failed',
+      code: 'destination-parent-missing',
+      message: expect.stringContaining('parent'),
+      hint: expect.stringContaining('Create that directory'),
+    })
+    expect(result.message).toContain(`${fixture.workspace}/missing`)
+  })
+
+  it('explains primary and aliasId spelling when a local root is not registered', async () => {
+    fixture = createFixtureWorkspace('remote-download')
+    const s = stack({ statuses: [] })
+    const result = await run(s, remoteToLocal({ to: { environmentId: 'local', rootId: 'docs', relativePath: 'out.bin' } }))
+    expect(result).toMatchObject({
+      status: 'failed',
+      code: 'local-root-unavailable',
+      hint: expect.stringContaining('primary'),
+    })
+    expect(result.hint).toContain('aliasId')
   })
 
   it('refuses a read-only local destination at admission, before the SFTP session opens', async () => {

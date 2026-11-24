@@ -82,6 +82,28 @@ Profile 就绪后，连接和绑定在 GUI 中配置，无需 root 权限、独�
 > [!TIP]
 > 删除不再需要的连接前，必须先解除它的全部工作区绑定（在绑定对话框中，或在远端行「…」菜单点击 **移除**——个人模式下移除会同时撤销登记并解除绑定），否则会报 `environment-in-use`。修改绑定权限或更新部署后状态变为「待重新登记（`withheld`）」时，再次从 `…` 菜单点击 **登记** 即可恢复。要修改某个已绑定目录的路径、动作或本地传输，从该行「…」菜单点击 **编辑** 即可直接打开「本项目绑定」对话框的对应编辑表单。
 
+## 使用远端工具
+
+模型只能通过 `remote_copy` 与 `remote_bash` 访问已登记的远端目录。两个复制端点写法相同，只有**省略** `environmentId` 才表示本机：本地主根写作 `local:primary`（省略 `environmentId`，`rootId` 为 `primary`），附加根用登记的 `aliasId`（如 `docs`）；远端端点必须显式给出 `environmentId`，`rootId` 用绑定对话框里登记的标识。`relativePath` 是根内单个普通文件的规范化相对路径，不能以 `/` 开头，也不能含 `.` 或 `..` 段。
+
+一次上传和一次下载的参数：
+
+```json
+{"from":{"rootId":"primary","relativePath":"dist/app.tar"},
+ "to":{"environmentId":"build","rootId":"app","relativePath":"in/app.tar"}}
+```
+
+```json
+{"from":{"environmentId":"build","rootId":"app","relativePath":"out/app.tar"},
+ "to":{"rootId":"primary","relativePath":"dist/app.tar"}}
+```
+
+复制只处理单个普通文件，且目标必须不存在：目标以 0600 创建，不保留源文件的 mtime 与可执行位，从不覆盖。需要搬运多个文件时，先在已授权的根内打成归档（例如 `tar -cf dist/app.tar -C dist .`），再把归档当单文件复制，最后在目标端自行解包。
+
+`remote_bash` 默认给 stdout 和 stderr 各 64 KiB 预览预算，JSON 转义也计入。可传 `maxOutputBytes` 调高预览，受连接部署上限约束。结果里的 `totalBytes` 是原始字节总数，`droppedBytes` 是未进入预览的原始字节数，无法精确确定的计数为 `null`。大输出可以重定向到已授权远端根内，例如通过 `remote_bash` 执行 `command > /srv/work/build.log 2>&1`，再分段查看（如 `sed -n '1,200p' …` 或 `tail -n 200 …`）或复制该文件。
+
+失败结果包含稳定的 `code`、简短的 `message` 和 `hint`。端点类错误可列出与对端匹配的候选，包含可用的本地根，每个方向最多 6 个。`unknown`、`admitted-may-start` 或 `scope: "unconfirmed"` 都需要先确认远端状态再决定是否重试。`unknown` 的 `reconcileId` 可用于核对本次操作。
+
 ## 停用 SSH 与故障排查
 
 在插件设置中关闭 **SSH 远端环境**，即可卸载远端工具并关闭远端控制面。沿用旧凭据代理实验的 profile 时，参见[旧配置迁移说明](../../reference/ssh-remote-environments.md#停用的旧配置)。
@@ -95,5 +117,6 @@ Profile 就绪后，连接和绑定在 GUI 中配置，无需 root 权限、独�
 - **Helper 安装失败**：连接页显示失败阶段、修复建议和可展开的技术详情。如果显示远端可能已改动，先检查服务器上的安装目录和 npm 日志。如果显示远端已校验但 Host 登记未确认，先重新读取连接状态，再决定是否重新安装。参见 [SSH 故障排查](../../troubleshooting/ssh-panel-operation-failed.md#helper-安装诊断)。
 - **`helper-outdated`**：桌面端记录的 Helper 没有 BoringSSL 传输入口，在对应连接卡片上重新 **安装 Helper**；已登记 Root 保持有效，无需重新登记。
 - **`unknown` 返回与 `reconcileId`**：远端命令启动后连接断开或文件发布应答丢失时，工具不会自动重试（避免重复执行或覆盖文件），请凭返回的 `reconcileId` 到远端对账后再决定后续操作。
+- **`invalid-arguments`**：工具在 Registry 准入与任何 SSH/SFTP I/O 之前拒绝了结构非法的参数，`message` 会指出具体字段（例如 `"to.relativePath" is required`）；按 `hint` 修正后重试。
 
 关于协议字段、全部错误码与架构细节，参见技术参考 [SSH 远端环境参考](../../reference/ssh-remote-environments.md) 与 [多执行环境控制面参考](../../reference/multi-environment-control-plane.md)。

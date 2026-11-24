@@ -6,7 +6,7 @@
  * generation so a stale connection can never pass the B-admission check.
  */
 import { environmentDigest, type RemoteEnvironment } from './manifest.ts'
-import { RemoteConnectionLost, type RemoteExecutionBackend, type RemoteExecDeployment, type RemoteProcessHandle } from './exec.ts'
+import { RemoteConnectionLost, type OutputChunkMeta, type RemoteExecutionBackend, type RemoteExecDeployment, type RemoteProcessHandle } from './exec.ts'
 import type { SshEnvironment, SftpEnvironment } from './ssh-environment.ts'
 import { posix } from 'node:path'
 import { SshEndpointVerifier, EndpointVerifyError } from './ssh-verifier.ts'
@@ -90,7 +90,9 @@ export function sshExecBackend(
 ): RemoteExecutionBackend | undefined {
   const deployment = deploymentOf(environment)
   if (deployment === undefined) return undefined
-  interface Collected { readFrom(offset: number): { text: string } | undefined }
+  interface Collected {
+    readFrom(offset: number): { text: string; nextOffset?: number; lossy?: boolean } | undefined
+  }
   interface Handle {
     done: Promise<Record<string, unknown>>
     waitForExit(signal?: AbortSignal): Promise<boolean>
@@ -121,11 +123,29 @@ export function sshExecBackend(
           graceMs: deployment.terminateGraceMs,
         }) as Handle
       } catch (error) { throw lost(error) }
+      // Whole-stream coordinates passed through from the upstream collector:
+      // nextOffset is the raw total it observed, lossy means the returned text
+      // is a tail (a head was already dropped). The text interface cannot
+      // distinguish a literal U+FFFD from one inserted during decoding. Keep
+      // the text intact and omit exact window coordinates in that case.
       const feed = () => {
         for (const [name, stream] of [['stdout', handle.collected?.stdout], ['stderr', handle.collected?.stderr]] as const) {
           if (stream === undefined) continue
-          const bytes = stream.readFrom(0)
-          if (bytes !== undefined) sink[name](new TextEncoder().encode(bytes.text))
+          const collected = stream.readFrom(0)
+          if (collected === undefined) continue
+          const lossy = collected.lossy === true
+          const totalBytes = collected.nextOffset
+          const knownTotal = typeof totalBytes === 'number' && Number.isInteger(totalBytes) && totalBytes >= 0
+          const bytes = new TextEncoder().encode(collected.text)
+          const approximate = collected.text.includes('\uFFFD')
+            || (knownTotal && (lossy ? bytes.byteLength > totalBytes : bytes.byteLength !== totalBytes))
+          const meta: OutputChunkMeta = {
+            lossy,
+            ...(knownTotal ? { totalBytes } : {}),
+            ...(approximate ? { approximate: true } : {}),
+            ...(approximate || !knownTotal ? {} : { offset: lossy ? Math.max(0, totalBytes - bytes.byteLength) : 0 }),
+          }
+          sink[name](bytes, meta)
         }
       }
       const exited = (async () => {
