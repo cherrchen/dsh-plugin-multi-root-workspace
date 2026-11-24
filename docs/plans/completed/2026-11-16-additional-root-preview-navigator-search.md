@@ -1,6 +1,6 @@
 # 附加根文件预览导航树的工作区搜索（实施计划）
 
-> 状态：**P1–P4 已实施**；P5 本机门禁与**隔离环境交互目检**已完成（见「进度与证据」，截图待维护者目视复核）。分支 `feat/additional-file-tree-search` 已推送，Draft PR [#65](https://github.com/cherrchen/dsh-plugin-multi-root-workspace/pull/65) 等待 CI。
+> 状态：**已完成——P1–P4 已实施**；P5 本机门禁与**隔离环境交互目检**已完成（见「进度与证据」）。PR [#65](https://github.com/cherrchen/dsh-plugin-multi-root-workspace/pull/65) `73bc32c` 已合入并随 `v0.1.21` 发版。
 > P0 文档已作为 `2265702` 提交，并按 2026-11-16 外部技术评审的 F1–F3 修订（RootSwitcher 过渡帧缺陷纳入、
 > 测试范围编号、危害主次表述）。本文件是实施计划与执行账本，每阶段结束把命令与结果写入「进度与证据」。
 >
@@ -705,7 +705,7 @@ aside[data-mrfw-navigator] > [data-files-search-settings] {
 - 主根对照（`18`）：主根 README 预览的 aside 不带 `data-mrfw-navigator`、无插件 pane，原生搜索栏可见且布局不变——切回主根恢复原生。
 - 已知偏差复核：移除根后重新登记会得到新 `rootId`，旧 rootId 上的「重试」持续 `not-found`（提示「没有找到对应的登记项」），关闭/重开 Folder 后重新解析并恢复；与需求文档已记录的边界一致。
 
-截图供维护者目视复核；本计划保持在 `active/`。
+截图供维护者目视复核；PR #65 已合入并随 `v0.1.21` 发版，本计划归档至 `completed/`。
 
 ### 本次会话的版本与代码事实核对（P0 证据）
 

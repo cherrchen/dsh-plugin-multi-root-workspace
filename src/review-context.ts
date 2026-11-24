@@ -3,7 +3,6 @@ import { createHash } from 'node:crypto'
 import { resolve } from 'node:path'
 import { Context, Service } from '@deepseek-ai/cordis'
 import type { Agent } from '@deepseek-ai/dsh-agent'
-import { canonicalPath } from '@deepseek-ai/dsh-sandbox'
 import type {} from './compat.ts'
 import type {} from './providers.ts'
 import type {} from './registry.ts'
@@ -11,7 +10,7 @@ import type {} from './scope.ts'
 import type { CurrentRootInstruction } from './instructions.ts'
 import { nativeInstructionFingerprint } from './compat/review-session.ts'
 import { requireAutoReviewRelease } from './compat/auto-review-contract.ts'
-import { effectiveDirectory } from './compat/session-directory.ts'
+import { effectiveDirectory, originDirectory } from './compat/session-directory.ts'
 import { DEFAULT_MAX_BYTES, touchedPathOfToolCall } from './instructions.ts'
 import { pendingInstructionTargets, stableOpsJson } from './compat/instruction-activity.ts'
 import { opsCompatibilityToken } from './compat/ops-settings.ts'
@@ -64,10 +63,12 @@ export class MultiRootReviewContext extends Service {
     const agent = exec.agent
     if (agent === undefined) throw new Error('review-context: missing session')
     const policy = this.ctx.sandboxPolicy.resolve({ session: agent.session })
-    const primary = canonicalPath(policy.workspaceRoot)
-    if (agent.session.header.cwd !== undefined && canonicalPath(agent.session.header.cwd) !== primary) throw new Error('review-context: inconsistent session origin')
+    // Identity is the Session origin, never upstream's effective policy root: a
+    // Host move of the working directory leaves the Registry key unchanged
+    // (ADR-0012), so a moved Session must still build its review context.
+    const origin = originDirectory(this.ctx, agent.session) ?? policy.workspaceRoot
     // The Registry key is the upstream spelling, verbatim (MRW-01).
-    await this.ctx.multiRootRegistry.refresh(policy.workspaceRoot)
+    await this.ctx.multiRootRegistry.refresh(origin)
     signal.throwIfAborted()
     const cwd = effectiveDirectory(this.ctx, agent.session)
     if (cwd === undefined) throw new Error('review-context: missing effective cwd')

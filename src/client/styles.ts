@@ -354,6 +354,20 @@ export const STYLES = /* css */ `
 [data-files-page]:has(.mrfw-rootSwitcher[data-root-kind="additional"]) [data-slot="sidebar.right.tab.files.actions"] > *:has([data-open-target="directory"]:not(.mrfw-openSplit)),
 [data-files-page]:has(.mrfw-rootSwitcher[data-root-kind="additional"]) [data-open-target="directory"]:not(.mrfw-openSplit) { display: none; }
 
+/* Upstream 0.2.3 wraps the Files-page actions slot in a hashed
+   .externalActions flex box, so the occupant is no longer a direct flex
+   item of the header and the order/flex rules above stop applying. Reach that
+   wrapper structurally — the element that holds the slot anchor holding this
+   plugin's occupant — and drop the box with display: contents. The
+   :not(:has(> [data-files-path])) guard keeps the rule off the pre-wrapper
+   shape, where the slot anchor is a direct child of the header and the header
+   always carries a direct path label; without it the header itself would lose
+   its flex box on older hosts. */
+[data-files-page] :has(> [data-slot='sidebar.right.tab.files.actions'] > .mrfw-rootSwitcher):not(:has(> [data-files-path])),
+[data-files-page] :has(> [data-slot='sidebar.right.tab.files.actions'] > .mrfw-fileLauncher):not(:has(> [data-files-path])) {
+  display: contents;
+}
+
 /* While the switcher names an additional root, the native open-in-app split
    button hides too: its slot props carry the pane's primary root, so it
    would always open the primary root no matter what the switcher selected.
@@ -590,15 +604,19 @@ aside[data-mrfw-navigator] > [data-files-search-settings] {
 }
 
 /* ── files-tree fork (verbatim rules, renamed classes) ─────────────────────
-   Copied from upstream's FilesBody.module.css and FileTree.module.css
-   (ui-sidebar-files @ 0.2.2-rc.5, unchanged since rc.3) with local names mapped to mrfw-ft* so the
-   rules cannot collide with host DOM — and so the fork's own body (which must
-   NOT carry data-files-body) stays visible while the rules above hide the
-   native one. The header-only rules (root/header/path/tool/status/statusLine/
-   titleIcon) belong to the upstream shell this fork drops and are not mapped.
-   The tree's hidden, inactive, and match rules arrived with 0.2.2-rc.2's
-   search. Fork sync re-diffs the upstream files and re-applies the rename —
-   see src/client/files-tree/FORK.md. */
+   Copied from upstream's FilesBody.module.css (ui-sidebar-files @ 0.2.2-rc.5,
+   unchanged since rc.3) and FileTree.module.css (@ 0.2.3-alpha.2, whose only
+   change since rc.5 is the nested-level indent below) with local names mapped
+   to mrfw-ft* so the rules cannot collide with host DOM — and so the fork's own
+   body (which must NOT carry data-files-body) stays visible while the rules
+   above hide the native one. The header-only rules (root/header/path/tool/
+   status/statusLine/titleIcon) belong to the upstream shell this fork drops
+   and are not mapped. Alpha.1's FilesBody.module.css rewrite (covered rows
+   through a custom property, plus the header's externalActions rules) is not
+   mirrored: the fork draws no header, and neither portal target is a
+   navigator-row child. The tree's hidden, inactive, and match rules arrived
+   with 0.2.2-rc.2's search. Fork sync re-diffs the upstream files and
+   re-applies the rename — see src/client/files-tree/FORK.md. */
 
 /* The pane's own .root already supplies the flex column, color, and font;
    the fork's body takes the same stretch item the hidden native body held,
@@ -623,7 +641,7 @@ aside[data-mrfw-navigator] > [data-files-search-settings] {
 }
 
 .mrfw-ftLevel .mrfw-ftLevel {
-  padding-left: 18px;
+  padding-left: calc(16px + 6px);
 }
 
 .mrfw-ftItem {
@@ -1056,13 +1074,12 @@ aside[data-mrfw-navigator] > [data-files-search-settings] {
 
 /* ── open-in-app fork (verbatim rules, renamed classes) ───────────────────
    Copied from upstream's OpenTargetButton.module.css
-   (dsh-client-ui-open-in-app @ 0.2.1-alpha.2) with local names mapped to
+   (dsh-client-ui-open-in-app @ 0.2.3-alpha.2) with local names mapped to
    mrfw-open* so the rules cannot collide with host DOM. Fork sync re-diffs
    the upstream file and re-applies the rename — see
    src/client/open-in-app/FORK.md. */
 
-/* Sized to sit in the document header's 24px control row beside its round
-   icon buttons: a hairline pill with a 12px label and a narrow chevron half. */
+/* Compact split actions sit within the document header's 28px control row. */
 .mrfw-openMenuAnchor {
   display: inline-flex;
   flex: none;
@@ -1094,22 +1111,35 @@ aside[data-mrfw-navigator] > [data-files-search-settings] {
   cursor: pointer;
 }
 
+/* Keep both compact targets at 24px without spending layout width on the frame. */
+.mrfw-openSplit[data-size='compact'] {
+  border: 0;
+  box-shadow: inset 0 0 0 0.5px var(--dsw-alias-border-l4);
+}
+
 .mrfw-openMain {
   gap: 4px;
+  min-width: 24px;
   padding: 3px 5px;
 }
 
 .mrfw-openChevron {
+  min-width: 24px;
   padding: 3px 4px 3px 3px;
   border-left: 0.5px solid var(--dsw-alias-border-l4);
   color: var(--dsw-alias-label-secondary);
 }
 
-.mrfw-openMain:hover:not(:disabled),
 .mrfw-openMain:focus-visible,
-.mrfw-openChevron:hover:not(:disabled),
 .mrfw-openChevron:focus-visible {
   background: var(--dsw-alias-interactive-bg-hover);
+}
+
+@media (hover: hover) {
+  .mrfw-openMain:hover:not(:disabled),
+  .mrfw-openChevron:hover:not(:disabled) {
+    background: var(--dsw-alias-interactive-bg-hover);
+  }
 }
 
 /* Pending disables clicks without a restyle; only hover feedback pauses. */

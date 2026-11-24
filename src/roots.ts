@@ -286,16 +286,20 @@ function comparable(path: string): string {
 }
 
 /**
- * The Registry/scope lookup key of one primary root: the UPSTREAM spelling,
- * normalized lexically by `path.resolve` and case-folded on Windows — never
- * re-resolved. Upstream `dsh-sandbox-policy` sets `policy.workspaceRoot` to
- * `session.header.cwd` verbatim, so the spelling IS the identity: a symlinked
- * workspace and its realpath target are different sessions and different key
- * spaces. Re-resolving here would let a replaced workspace directory
- * silently re-key the record set onto another identity — the exact failure
- * the redirect rules exist to prevent. This is the ONLY function allowed to
- * turn a primary root into a Registry key; path geometry keeps using
- * {@link canonicalRoot}.
+ * The Registry/scope lookup key of one primary root: the Session origin
+ * spelling, normalized lexically by `path.resolve` and case-folded on Windows —
+ * never re-resolved. The spelling IS the identity: a symlinked workspace and
+ * its realpath target are different sessions and different key spaces.
+ *
+ * The origin is `session.header.cwd` (`originDirectory` in
+ * `compat/session-directory.ts`), never `policy.workspaceRoot`: since DSH
+ * `0.2.3-alpha.1` upstream resolves that policy root through the
+ * `workingDirectory` service, so it follows the Session's current directory and
+ * is only the enforcement boundary. Re-resolving here would let a replaced
+ * workspace directory silently re-key the record set onto another identity —
+ * the exact failure the redirect rules exist to prevent. This is the ONLY
+ * function allowed to turn a primary root into a Registry key; path geometry
+ * keeps using {@link canonicalRoot}.
  */
 export function primaryKey(path: string, platform: NodeJS.Platform = process.platform): string {
   const resolved = resolve(path)

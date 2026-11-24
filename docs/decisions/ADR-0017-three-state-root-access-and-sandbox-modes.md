@@ -227,7 +227,7 @@ sandbox 在 confine 入口捕获一次 scope，避免异步 profile 探测后混
 
 ## 负授权保留与顺序无关冲突（2026-10-16，分支安全审查 Phase A）
 
-分支安全审查（[2026-10-16 分支安全审查与硬链接隔离修复计划](../plans/active/2026-10-16-branch-security-review-and-hardlink-isolation.md)）在 `feat/sandbox-permision-harden` 上证实 R2、R3 两条 P1 真实可达，本节记录其定案修复；R1（Windows 祖先改名跨工具绕过）与 R4（硬链接 ACL 副作用）按该计划的 B/C 阶段另行实施，实施状态以路线账本为准。
+分支安全审查（[2026-10-16 分支安全审查与硬链接隔离修复计划](../plans/completed/2026-10-16-branch-security-review-and-hardlink-isolation.md)）在 `feat/sandbox-permision-harden` 上证实 R2、R3 两条 P1 真实可达，本节记录其定案修复；R1（Windows 祖先改名跨工具绕过）与 R4（硬链接 ACL 副作用）按该计划的 B/C 阶段另行实施，实施状态以路线账本为准。
 
 ### read-only 的 deny 在 graft 之后应用（R2）
 

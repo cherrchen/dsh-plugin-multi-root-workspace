@@ -67,4 +67,3 @@ export function messagesFrames(call, text, id) {
     { type: 'message_stop' },
   ].map(frame)
 }
-

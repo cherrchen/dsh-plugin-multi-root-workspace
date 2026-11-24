@@ -53,6 +53,7 @@ import { storeIdentity } from './authority/native.ts'
 import { AuthorityClient, AuthorityServer, snapshotSchema, parseArguments, type Method, type Snapshot } from './authority/protocol.ts'
 import { isAbsolute } from 'node:path'
 import { Context, Service } from '@deepseek-ai/cordis'
+import { policyOriginRoot } from './compat/session-directory.ts'
 import type { SandboxExecutionPolicy } from '@deepseek-ai/dsh-sandbox'
 import { defineDomain, domainTable, type KvTable } from '@deepseek-ai/dsh-storage-domain'
 import type {} from './compat.ts'
@@ -1179,31 +1180,37 @@ export class MultiRootRegistry extends Service {
     if (this.disposed) throw new Error('multi-root registry: cannot admit an operation after disposal')
     // Copy policy before the first await; the trusted caller still owns it.
     const capturedPolicy = structuredClone(policy)
+    // The admission key is the Session origin, never upstream's effective
+    // policy root: a moved Session must still admit its registered roots and
+    // deny boundaries (ADR-0012). Resolve it before the first await, while the
+    // live Session lookup is still synchronously available.
+    const origin = policyOriginRoot(this.ctx, capturedPolicy)
     await this.ensureAuthority()
-    const key = primaryKey(capturedPolicy.workspaceRoot)
+    const key = primaryKey(origin)
     if (this.available) {
       const snapshot = this.client
         ? await this.remoteSnapshot('admit', [key])
         : await this.captureSnapshot(key)
-      const scope = freezeOperationScope(this.ctx.multiRootScope.resolveSnapshot(capturedPolicy, this.projectRoots(this.localSnapshotRoots(snapshot)), snapshot.available))
-      return await runRegistryOperation(scope, kind, snapshot.epoch, snapshot.revision, body, this.operationProof, capturedPolicy.mode)
+      const scope = freezeOperationScope(this.ctx.multiRootScope.resolveSnapshot(capturedPolicy.mode, origin, this.projectRoots(this.localSnapshotRoots(snapshot)), snapshot.available))
+      return await runRegistryOperation(scope, kind, snapshot.epoch, snapshot.revision, body, this.operationProof, capturedPolicy)
     }
     const admission = await this.serialize(key, () => {
       if (this.disposed) throw new Error('multi-root registry: cannot admit an operation after disposal')
       return {
-        scope: freezeOperationScope(this.ctx.multiRootScope.resolveSnapshot(capturedPolicy, this.projectRoots(this.cache.get(key) ?? []), false)),
+        scope: freezeOperationScope(this.ctx.multiRootScope.resolveSnapshot(capturedPolicy.mode, origin, this.projectRoots(this.cache.get(key) ?? []), false)),
         epoch: this.operationEpoch,
         revision: this.operationRevision,
       }
     })
-    return await runRegistryOperation(admission.scope, kind, admission.epoch, admission.revision, body, this.operationProof, capturedPolicy.mode)
+    return await runRegistryOperation(admission.scope, kind, admission.epoch, admission.revision, body, this.operationProof, capturedPolicy)
   }
 
   withPrimaryOperation<T>(policy: SandboxExecutionPolicy, body: () => T): T {
     // No IPC, no additional grant, and no shared temp authority. This is only
     // the compatibility fallback for a public entry that must stay synchronous.
-    const scope = this.ctx.multiRootScope.resolveSnapshot(policy, this.projectRoots(this.cache.get(primaryKey(policy.workspaceRoot)) ?? []), false)
-    return runPrimaryOperation(freezeOperationScope(scope), policy.mode, this.operationProof, body)
+    const origin = policyOriginRoot(this.ctx, policy)
+    const scope = this.ctx.multiRootScope.resolveSnapshot(policy.mode, origin, this.projectRoots(this.cache.get(primaryKey(origin)) ?? []), false)
+    return runPrimaryOperation(freezeOperationScope(scope), policy, this.operationProof, body)
   }
 
   /**
@@ -2175,11 +2182,11 @@ export class MultiRootRegistry extends Service {
 
   /**
    * The scope the registry publishes: only usable roots, in registry order.
-   * @param policy - the per-call policy; its workspace root is the primary root.
+   * @param policy - the per-call policy; its Session origin is the primary root.
    * @returns the granted canonical roots.
    */
   grantedFor(policy: SandboxExecutionPolicy): readonly string[] {
-    return this.granted(policy.workspaceRoot)
+    return this.granted(policyOriginRoot(this.ctx, policy))
   }
 
   /** Classify one stored record set and cache it. */

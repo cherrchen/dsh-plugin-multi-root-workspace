@@ -83,7 +83,7 @@ Workspace Folders 目前只有一个入口：侧栏底部 `sidebar.footer.action
 
 **已知耦合**：探针依赖四条结构事实——options 容器是 flex 子项、slot outlet 是 `display: contents`、同槽条目与 seat 处于同一个 outlet 包装（探针沿包装下钻，不把包装当条目）、options 组是行内最后一项。它们在 `0.2.1-alpha.3`–`0.2.2-rc.3` 的已安装源码中一致；任何一条不成立时探针返回 `null`（或保守地少算余量），入口回落到旧形态而不是报错或消失。若上游给 hero 行加容器或允许 `.heroOptions` 收缩，应重新评估本节。
 
-**验证**：几何逻辑用 jsdom + 桩矩形单测（`tests/client-hero-room.spec.ts`、`tests/client-hero-entry.spec.tsx`，夹具按渲染器的单 outlet 共享包装形状搭建），样式用 `tests/client-styles.spec.ts` 钉住；真实布局以 Chromium 复刻页（上游 rc.3 规则 + 生产样式表 + 生产几何模块）测量，含同槽条目场景，数据与过程见[计划](../plans/active/2026-11-14-hero-entry-adaptive-width.md)。
+**验证**：几何逻辑用 jsdom + 桩矩形单测（`tests/client-hero-room.spec.ts`、`tests/client-hero-entry.spec.tsx`，夹具按渲染器的单 outlet 共享包装形状搭建），样式用 `tests/client-styles.spec.ts` 钉住；真实布局以 Chromium 复刻页（上游 rc.3 规则 + 生产样式表 + 生产几何模块）测量，含同槽条目场景，数据与过程见[计划](../plans/completed/2026-11-14-hero-entry-adaptive-width.md)。
 
 **Review 修正（2026-11-14）**：首版 `groupBoxes` 对包含 seat 的包装直接返回，导致同处一个 outlet 的其他条目被跳过——而渲染器正是每个渲染点只发一个 outlet，真实宿主里 forge 的 worktree 条目会让余量被高估、在窄列仍保留溢出 label。已改为沿包装下钻计数（Chromium 复刻：520px 列宽 + 93px 同槽条目的行溢出由 +26px 变为 0），夹具与用例同步换成共享包装形状。
 

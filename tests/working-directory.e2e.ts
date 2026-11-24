@@ -11,6 +11,7 @@ import SystemPrompt from '@deepseek-ai/dsh-system-prompt'
 import LocalSubprocess from '@deepseek-ai/dsh-subprocess-local'
 import { canonicalPath } from '@deepseek-ai/dsh-sandbox'
 import { MultiRootFileSystem } from '../src/fs.ts'
+import type { Config as ScopeConfig } from '../src/scope.ts'
 import { effectiveDirectory } from '../src/compat/session-directory.ts'
 import { mountRegistryStack } from './support/registry-stack.ts'
 import { createFixtureWorkspace, REPO_ROOT } from './support/temp-workspace.ts'
@@ -33,7 +34,7 @@ const worktreeModule = await optionalRuntime('@deepseek-ai/dsh-experimental-work
 const cleanup: Array<() => Promise<void>> = []
 afterEach(async () => { while (cleanup.length) await cleanup.pop()!() })
 
-async function world() {
+async function world(options: { readonly scopeConfig?: ScopeConfig } = {}) {
   const fixture = createFixtureWorkspace('directory')
   const third = join(fixture.base, 'third'); mkdirSync(third)
   // The real providers must mount before the provider-conflict gate inside the
@@ -42,6 +43,7 @@ async function world() {
   // The mounts keep their original dependency order (Policy waits on the
   // session services), just inside the gate hook.
   const stack = await mountRegistryStack(join(fixture.base, 'store'), {}, {
+    ...(options.scopeConfig === undefined ? {} : { scopeConfig: options.scopeConfig }),
     beforeGate: async ctx => {
       await ctx.plugin(Sessions)
       await ctx.plugin(Projections)
@@ -62,25 +64,76 @@ async function world() {
   return { fixture, third, stack, ctx, session, agent, notices, wd: ctx.get('workingDirectory' as never) as any }
 }
 
-it.runIf(directoryModule !== undefined)('keeps origin grants and registry identity through authorized and unauthorized cwd changes', async () => {
+it.runIf(directoryModule !== undefined)('keeps origin grants and registry identity while the policy root follows the effective cwd', async context => {
   const { ctx, wd, agent, session, stack, fixture, third } = await world()
   const nested = join(fixture.outside, 'nested'); mkdirSync(nested)
   const other = ctx.sessions.create(SessionId('independent'), { meta: { cwd: fixture.workspace } })
   const policy = () => ctx.sandboxPolicy.resolve({ session })
+  await wd.set(agent, nested)
+  if (policy().workspaceRoot !== canonicalPath(nested)) {
+    // Releases before 0.2.3 keep the sandbox policy root on the Session origin.
+    context.skip('the install does not follow the effective working directory')
+    return
+  }
   for (const cwd of [nested, third, fixture.workspace]) {
     await wd.set(agent, cwd)
     expect(effectiveDirectory(ctx, session)).toBe(canonicalPath(cwd))
     expect(wd.get(other)).toBe(fixture.workspace)
-    expect(policy().workspaceRoot).toBe(fixture.workspace)
+    // Upstream 0.2.3: the policy's workspace root is the Session's effective
+    // directory, and it moves the upstream write boundary with it.
+    expect(policy().workspaceRoot).toBe(canonicalPath(cwd))
+    // Identity never moves: the header, the Registry key and the grant set
+    // stay on the origin (ADR-0012).
+    expect(session.header.cwd).toBe(fixture.workspace)
     expect(ctx.multiRootScope.snapshot(policy()).additionalRoots).toEqual([canonicalPath(fixture.outside)])
-    const target = await ctx.fs.resolve('relative.txt', { cwd: wd.get(session) })
-    if (cwd === third) await expect(ctx.fs.writeText(target, 'bad', undefined, undefined, policy())).rejects.toMatchObject({ code: 'FS_SANDBOX_DENIED' })
-    else await ctx.fs.writeText(target, 'allowed', undefined, undefined, policy())
     expect(stack.registry.list(third)).toEqual([])
+    const target = await ctx.fs.resolve('relative.txt', { cwd: wd.get(session) })
+    await ctx.fs.writeText(target, 'allowed', undefined, undefined, policy())
   }
-  expect(existsSync(join(third, 'relative.txt'))).toBe(false)
-  expect(session.header.cwd).toBe(fixture.workspace)
+  expect(existsSync(join(third, 'relative.txt'))).toBe(true)
   expect((await stack.registry.refresh(fixture.workspace))).toHaveLength(1)
+  expect(await stack.registry.refresh(third)).toEqual([])
+})
+
+it.runIf(directoryModule !== undefined)('keeps a registered read-only root denied after the session moves into it', async context => {
+  const { ctx, wd, agent, session, stack, fixture } = await world()
+  const readOnly = join(fixture.base, 'read-only-root'); mkdirSync(readOnly)
+  await stack.registry.add(fixture.workspace, { path: readOnly, access: 'read-only' })
+  const policy = () => ctx.sandboxPolicy.resolve({ session })
+  await wd.set(agent, readOnly)
+  if (policy().workspaceRoot !== canonicalPath(readOnly)) {
+    context.skip('the install does not follow the effective working directory')
+    return
+  }
+  // The upstream boundary moved onto the directory the origin registered as
+  // read-only; only the origin's record set can keep it refused.
+  expect(ctx.multiRootScope.snapshot(policy()).deniedRoots).toEqual([canonicalPath(readOnly)])
+  const target = await ctx.fs.resolve('denied.txt', { cwd: wd.get(session) })
+  await expect(ctx.fs.writeText(target, 'bad', undefined, undefined, policy())).rejects.toMatchObject({ code: 'FS_SANDBOX_DENIED' })
+  expect(existsSync(join(readOnly, 'denied.txt'))).toBe(false)
+})
+
+it.runIf(directoryModule !== undefined)('keeps toolAccess caps after the session moves into a writable additional root', async context => {
+  const { ctx, wd, agent, session, fixture } = await world({ scopeConfig: { toolAccess: { write: 'read-only' } } })
+  const nested = join(fixture.outside, 'capped'); mkdirSync(nested)
+  const policy = () => ctx.sandboxPolicy.resolve({ session })
+  await wd.set(agent, nested)
+  if (policy().workspaceRoot !== canonicalPath(nested)) {
+    context.skip('the install does not follow the effective working directory')
+    return
+  }
+  const target = await ctx.fs.resolve('capped.txt', { cwd: wd.get(session) })
+  const waterfall = ctx.waterfall.bind(ctx) as (
+    event: string, exec: { name: string; callId: string }, next: () => Promise<unknown>,
+  ) => Promise<unknown>
+  // The cap is a dispatch fact; the effective policy root must not lift it.
+  await expect(waterfall('tools/execute', { name: 'write', callId: 'cap-write' },
+    () => ctx.fs.writeText(target, 'bad', undefined, undefined, policy()))).rejects.toMatchObject({ code: 'FS_SANDBOX_DENIED' })
+  expect(existsSync(join(nested, 'capped.txt'))).toBe(false)
+  // An uncapped tool keeps the origin's writable grant.
+  await waterfall('tools/execute', { name: 'read', callId: 'cap-read' },
+    () => ctx.fs.writeText(target, 'ok', undefined, undefined, policy()))
+  expect(readFileSync(join(nested, 'capped.txt'), 'utf8')).toBe('ok')
 })
 
 it.runIf(directoryModule !== undefined)('replays effective cwd and recovers a missing directory without moving the grants', async () => {
@@ -140,8 +193,20 @@ it.runIf(directoryModule !== undefined && worktreeModule !== undefined)('uses th
   }
   await w.wd.set(w.agent, w.third)
   const deniedPolicy = w.ctx.sandboxPolicy.resolve({ session: w.session })
-  await expect(w.stack.registry.withOperation(deniedPolicy, 'process', async () => worktrees.create(w.agent, { name: 'denied' }))).rejects.toThrow('Could not finish worktree')
-  expect(existsSync(join(w.third, '.agents/worktrees/denied'))).toBe(false)
+  if (deniedPolicy.workspaceRoot === canonicalPath(w.third)) {
+    // Upstream 0.2.3 moves the primary write boundary with the effective
+    // directory — the Host Worktree service depends on that. The plugin keeps
+    // identity and grants on the origin and must not re-key them here, so the
+    // moved Host may create the worktree while the Registry stays untouched.
+    const created = await w.stack.registry.withOperation(deniedPolicy, 'process', async () => worktrees.create(w.agent, { name: 'denied' }))
+    expect(created.path).toBe(canonicalPath(join(w.third, '.agents/worktrees/denied')))
+    expect(existsSync(join(w.third, '.agents/worktrees/denied'))).toBe(true)
+  } else {
+    // Releases before 0.2.3 keep the upstream boundary on the origin, so this
+    // repository stays unauthorized.
+    await expect(w.stack.registry.withOperation(deniedPolicy, 'process', async () => worktrees.create(w.agent, { name: 'denied' }))).rejects.toThrow('Could not finish worktree')
+    expect(existsSync(join(w.third, '.agents/worktrees/denied'))).toBe(false)
+  }
   expect((await w.stack.registry.refresh(w.fixture.workspace))).toHaveLength(1)
 }, 120000)
 

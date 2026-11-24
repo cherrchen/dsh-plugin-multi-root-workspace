@@ -158,7 +158,7 @@ try {
     output.workingDirectory = 'ABSENT: the 0.2.0 runtime uses its native cwd fallback; no substitute service was installed'
   }
   await ctx.plugin(integration({ preset: 'ops-e2e-ptc', presentation: 'ptc', discovery: false, allowedTools: ['read_files'], alwaysLoaded: ['read_files'], required: true }))
-  const ptc = await run('ops-e2e-ptc', 'run_code', { description: 'Read two isolated additional-root fixtures', code: `return await tools.ops_read_files({files:[{path:${JSON.stringify(a)}},{path:${JSON.stringify(b)}}]})` }, true)
+  const ptc = await run('ops-e2e-ptc', 'run_code', { description: 'Read two isolated additional-root fixtures', code: `await tools.ops_read_files({files:[{path:${JSON.stringify(a)}},{path:${JSON.stringify(b)}}]})` }, true)
   const ptcValue = ptc.records.find(result => result.nested && result.name === 'ops_read_files')?.result.value
   assert.equal(ptcValue?.status, 'completed')
   for (const name of ['root', 'a', 'deep', 'b']) assert(ptc.text.includes(sentinels[name]), `PTC read missed ${name}`)

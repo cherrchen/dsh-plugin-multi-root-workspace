@@ -1,6 +1,6 @@
 # 工作区菜单入口与 Workspace Folders 对话框复用（实施计划）
 
-> **状态：已实施并在隔离 Web 宿主完成核心场景目检（`feat/workspace-menu-ui`，2026-11-08），决策见 [ADR-0038](../../decisions/ADR-0038-workspace-menu-folders-dialog.md)。** Phase 0–3 与文档/测试/门禁已完成，随 `v0.1.17` 发版。本计划只覆盖"工作区 `...` 菜单新增管理工作区目录入口"这一件事；`RootSwitcher`、上游 `WorkspaceBrowser`、对话框内部逻辑均不在改动范围内。
+> **状态：已完成——已实施并在隔离 Web 宿主完成核心场景目检（`feat/workspace-menu-ui`，2026-11-08），决策见 [ADR-0038](../../decisions/ADR-0038-workspace-menu-folders-dialog.md)。** Phase 0–3 与文档/测试/门禁已完成，随 `v0.1.17` 发版。本计划只覆盖"工作区 `...` 菜单新增管理工作区目录入口"这一件事；`RootSwitcher`、上游 `WorkspaceBrowser`、对话框内部逻辑均不在改动范围内。
 
 ## Goal
 
@@ -420,7 +420,7 @@ pnpm docs:check
 
 - `docs/decisions/ADR-0038-workspace-menu-folders-dialog.md`（新增）；
 - `docs/decisions/README.md` / `README.en.md`（索引）；
-- `docs/plans/active/2026-11-08-workspace-menu-folders-dialog.md`（本文件）；
+- `docs/plans/completed/2026-11-08-workspace-menu-folders-dialog.md`（本文件）；
 - `docs/plans/README.md` / `README.en.md`（active 索引）；
 - `docs/architecture/multi-root-workspace.md`：Client 半部条目补充 footer dialog owner、菜单入口、`order: 150`、导航语义；
 - `docs/guide/README.md` / `README.en.md`：工作区 `...` 菜单入口与"先切换再打开"的用户可见语义；
@@ -475,7 +475,7 @@ pnpm docs:check
 
 - 定向回归：`client-workspace-menu.spec.ts` 26/26、`client-panel.spec.tsx` 72/72、`client-icons.spec.ts` 4/4；`client-switcher.spec.tsx` 23/23、`client-navigator.spec.tsx` 23/23 无回归。
 - 完整 `pnpm test`（DSH 工具沙箱内）：**1223 passed / 157 skipped / 17 failed**。rebase 前本分支同一环境为 1181/157/17，更早的基线为 1142/157/17；三次的失败集合相同，全部是工具沙箱拒绝嵌套 `sandbox-exec` 与共享 Registry IPC 导致的 follower 期望失败（`expected 'contended' to be 'follower'`），范围是 `registry*`、`skills-*`、`authority-boundaries`、`b9-review-regressions`。
-- 完整 `pnpm test`（完整主机权限）：**1302 passed / 95 skipped / 0 failed**（84 个文件通过、3 个文件整体跳过）。这与仓库 `v0.1.16` 发版记录中"沙箱内失败、完整权限下通过"的现象一致（见[进度总账](./2026-09-12-multi-root-workspace.md#v0116-发版验收2026-11-08)），因此确认上述 17 项不是本批回归。
+- 完整 `pnpm test`（完整主机权限）：**1302 passed / 95 skipped / 0 failed**（84 个文件通过、3 个文件整体跳过）。这与仓库 `v0.1.16` 发版记录中"沙箱内失败、完整权限下通过"的现象一致（见[进度总账](../active/2026-09-12-multi-root-workspace.md#v0116-发版验收2026-11-08)），因此确认上述 17 项不是本批回归。
 - `pnpm typecheck`、`pnpm build`、`pnpm compat:check`、`pnpm lint`、`pnpm docs:check`、`pnpm pack:check`（185 个成员）全部通过。
 - `pnpm smoke:packed`（DSH 工具沙箱内）：**95 passed / 0 failed / 8 skipped**；完整主机权限 + `DSH_PROBE_VERIFIED_DIALECTS=seatbelt` 重跑：**136 passed / 0 failed / 0 skipped**，打包产物行为电池全绿。
 - **隔离 Web 宿主目检（已执行）**：在 `/tmp/dsh-mrw-manual-1794125206` 的独立 `$DSH_HOME` 中以 `link:` 安装本分支，启动 `dsh --profile web --port 52380`；用 headless Chrome（1280×800）实际点击验证：当前 repo-a → repo-b 的 `...` → 「管理工作区目录…」→ 当前会话切换为 repo-b，`工作区目录` 对话框可见，主根显示 repo-b 的 canonical 路径（截图 `/tmp/mrw-final.png`，不提交）。同一轮也验证了菜单项位于「重命名」与「在 Finder 中显示」之间、图标为 workspace-tree、页脚「工作区目录」按钮仍可独立打开。

@@ -2,7 +2,7 @@
 import { afterEach, beforeEach, expect, it } from 'vitest'
 import { createServer, type IncomingMessage, type ServerResponse } from 'node:http'
 import type { AddressInfo } from 'node:net'
-import { HostConnectionService } from '@deepseek-ai/dsh-client-connection'
+import { ConnectionAuthentication, HostConnectionService, type PeerScope } from '@deepseek-ai/dsh-client-connection'
 import { createFixtureWorkspace, type FixtureWorkspace } from './support/temp-workspace.ts'
 import { skillsStack, project, writeSkill } from './support/skills-stack.ts'
 import * as Command from '../src/command.ts'
@@ -13,16 +13,29 @@ afterEach(() => fixture.dispose())
 
 it('serves cold Session metadata, preview and revocation over the real Connection channel', async () => {
   const stack = await skillsStack(fixture.base)
-  const routes: { path: string; handler(req: IncomingMessage, res: ServerResponse): Promise<void> }[] = []
+  const routes: { path: string; handler(req: IncomingMessage, res: ServerResponse, peer: PeerScope): Promise<void> }[] = []
+  // The WebServer authorizes the request and hands the route the admitted
+  // Peer; this fixture server stands in for that step with the owner Peer.
+  // Without a Peer the route returns before the bridge and never answers.
+  let peer: PeerScope | undefined
   const server = createServer((req, res) => {
     const route = routes.find(route => req.url?.startsWith(route.path))
-    if (route) void route.handler(req, res).catch(error => { res.writeHead(500); res.end(String(error)) })
+    if (route) void route.handler(req, res, peer as PeerScope).catch(error => { res.writeHead(500); res.end(String(error)) })
     else { res.writeHead(404); res.end() }
   })
   try {
     const ctx = stack.ctx
     ctx.provide('webServer', { host: '127.0.0.1', protocol: 'http:', port: 0, register: (route: typeof routes[number]) => { routes.push(route); return () => { routes.splice(routes.indexOf(route), 1) } } } as never)
-    new HostConnectionService(ctx, [], { isAuthenticated: () => true } as never)
+    // Credential verification is a nested service from 0.2.3-alpha.1: the
+    // transport reads it at construction and routes require an admitted Peer.
+    // Older releases authenticate through constructor options and answer
+    // without a Peer, so the fixture selects the shape it installed.
+    if (typeof ConnectionAuthentication === 'function') {
+      new ConnectionAuthentication(ctx)
+      peer = new HostConnectionService(ctx, []).createPeer({ principal: { kind: 'owner' } })
+    } else {
+      Reflect.construct(HostConnectionService, [ctx, [], { isAuthenticated: () => true }])
+    }
     ctx.provide('commands', { register: () => () => {} } as never)
     ctx.provide('sandboxPolicy', { resolve: () => ({ mode: 'workspace-write', workspaceRoot: fixture.workspace }) } as never)
     await ctx.plugin(Command)

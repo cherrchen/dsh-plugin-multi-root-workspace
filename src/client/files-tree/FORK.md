@@ -40,6 +40,19 @@ which is always the primary root and cannot be re-pointed.
   and with it `SidebarFilesKey`, is unchanged). The component sources are
   byte-identical to the previous baseline, except for the documented
   `face.ts` hold/release lifecycle delta.
+  The `0.2.3` line changes the Files page around this fork without moving the
+  legacy baseline. `FilesBody.tsx` derives the pane directory from
+  `selectSessionDirectory` and wraps the `sidebar.right.tab.files.actions` slot
+  in a `.externalActions` box; `FileTree.module.css` indents nested levels by
+  `calc(16px + 6px)` instead of `18px`. The fork never reads the Session cwd —
+  its `root` arrives as a prop — so the first needs nothing here. The second is
+  mirrored by `.mrfw-ftLevel .mrfw-ftLevel` in `src/client/styles.ts`. The
+  wrapper is upstream's new DOM and puts the switcher/launcher one element
+  deeper than the header's flex row, so `styles.ts` also drops it with
+  `display: contents`; `tests/client-styles.spec.ts` pins the rule and
+  `tests/client-switcher.spec.tsx` renders the wrapped header shape.
+  `0.2.3-alpha.2` changes only package versions, so one sync covers both
+  releases.
 
 ## Forked files (baseline copy + documented deltas)
 
@@ -290,7 +303,10 @@ upstream binds inside it arrives as a prop instead:
   additional-root preview carries workspace search too (ADR-0043); the native
   preview's own search state is still upstream's `FileNavigator` face and is
   not joined. Re-check those selectors whenever the upstream navigator gains
-  a new `data-files-search*` hook.
+  a new `data-files-search*` hook. The `0.2.3-alpha.1` preview header wraps
+  the document-actions handoff in a `.externalActions` box as well; this
+  plugin's navigator anchor is an invisible span that no stylesheet rule
+  targets, so the retarget is unaffected.
 - The `sidebarFiles` dictionaries — the fork binds, never registers.
 - The session-scope `data-files-*` DOM contract — the fork reads those hooks
   (`closest('[data-files-root]')`, `closest('[data-dockkit-content]')`) but
@@ -310,6 +326,13 @@ upstream `src/client/` tree, so the copies stay as reviewed at `0.2.2-rc.3`:
 | `search-rules.ts` | `search-rules.ts` | logic verbatim; JSDoc condensed |
 | `search-tree.ts` | `search-tree.ts` | `buildSearchTree` returns this fork's `FilesTabState` and imports `childPath` from `resource-path.ts` |
 | `search-preferences.ts` | `search-preferences.ts` | plugin-owned Storage seam (same localStorage key and stored format) instead of `@deepseek-ai/dsh-client-store` persist; no upstream runtime import |
+
+`0.2.3-alpha.1` also moved upstream's `face.ts` (a held search re-runs when
+the held cwd changes) and rewrote `FilesBody.module.css`'s covered-row rule as
+a custom property on the row; neither is forked — this directory's `face.ts`
+is the legacy listing face with no search (search lives in `pane.tsx` and the
+`search-*` modules), and its portal targets are not navigator-row children —
+so the semantic copies stay at their `0.2.2-rc.5` pins.
 
 Everything else is ours: `search-state.ts` (per-(tab, root) records, plus the
 request identity that lets a body remount reuse a settled answer and
@@ -340,7 +363,9 @@ The legacy files remain pinned to `0.2.2-alpha.2`, since replacing their
 store/face with the later pane-based API would drop older supported hosts.
 For newer releases compare their `FileTree` Factory input, `FilesBody` page
 hooks, locales and remote signatures against `src/compat/files-tree.ts` and
-the page selectors before changing this baseline. Re-copy the legacy files
+the page selectors before changing this baseline. The `0.2.3` line's
+`.externalActions` header wrapper and nested-level indent are the two page
+changes to re-check against `styles.ts` when the pin moves. Re-copy the legacy files
 only when intentionally changing the legacy baseline; then perform the steps
 below. The Factory fallback must keep older or incomplete compositions usable.
 

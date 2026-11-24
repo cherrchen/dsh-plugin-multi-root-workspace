@@ -7,11 +7,11 @@
 
 | 项 | 值 | 说明 |
 | --- | --- | --- |
-| 开发目标版本（基线） | `0.2.2-rc.5` | 精确 pin 在 `devDependencies`；CI 主车道对每个精确版本覆盖通用和适用的原生验证 |
+| 开发目标版本（基线） | `0.2.3-alpha.2` | 精确 pin 在 `devDependencies`；CI 主车道对每个精确版本覆盖通用和适用的原生验证 |
 | 支持矩阵 | [`SUPPORTED_DSH_RELEASES`](../../src/compat/dsh-version.ts) | **精确版本 allowlist**；`peerDependencies` 逐项或，不承诺未来版本 |
-| 实测证据 | [路线图兼容提升记录](../plans/active/2026-09-12-multi-root-workspace.md#dsh-021-rc3-兼容提升2026-10-23)（历次记录同档） | 升级车道跑候选的完整套件，旧版回归覆盖所有受支持版本；`upgrade.yml` 只探测候选，不自动扩大 allowlist |
+| 实测证据 | [路线图兼容提升记录](../plans/active/2026-09-12-multi-root-workspace.md#dsh-023-alpha1--alpha2-兼容提升2026-11-22)（历次记录同档） | 升级车道跑候选的完整套件，旧版回归覆盖所有受支持版本；`upgrade.yml` 只探测候选，不自动扩大 allowlist |
 | 运行时门禁 | `multi-root-compat` 行 | 版本不在 allowlist 或核心包混装时，四个安全相关行根本不启动（ADR-0009） |
-| cordis | 基线 `4.1.0`；旧版按 `dsh` 声明的范围下限精确 pin | `upgrade-dsh.mjs` 同步重指，并从精确 release-age 条目派生 workspace-only 的 DSH probe overrides 与 cordis 生态 pin（`cordis-plugin-*` / `schemastery` / `cosmokit`，取自目标版本自身 manifest），避免预发布范围导致混装、重复副本导致工具调度 Symbol 不一致或生态版本错代。已有自定义 overrides 时拒绝覆盖；探测后恢复保存的 workspace |
+| cordis | 基线 `4.2.0-alpha.1`；旧版按 `dsh` 声明的范围下限精确 pin | `upgrade-dsh.mjs` 同步重指，并从精确 release-age 条目派生 workspace-only 的 DSH probe overrides 与 cordis 生态 pin（`cordis-plugin-*` / `schemastery` / `cosmokit`，取自目标版本自身 manifest），避免预发布范围导致混装、重复副本导致工具调度 Symbol 不一致或生态版本错代。已有自定义 overrides 时拒绝覆盖；探测后恢复保存的 workspace |
 
 **必须精确 pin**：上游使用多个可变的 npm dist-tag，`latest` / `next` 与 `alpha` 可以指向不同发布线；范围或 tag 不能证明解析到的是已验证版本。`pnpm-workspace.yaml` 里的 `minimumReleaseAgeExclude` 对开发版本的直接与传递 DSH 包、宿主 document tooling 都逐项列出精确版本，供 frozen install 与运行脚本前的依赖自检使用；不使用跨版本通配豁免。它是为此配套的（pnpm 的发布年龄门禁会拦下刚发布的预发布版本）。
 
@@ -21,7 +21,7 @@
 
 | 用途 | 工具 | 配置 |
 | --- | --- | --- |
-| Node.js | `24.9.0`（0.2.2 车道及以后）；旧版回归按 CI 同一路由用 `22.19.0` | `scripts/ci/plan.mjs` 按已知旧版前缀分流：仅 `0.1.*` / `0.2.0` / `0.2.1` 用 22 |
+| Node.js | `24.22.3`（0.2.3 车道及以后）、`24.9.0`（0.2.2 车道）、`22.19.0`（旧版回归） | `scripts/ci/plan.mjs` 按版本分流：`0.1.*` / `0.2.0` / `0.2.1` 用 22.19.0，`0.2.2` 用 24.9.0，`0.2.3` 及以后用 24.22.3（上游 alpha.2 的 engines 为 `^24.22.3 || >=26.13.1`） |
 | 包管理 | pnpm `11.25.0` | `package.json#packageManager` |
 | 类型检查与声明产出 | TypeScript `6.x` | `tsconfig.host.json`（strict、`exactOptionalPropertyTypes`、`noUncheckedIndexedAccess`、`verbatimModuleSyntax`、`rewriteRelativeImportExtensions`） |
 | 打包 | tsdown（rolldown） | `tsdown.config.ts`：逐入口 ESM bundle 到 `lib/`，`@deepseek-ai/*` 与 cordis 保持 external |
@@ -224,7 +224,7 @@ dsh --profile web --dump-config     # 应看到两行 disabled + 十行 insert
 
 [CI workflow](../../.github/workflows/ci.yml) 响应 main push、PR 和手动触发，权限为 `contents: read`。在 GitHub Actions 的 CI 页面可选择分支后点 **Run workflow**，也可用 `gh workflow run ci.yml --ref <branch>` 验证分支。
 
-- `releases` 通过 [list-dsh-releases.mjs](../../scripts/list-dsh-releases.mjs) 读取精确契约，按 Node 版本分桶，再把每个桶切成最多四个版本一组。当前 26 个版本在每个启用镜像形成七组（Node 22 五组、Node 24 两组）。该 job 也在 frozen 开发树校验契约，并各跑一次 lint、docs:check 和 Chromium 面板布局回归。
+- `releases` 通过 [list-dsh-releases.mjs](../../scripts/list-dsh-releases.mjs) 读取精确契约，按 Node 版本分桶，再把每个桶切成最多四个版本一组。当前 27 个版本在每个启用镜像形成八组（Node 22 五组、Node 24.9 两组、Node 24.22.3 一组）。该 job 也在 frozen 开发树校验契约，并各跑一次 lint、docs:check 和 Chromium 面板布局回归。
 - 每组从同一个 Git commit 解包。源码目录与原 checkout 同级，父目录链禁止有 `node_modules`。每个版本独享 manifest、lockfile、依赖树、`lib/`、探针文件、DSH scratch 与日志。依赖下载共享 pnpm 的内容寻址缓存。源码及其中的内核拒绝夹具位于 `/tmp` 和本机 temp grant 之外；DSH scratch 在平台临时区中分配，保留各方言对原生临时目录的语义。开发 pin 走 frozen lockfile，其余复用 `upgrade-dsh.mjs`，仅在该副本内关闭 release-age 等待。
 - `ubuntu-latest` 对每版跑 `compat:check`、双端 typecheck、build、完整 Vitest 和冒烟，保留原生 Landlock；开发 pin 版另跑 `licenses:check`（发布 tarball 只由它构建）。每组并行最多两版，各用最多两个 Vitest worker。其他镜像按版本串行，各用最多四个 worker；每版做精确契约检查、构建和原生套件。Auto Review 联合合同的每个发布都是独立车道：该版本按自身基线做实现类型检查、完整单测与差分门禁（Ubuntu 完整镜像），并在每个启用镜像上执行联合冒烟；其他版本照常显式跳过并退出 0。
 - [Ubuntu 独占套件清单](../../scripts/ci/ubuntu-only.json) 记录从其他镜像迁移的 Vitest 文件。客户端、RPC 和合同、locale 与快照、纯方言 argv、指令与 OPS 活动归属、恢复调度器、打包元数据及工作流等检查集中在 Ubuntu。含平台断言的混合文件整组保留，包括 Registry/IPC/lease 和跨进程接管、实际内核执行、Windows ACL / PowerShell / ConPTY、LSP、worktree Git 和路径边界。所有镜像继续运行真实安装的 `smoke:compose`、`smoke:behavior`、`smoke:journey`、`pack:check` 与 `smoke:packed`。

@@ -5,10 +5,15 @@
  * registered additional roots next, and the Workspace Folders manager last),
  * followed by a `PathLabel` of the selected root's full path — the same
  * component upstream draws in that spot, so both primary and additional
- * selections read exactly like the native header. While an additional root
- * is selected it also lends the pane's body area to this plugin's verbatim
- * fork of the native Files tree (`files-tree/`), so an additional root reads
- * and behaves exactly like the primary one.
+ * selections read exactly like the native header. For the primary selection
+ * that path is the Files pane's own directory — the slot owner's
+ * `absolutePath`, which upstream resolves from the Session's effective
+ * directory — not the Registry identity: once the Session moves into a
+ * worktree, the tree browses the moved directory while the registry stays
+ * keyed on the Session origin. While an additional root is selected it also
+ * lends the pane's body area to this plugin's verbatim fork of the native
+ * Files tree (`files-tree/`), so an additional root reads and behaves
+ * exactly like the primary one.
  *
  * Two upstream DOM hooks make the takeover work, and both degrade silently:
  *
@@ -70,7 +75,14 @@ import {
 
 /** What the registered Files-actions occupant needs beyond the slot owner. */
 export interface RootSwitcherProps extends Omit<WorkspaceFoldersActionProps, 'compact' | 'wide'> {
-  /** This pane's workspace root, carried by the slot owner's `absolutePath`. */
+  /**
+   * The directory this pane browses, carried by the slot owner's
+   * `absolutePath`. Upstream passes the Session's effective directory (the
+   * projected `workingDirectory` ?? the header cwd), so after the Session
+   * moves into a worktree this differs from the Registry identity
+   * (`view.primaryRoot`, the Session origin); the header follows this value,
+   * never the registry one.
+   */
   readonly primaryPath: string
   /**
    * The forked open-in-app control's shared props, or `undefined` where the
@@ -355,11 +367,19 @@ export function RootSwitcher(props: RootSwitcherProps): ReactNode {
   }, [view, selected, setSelected])
 
   const roots = useMemo(() => view?.roots ?? [], [view])
-  const primaryLabel = view?.primaryName ?? basename(view?.primaryRoot ?? primaryPath)
+  // The primary row's label is the workspace title the host resolved when it
+  // has one; otherwise it names the directory being browsed. The browsing
+  // path, its tooltip, and the open-in-app target are always the Files slot's
+  // directory (`primaryPath`), never `view.primaryRoot`: the latter is the
+  // Registry identity, keyed on the Session origin, and a Session moving into
+  // a worktree makes the two diverge. `view.primaryRoot` remains the Registry
+  // identity that the management dialog and other Registry-facing data are
+  // keyed on, never the header's path.
+  const primaryLabel = view?.primaryName ?? basename(primaryPath)
   const triggerLabel = selected === 'primary'
     ? primaryLabel
     : selected.kind === 'remote' ? remoteLabel(selected.view) : displayNameOf(selected.view)
-  const triggerPath = selected === 'primary' ? (view?.primaryRoot ?? primaryPath) : selected.path
+  const triggerPath = selected === 'primary' ? primaryPath : selected.path
   // The selection's provider, cached by its identity key: the surface is
   // rebuilt every render, so a plain memo would hand the takeover effect a
   // fresh provider each pass — one slot suffices because only the current

@@ -56,7 +56,7 @@ Accepted
 
 ## Related Documents
 
-- [B4–B8 开发计划](../plans/active/2026-10-11-b4-b8-p2.md)
+- [B4–B8 开发计划](../plans/completed/2026-10-11-b4-b8-p2.md)
 - [ADR-0004 注册表持久化与校验](./ADR-0004-root-registry-persistence-and-validation.md)
 - [ADR-0009 DSH 兼容性代码契约](./ADR-0009-dsh-compat-contract.md)（门禁行同一模式）
 - [根数量基准](../reference/bench-root-scale-darwin.json)

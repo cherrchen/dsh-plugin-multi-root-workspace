@@ -79,3 +79,11 @@ DSH `0.2.2-rc.4` 加入联合支持集合（current 基线第 6 个发布，联�
 ## 修订（2026-11-18，0.2.2-rc.5）
 
 DSH `0.2.2-rc.5` 加入联合支持集合（current 基线第 7 个发布，联合集合共 11 个精确发布）：该发布的 `packages/experimental/auto-review/src` 树与 `0.2.2-rc.4` 逐字节相同（tree hash `2c4de92078…`），因此把 current 基线的编译 pin 从 `0.2.2-rc.4` 前移到 `0.2.2-rc.5`，让 rc.5 开发树继续执行实现类型检查；两份实现、允许差异、差分门禁与请求身份分支均不变。证据见[接口审查](../reference/auto-review-0.2.2-migration.md#版本拓扑与基线分组)与[路线账本](../plans/active/2026-09-12-multi-root-workspace.md)。
+
+## 修订五（2026-11-22，DSH 0.2.3-alpha.2）
+
+DSH `0.2.3-alpha.2` 加入联合支持集合（current 基线第 8 个发布，联合集合共 **12 个精确发布**）。该发布与 `0.2.3-alpha.1` 的 reviewer `src` 树逐字节相同（`9178184679…`，`index.ts` sha256 `179e8f50…`），与 `0.2.2-rc.5` 的差异只有 import 顺序与 `ctx.root` → `ctx[Context.root]` 两行，且两行都在已审阅 `fork.patch` 的替换范围内；输入模型未变，因此不新增第三个源码代际，只把 alpha.2 加入 current 基线并把编译 pin 前移到 `0.2.3-alpha.2`。冻结副本保持 rc.5 字节（8 个发布中 7 个逐字节命中），审计差异即上述两行。
+
+`0.2.3-alpha.1` 不进入联合集合。它的 tag 源码虽已迁移到 4.2 根符号，但发布提交没有同步 vendor pin（包仍声明 cordis `~4.1.0` / loader `~1.1.0`），`dsh --version` 直接抛 `EntryValidationError` 导出缺失；源码差异只保留在接口审查中解释接缝来源。
+
+cordis 4.2 的根上下文 API 变化由 `src/compat/cordis-root.ts` 结构化探测：current 基线横跨 `0.2.2` 行（cordis 4.1，只有 `ctx.root`）与 `0.2.3-alpha.2`（cordis 4.2，只有 `Context.root` 符号），`scripts/check-auto-review-fork.mjs` 新增第 9 项断言禁止回退到单一 API。alpha.2 车道执行实现类型检查（编译 pin），证据是运行时测试与联合冒烟。证据见[接口审查](../reference/auto-review-0.2.2-migration.md)与[路线账本](../plans/active/2026-09-12-multi-root-workspace.md)。

@@ -7,7 +7,7 @@ Personal SSH is experimental and off by default. Once enabled, the Agent can use
 > [!WARNING]
 > **Platform and release prerequisites**:
 > - Supported on **Linux** and **macOS** initiators only, targeting **Linux** or **macOS** remote hosts (Windows initiators and Windows targets are deferred / unsupported).
-> - Requires a DSH runtime inside the SSH support matrix (currently `0.2.2-rc.1` through `0.2.2-rc.5`) with the four matching official SSH optional packages installed (`@deepseek-ai/dsh-ssh`, `dsh-fs-ssh`, `dsh-subprocess-ssh`, `dsh-sandbox-ssh`).
+> - Requires a DSH runtime inside the SSH support matrix (currently `0.2.2-rc.1` through `0.2.3-alpha.2`) with the four matching official SSH optional packages installed (`@deepseek-ai/dsh-ssh`, `dsh-fs-ssh`, `dsh-subprocess-ssh`, `dsh-sandbox-ssh`).
 
 ## Remote access boundaries
 

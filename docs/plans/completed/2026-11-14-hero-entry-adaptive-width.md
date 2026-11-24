@@ -1,6 +1,6 @@
 # 新会话 Hero 入口按可用宽度自适应（Workspace Folders）
 
-> 状态：**P1–P3 已完成**（2026-11-14），Draft PR [#53](https://github.com/cherrchen/dsh-plugin-multi-root-workspace/pull/53) 待评审；真实 GUI 复核留给评审者/用户。决策修订见 [ADR-0037](../../decisions/ADR-0037-conversation-hero-workspace-folders-entry.md) 文末修订节。
+> 状态：**已完成**（2026-11-14，PR [#53](https://github.com/cherrchen/dsh-plugin-multi-root-workspace/pull/53) `8c09c7b` 已合入并随 `v0.1.20` 发版）。决策修订见 [ADR-0037](../../decisions/ADR-0037-conversation-hero-workspace-folders-entry.md) 文末修订节。
 
 ## Goal
 

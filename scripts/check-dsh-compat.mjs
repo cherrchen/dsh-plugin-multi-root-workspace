@@ -206,6 +206,99 @@ if (hostKoffi === undefined) {
   fail(`devDependencies.koffi is "${devs.koffi ?? '(absent)'}" but the host tree resolves ${hostKoffi}; repoint the development pin to the host's koffi`)
 }
 
+// 5b. Every shared singleton the development host resolves must be admitted by
+//     its declared peer range. Prereleases are only admitted by an explicit
+//     alternative (npm semver does not let a stable comparator range cover
+//     them), so a host that moves to a new prerelease must be reflected here —
+//     otherwise pnpm warns (or a strict install refuses) while the tree under
+//     test is already that host.
+const SINGLETON_PEERS = ['@deepseek-ai/schemastery', '@deepseek-ai/node-addon-system', 'koffi']
+
+/** Compare two numeric release triples. */
+function compareTriple(a, b) {
+  for (let index = 0; index < 3; index += 1) {
+    if (a[index] !== b[index]) return a[index] - b[index]
+  }
+  return 0
+}
+
+/**
+ * Whether one released (non-prerelease) version satisfies one alternative.
+ * @param triple - numeric release triple of the installed version.
+ * @param alternative - one §||§ alternative of the declared range.
+ * @returns whether the alternative admits the version.
+ */
+function admitsStable(triple, alternative) {
+  const text = alternative.trim()
+  if (/^\d+\.\d+\.\d+$/.test(text)) return text === triple.join('.')
+  const caret = /^\^(\d+)\.(\d+)\.(\d+)$/.exec(text)
+  if (caret !== null) {
+    const lower = [Number(caret[1]), Number(caret[2]), Number(caret[3])]
+    if (compareTriple(triple, lower) < 0) return false
+    if (lower[0] !== 0) return triple[0] === lower[0]
+    if (lower[1] !== 0) return triple[0] === 0 && triple[1] === lower[1]
+    return triple[0] === 0 && triple[1] === 0 && triple[2] === lower[2]
+  }
+  const tilde = /^~(\d+)\.(\d+)\.(\d+)$/.exec(text)
+  if (tilde !== null) {
+    const lower = [Number(tilde[1]), Number(tilde[2]), Number(tilde[3])]
+    return compareTriple(triple, lower) >= 0 && triple[0] === lower[0] && triple[1] === lower[1]
+  }
+  const comparators = text.split(/\s+/u)
+  if (comparators.length === 0) return false
+  for (const comparator of comparators) {
+    const match = /^(>=|<=|>|<|=)?(\d+)\.(\d+)\.(\d+)$/.exec(comparator)
+    if (match === null) return false
+    const order = compareTriple(triple, [Number(match[2]), Number(match[3]), Number(match[4])])
+    const operator = match[1] ?? '='
+    if (operator === '>=' && order < 0) return false
+    if (operator === '>' && order <= 0) return false
+    if (operator === '<=' && order > 0) return false
+    if (operator === '<' && order >= 0) return false
+    if (operator === '=' && order !== 0) return false
+  }
+  return true
+}
+
+/**
+ * Whether a declared peer range admits one installed version.
+ *
+ * A prerelease is admitted only by an explicit prerelease alternative: that is
+ * exactly the failure this check exists for (a stable comparator range plus a
+ * list of explicit prereleases silently missing the host's current one).
+ * @param version - installed version string.
+ * @param range - declared peer range.
+ * @returns whether the range names the version.
+ */
+function admitsPeer(version, range) {
+  const alternatives = range.split('||').map(part => part.trim())
+  if (version.includes('-')) return alternatives.includes(version)
+  const match = /^(\d+)\.(\d+)\.(\d+)/.exec(version)
+  if (match === null) return false
+  const triple = [Number(match[1]), Number(match[2]), Number(match[3])]
+  return alternatives.some(alternative => admitsStable(triple, alternative))
+}
+
+const singletonNotes = []
+for (const name of SINGLETON_PEERS) {
+  const range = peers[name]
+  if (range === undefined) continue
+  let version
+  try {
+    const hostRequire = createRequire(require.resolve('@deepseek-ai/dsh-sandbox-local/package.json'))
+    version = hostRequire(`${name}/package.json`).version
+  } catch {
+    try { version = require(`${name}/package.json`).version } catch { version = undefined }
+  }
+  if (version === undefined) continue
+  if (!admitsPeer(version, range)) {
+    fail(`peerDependencies[` + JSON.stringify(name) + `] is ` + range + ` but the development host resolves ` + version + `; name that release explicitly (a prerelease needs its own alternative)`)
+  } else {
+    singletonNotes.push(name + `@` + version)
+  }
+}
+if (singletonNotes.length > 0) notes.push(`singleton peer ranges admit the host tree: ` + singletonNotes.join(`, `))
+
 // 6. What is actually installed here agrees with itself and with the allowlist.
 //    This mirrors the runtime gate, so `pnpm compat:check` reproduces a boot
 //    refusal without booting a harness. SSH peers stay OUT of this set —

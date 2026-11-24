@@ -1,6 +1,6 @@
 # Worktree 提示加回圆形关闭按钮 — 实施计划与退出验收
 
-> 状态：**已实施，GUI 验收已通过**（2026-11-15，分支 `feat/worktree-toast-close`）：代码、测试、文档与构建门禁已通过，Draft PR [#62](https://github.com/cherrchen/dsh-plugin-multi-root-workspace/pull/62) 已创建；维护者已完成 GUI 视觉复核（E5）——正圆、18px、`0.5px` 细描边、2px 内收、悬停不变色。本轮收回 [ADR-0039 第二十一次修订](../../decisions/ADR-0039-worktree-aware-root-suggestions.md#第二十一次修订2026-11-15) 的 D3「删除 ×」决定，只在常驻提示的呈现层加回一个正圆关闭按钮，不改变触发、RPC、授权、宿主复验与生命周期语义。
+> 状态：**已完成，GUI 验收已通过**（2026-11-15，分支 `feat/worktree-toast-close`；PR [#62](https://github.com/cherrchen/dsh-plugin-multi-root-workspace/pull/62) `53ae34d` 已合入并随 `v0.1.21` 发版）：代码、测试、文档与构建门禁已通过；维护者已完成 GUI 视觉复核（E5）——正圆、18px、`0.5px` 细描边、2px 内收、悬停不变色。本轮收回 [ADR-0039 第二十一次修订](../../decisions/ADR-0039-worktree-aware-root-suggestions.md#第二十一次修订2026-11-15) 的 D3「删除 ×」决定，只在常驻提示的呈现层加回一个正圆关闭按钮，不改变触发、RPC、授权、宿主复验与生命周期语义。
 
 ## 1. 需求与决定
 
@@ -34,7 +34,7 @@
 | `README.md` / `README.en.md` | 提示操作描述改为「查看 / 稍后提醒 / 右上角圆形关闭」，说明关闭不写提醒状态。 |
 | `docs/decisions/ADR-0039-…` | 新增第二十五次修订，记录反转与语义。 |
 | `docs/plans/README.md` / `README.en.md` | active 索引登记本计划。 |
-| `docs/plans/active/2026-11-15-workspace-toast-implementation.md` | D3 标注已被本计划取代。 |
+| `docs/plans/completed/2026-11-15-workspace-toast-implementation.md` | D3 标注已被本计划取代。 |
 
 ## 4. 测试与验证
 

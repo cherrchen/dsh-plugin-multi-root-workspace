@@ -45,6 +45,7 @@ import { defineContentToolFixture } from '@deepseek-ai/dsh-tool-testkit'
 import ApprovalService, { setApprovalPolicy, type ApprovalOutcome } from '@deepseek-ai/dsh-user-approval'
 import * as AutoReview from '../../../src/auto-review/current/fork.ts'
 import { autoReviewRequestIdentity, type AutoReviewRelease } from '../../../src/compat/auto-review-contract.ts'
+import { rootContext } from '../../../src/compat/cordis-root.ts'
 
 // The fork's execution-copy gate compares the host release the compat service
 // reports; this suite mounts the reviewer without the plugin's compat row, so
@@ -1494,7 +1495,7 @@ describe('cancellation and integration teardown', () => {
 
     await auto.restart()
 
-    expect(ctx.root.fiber.state).toBe(2 /* FiberState.ACTIVE */)
+    expect(rootContext(ctx).fiber.state).toBe(2 /* FiberState.ACTIVE */)
     expect(ctx.permissionPresets.current(session)).toBe('danger-full-access')
     expect(ctx.permissionPresets.names).toContain(AUTO_PRESET)
     expect(session.snapshotEvents().filter(event => event.type === 'approval/policy').at(-1)?.data)
@@ -1555,7 +1556,7 @@ describe('cancellation and integration teardown', () => {
       const disposal = ctx.fiber.dispose().then(() => { disposed = true })
       try {
         await cancelled.promise
-        expect(ctx.root.fiber.state).toBe(5 /* FiberState.UNLOADING */)
+        expect(rootContext(ctx).fiber.state).toBe(5 /* FiberState.UNLOADING */)
         expect(disposed).toBe(false)
         expect(sessions.list()).toContain(session)
         expect(events).toEqual(beforeShutdown)

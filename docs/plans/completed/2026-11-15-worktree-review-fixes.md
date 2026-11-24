@@ -1,6 +1,6 @@
 # Worktree 发现建议评审修复（PR #60）：Follower 授权、Files 手动入口与主 checkout 分支刷新
 
-> 状态：**已实施并通过 CI 验收**（2026-11-15，分支 `feat/workspace-toast`，reviewed commit `eebde19`，验收 head `ab17638`，run [43702749353](https://github.com/cherrchen/dsh-plugin-multi-root-workspace/actions/runs/43702749353) 30/30 checks 全绿；P0–P5 见 §10；待 PR 合并后随计划归档）。本文件是本轮评审修复的核验账本、实施计划与退出机制。
+> 状态：**已实施并通过 CI 验收**（2026-11-15，分支 `feat/workspace-toast`，reviewed commit `eebde19`，验收 head `ab17638`，run [43702749353](https://github.com/cherrchen/dsh-plugin-multi-root-workspace/actions/runs/43702749353) 30/30 checks 全绿；P0–P5 见 §10；PR #60 `2208048` 已合入，随 `v0.1.20` 发版）。本文件是本轮评审修复的核验账本、实施计划与退出机制。
 >
 > 关联：PR [#60](https://github.com/cherrchen/dsh-plugin-multi-root-workspace/pull/60)、[ADR-0039](../../decisions/ADR-0039-worktree-aware-root-suggestions.md)（第二十二次修订）、[Toast 实施计划](./2026-11-15-workspace-toast-implementation.md)、[Dialog 重构报告](./2026-11-15-worktree-dialog-redesign.md)。
 

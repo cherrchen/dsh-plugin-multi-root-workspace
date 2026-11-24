@@ -338,5 +338,5 @@ Files 页既有行为，需在 ADR/CHANGELOG 明说）：
 - [ADR-0002](./ADR-0002-upstream-coupling-policy.md) / [ADR-0009](./ADR-0009-dsh-compat-contract.md)（上游耦合与结构探测）
 - [ADR-0006](./ADR-0006-client-ui-host-tokens.md)（宿主 token）
 - [ADR-0024](./ADR-0024-registry-operation-admission.md) / [ADR-0025](./ADR-0025-shared-registry-authority.md)（Host 准入与共享权威）
-- [实施计划](../plans/active/2026-11-16-additional-root-preview-navigator-search.md)
+- [实施计划](../plans/completed/2026-11-16-additional-root-preview-navigator-search.md)
 - `src/client/files-tree/FORK.md`、`docs/reference/dsh-0.2.2-migration.md`

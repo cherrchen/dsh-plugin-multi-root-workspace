@@ -40,3 +40,4 @@ English: [README.en.md](./README.en.md)
 
 - [dsh-0.2.1-migration.md](./dsh-0.2.1-migration.md) — DSH 0.2.1 三个上游 tag 的接口、安全不变量与 Worktree 约束审查。
 - [dsh-0.2.2-migration.md](./dsh-0.2.2-migration.md) — DSH 0.2.1-rc.4、0.2.1-rc.5 与 0.2.2 各发布的接口与安全契约审查（sessionProjections 注入、工具执行拆分、additionalWritableRoots、Node 24 要求，rc.2 的 SandboxPreparationError、registerWritableRoot、workspaceFiles.search 与 dsh-error 共享基类，以及 rc.3 的新会话行 HOC 槽、`workspace.picker` Factory 与可选实验 bundle `dsh-deepseek-chat-import`）。
+- [dsh-0.2.3-migration.md](./dsh-0.2.3-migration.md) — DSH `0.2.3-alpha.2` 的接口与安全契约审查（`alpha.1` 源码对照保留，发布本身不可启动、不纳入合同）（Session workspace root 的安全影响、`workspace-root/change` 事件、cordis 4.2 双根 API、客户端复刻变化、Node 24.22.3 与 Auto Review 联合集合扩展）。

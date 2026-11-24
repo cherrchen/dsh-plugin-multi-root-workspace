@@ -29,6 +29,56 @@ describe('the Files-tab launcher rules', () => {
   })
 })
 
+describe('the 0.2.3 Files-header wrapper rules', () => {
+  // Upstream 0.2.3-alpha.1 puts a CSS-module-hashed `.externalActions` box
+  // between the header and the display:contents slot anchor, so the occupant
+  // stops being a direct header flex item and the order/flex takeover rules
+  // go inert. The wrapper cannot be named; the rule reaches it structurally.
+  const UNWRAP_ROOT = `[data-files-page] :has(> [data-slot='sidebar.right.tab.files.actions'] > .mrfw-rootSwitcher):not(:has(> [data-files-path]))`
+  const UNWRAP_LAUNCHER = `[data-files-page] :has(> [data-slot='sidebar.right.tab.files.actions'] > .mrfw-fileLauncher):not(:has(> [data-files-path]))`
+
+  it('drops the wrapper box for the switcher and the icon-only launcher', () => {
+    expect(STYLES).toContain(UNWRAP_ROOT)
+    expect(STYLES).toContain(UNWRAP_LAUNCHER)
+    expect(STYLES).toMatch(/\[data-files-page\] :has\(> \[data-slot='sidebar\.right\.tab\.files\.actions'\] > \.mrfw-rootSwitcher\):not\(:has\(> \[data-files-path\]\)\)[\s\S]*?display:\s*contents/)
+  })
+
+  it('matches the new wrapper, never a pre-wrapper header', () => {
+    // The 0.2.3 shape: header > .externalActions > [data-slot] > occupant.
+    document.body.innerHTML = `
+      <div data-files-page>
+        <div class="header">
+          <span data-files-path></span>
+          <div class="externalActions">
+            <div data-slot="sidebar.right.tab.files.actions">
+              <span class="mrfw-rootSwitcher" data-root-kind="primary"></span>
+            </div>
+          </div>
+        </div>
+      </div>`
+    const switcherWrapper = document.querySelector('.externalActions')!
+    expect(switcherWrapper.matches(UNWRAP_ROOT)).toBe(true)
+    expect(switcherWrapper.matches(UNWRAP_LAUNCHER)).toBe(false)
+
+    // The pre-0.2.3 shape: header > [data-slot] > occupant. The unguarded
+    // selector matches the header there; the :not(:has(> [data-files-path]))
+    // guard is what keeps the header from losing its flex box on older hosts.
+    document.body.innerHTML = `
+      <div data-files-page>
+        <div class="header">
+          <span data-files-path></span>
+          <div data-slot="sidebar.right.tab.files.actions" style="display:contents">
+            <span class="mrfw-fileLauncher"></span>
+          </div>
+        </div>
+      </div>`
+    const legacyHeader = document.querySelector('.header')!
+    expect(legacyHeader.matches(UNWRAP_LAUNCHER)).toBe(false)
+    expect(legacyHeader.matches(UNWRAP_LAUNCHER.replace(':not(:has(> [data-files-path]))', ''))).toBe(true)
+    expect(document.querySelectorAll(UNWRAP_LAUNCHER)).toHaveLength(0)
+  })
+})
+
 describe('the root-switcher rules', () => {
   it('takes over the path label position and hides only the header label', () => {
     expect(STYLES).toMatch(/\.mrfw-rootSwitcher\s*\{[^}]*order:\s*-1/s)
@@ -130,6 +180,14 @@ describe('the root-switcher rules', () => {
   })
 })
 
+describe('the files-tree fork rules', () => {
+  it('indents nested levels by the 0.2.3-alpha.2 FileTree.module.css step', () => {
+    // Upstream replaced the flat 18px with the icon-plus-gap sum, so the
+    // fork's own level rule has to follow it or nested rows drift a pixel.
+    expect(STYLES).toMatch(/\.mrfw-ftLevel\s+\.mrfw-ftLevel\s*\{\s*padding-left:\s*calc\(16px \+ 6px\);\s*\}/)
+  })
+})
+
 describe('the additional-root row rules', () => {
   it('rides the access badge beside the name, never shrinking', () => {
     expect(STYLES).toMatch(/\.mrfw-rootName\s*\{[^}]*display:\s*flex[^}]*align-items:\s*center/s)
@@ -215,7 +273,16 @@ describe('the open-in-app takeover', () => {
   it('carries the forked OpenTargetButton rules under mrfw-open* names', () => {
     expect(STYLES).toMatch(/\.mrfw-openSplit\s*\{[^}]*height:\s*24px[^}]*border:/s)
     expect(STYLES).toMatch(/\.mrfw-openChevron\s*\{[^}]*border-left:/s)
-    expect(STYLES).toMatch(/\.mrfw-openMain:hover:not\(:disabled\)/s)
+    // 0.2.3-alpha.2 keeps both compact targets 24px wide and spends no layout
+    // width on the frame: the compact split drops its border for an inset ring.
+    expect(STYLES).toMatch(/\.mrfw-openSplit\[data-size='compact'\]\s*\{[^}]*border:\s*0[^}]*box-shadow:\s*inset 0 0 0 0\.5px var\(--dsw-alias-border-l4\)/s)
+    expect(STYLES).toMatch(/\.mrfw-openMain\s*\{[^}]*min-width:\s*24px/s)
+    expect(STYLES).toMatch(/\.mrfw-openChevron\s*\{[^}]*min-width:\s*24px/s)
+    // Focus rings are pointer-independent; only hover waits for a hover-capable
+    // pointer, so a touch device does not keep the fill after a tap.
+    expect(STYLES).toMatch(/\.mrfw-openMain:focus-visible,\s*\n?\.mrfw-openChevron:focus-visible\s*\{[^}]*background:\s*var\(--dsw-alias-interactive-bg-hover\)/s)
+    expect(STYLES).toMatch(/@media \(hover: hover\) \{\s*\.mrfw-openMain:hover:not\(:disabled\),\s*\n?\s*\.mrfw-openChevron:hover:not\(:disabled\)\s*\{[^}]*background:\s*var\(--dsw-alias-interactive-bg-hover\)/s)
+    expect(STYLES).not.toMatch(/\.mrfw-openMain:hover:not\(:disabled\),\s*\n?\.mrfw-openMain:focus-visible/s)
   })
 })
 

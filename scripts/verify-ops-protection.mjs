@@ -307,7 +307,7 @@ async function world(mode, shared) {
         if (exec.agent === ptc && exec.parent !== undefined && exec.name === 'ops_write_file') inner = result
       }, { global: true })
       const startsBefore = data.started.length
-      const result = await call('run_code', { code: `return await tools.ops_write_file(${JSON.stringify(operations[0][1])})`, description: 'Verify read-only root protection' }, ptc)
+      const result = await call('run_code', { code: `await tools.ops_write_file(${JSON.stringify(operations[0][1])})`, description: 'Verify read-only root protection' }, ptc)
       stop()
       if (inner === undefined && !shared && mode !== 'danger-full-access') {
         assert(refused(result), JSON.stringify(result))

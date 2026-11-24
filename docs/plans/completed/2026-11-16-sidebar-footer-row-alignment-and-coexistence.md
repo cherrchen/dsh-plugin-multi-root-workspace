@@ -1,8 +1,7 @@
 # 侧栏 footer 入口：图标与跨两代几何对齐、同槽共存
 
-> 状态：**实施完成（2026-11-16），待验收发版**。[ADR-0044](../../decisions/ADR-0044-sidebar-footer-row-alignment-and-coexistence.md)
-> 已 Accepted；分支 `fix/sidebar-buttom-style`；实现提交 `b1bd1d8`。目标：随下一个版本发布（版本号待发布准备
-> 确定）。本地门禁、一次性 Chromium 复刻与隔离环境的真实 GUI 目检均已回填 §Progress；
+> 状态：**已完成（2026-11-16；PR [#63](https://github.com/cherrchen/dsh-plugin-multi-root-workspace/pull/63) `290d7f7` 已合入并随 `v0.1.21` 发版）**。[ADR-0044](../../decisions/ADR-0044-sidebar-footer-row-alignment-and-coexistence.md)
+> 已 Accepted；分支 `fix/sidebar-buttom-style`；实现提交 `b1bd1d8`。本地门禁、一次性 Chromium 复刻与隔离环境的真实 GUI 目检均已回填 §Progress；
 > 2026-11-16 追加 A 修订（按钮高度跟随设置行 occupant，hover 药丸同尺寸，见 Phase 6）。
 
 ## Goal

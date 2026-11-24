@@ -51,9 +51,15 @@ const BASELINES = {
       .replace('    multiRoot,\n', ''),
     // A const enum has no runtime value in the published cordis, so the fork
     // spells the ACTIVE state as an annotated literal.
+    // The published cordis has no runtime `FiberState` value, so the fork
+    // spells the ACTIVE state as an annotated literal; it also resolves the root
+    // through the dual-generation probe (src/compat/cordis-root.ts), because the current baseline spans 0.2.2 (cordis 4.1, `ctx.root` only) and the
+    // supported 0.2.3-alpha.2 (cordis 4.2, the `Context.root` symbol only); the
+    // 0.2.3-alpha.1 release cannot launch and is not in the contract.
     normalizeTail: source => source.replace(
-      '=== 2 /* FiberState.ACTIVE (const enum; the published cordis has no runtime value) */',
-      '=== FiberState.ACTIVE'),
+      'rootContext(ctx).fiber.state === 2 /* FiberState.ACTIVE (const enum; the published cordis has no runtime value) */',
+      'ctx.root.fiber.state === FiberState.ACTIVE'),
+    resolvesRootStructurally: true,
     // The multi-root delta rewrites the render function; pin its required behavior.
     renderSnippets: [
       'snapshot.multiRoot.environment',
@@ -132,6 +138,19 @@ for (const baseline of Object.keys(AUTO_REVIEW_BASELINES)) {
 
   // 8. The bundled implementation the entry loads must be this baseline's.
   assert.ok(CONTRACT.includes(`'${baseline}': './auto-review-${config.directory}.js'`), `${baseline}: contract implementation file does not match ${config.directory}`)
+
+  // 9. A baseline that spans two cordis root APIs must reach the root through
+  //    the structural probe. The tail normalization above rewrites the probe
+  //    call back to upstream's `ctx.root` spelling, so without this assertion a
+  //    fork regressed to a single generation's API would still replay clean.
+  if (config.resolvesRootStructurally === true) {
+    assert.ok(fork.includes('rootContext(ctx)'), `${baseline}: the fork does not resolve the root through rootContext`)
+    assert.ok(!/ctx\.root\b|ctx\[Context\.root\]/u.test(fork), `${baseline}: the fork spells a cordis root API instead of probing it`)
+    const rootProbe = read('../compat/cordis-root.ts')
+    assert.ok(rootProbe.includes("Symbol.for('cordis.root')"), 'compat/cordis-root.ts must probe the published cordis root symbol')
+    assert.ok(rootProbe.includes('{ root?: Context }'), 'compat/cordis-root.ts must retain the pre-symbol property fallback')
+    assert.match(rootProbe, /throw new Error/u, 'compat/cordis-root.ts must fail loudly on an unknown cordis root API')
+  }
 }
 
 // The hand-written declaration shipped for old lanes must not drift from the

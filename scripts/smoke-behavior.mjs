@@ -209,7 +209,7 @@ function markerProbe(path) {
  *
  * Read from the SERIALIZED record, because that is what travels out of the battery
  * and what appears in a failure message: whether the value is a boolean or the
- * string `"true"` depends on how the child serialized it, and §either way the
+ * string `"true"` depends on how the child serialized it, and `either way the
  * question being asked — did the confined command write? — has the same answer.
  * @param outcome - the recorded value (an object, or the battery's failure text).
  * @returns the two facts, plus whether the command ran at all.
@@ -625,7 +625,13 @@ async function ambientBattery() {
         ['fixed', fixedRoot, true], ['read-only', extraRoot, false]]) {
         const path = join(root, 'ptc-full-access.txt')
         rmSync(path, { force: true })
-        const spec = runtime.resolve({ program: `const fs = await import('node:fs'); fs.writeFileSync(${JSON.stringify(path)}, 'ok'); return 42;`,
+        // 0.2.3's PTC runtime no longer evaluates the program as a function
+        // body by default, so a top-level `return` is a syntax error there.
+        // Both generations expose the resolved execution format and both turn
+        // a final REPL/Script expression into `PtcRunResult.value`, so select
+        // the completion style structurally instead of comparing versions.
+        const functionBody = runtime.programFormat === undefined || runtime.programFormat === 'function-body'
+        const spec = runtime.resolve({ program: `const fs = await import('node:fs'); fs.writeFileSync(${JSON.stringify(path)}, 'ok'); ${functionBody ? 'return 42;' : '42;'}`,
           bindings: [], cwd: primaryRoot, sandboxPolicy: policy })
         const result = await admitted(ctx, policy, () => runtime.run(spec))
         check.equal(existsSync(path), writable, `Full-access PTC: ${name} matches root policy`, JSON.stringify(result))

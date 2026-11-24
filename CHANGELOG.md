@@ -8,6 +8,56 @@ English: [CHANGELOG.en.md](./CHANGELOG.en.md)
 - 安装方式、受支持的上游运行时与已知限制见 [README](./README.md)。
 - 每个版本的实施证据、编号口径与发布状态见[路线图 §进度总账](./docs/plans/active/2026-09-12-multi-root-workspace.md#进度总账)；GitHub Release 的正文由 `scripts/release-notes.mjs` 从 commit 历史生成，是本文件之外的完整原始清单。
 
+## [0.1.24] - 2026-11-24
+
+本版是 `0.1.24` 线的首个稳定版，收束 `0.1.24-beta.1`–`0.1.24-beta.6` 的全部内容：个人 SSH 远端环境以实验性、默认关闭的形态进入发布包，含连接与 Workspace Root 绑定管理、`remote_copy` 与 `remote_bash` 两个远端工具及它们的参数校验、失败文案与输出预算、SSH 依赖修复引导与 Helper 安装诊断、随包发行的 `install-ssh-deps` 依赖安装命令与 Desktop 一键安装入口；精确支持合同推进到 DSH `0.2.3-alpha.2`（27 个精确发布），Registry/scope 身份改用 Session 原始目录，并同步客户端复刻与 Auto Review 双 cordis 根探测；另含 Workspace Folders 对话框附加根列表滚动修复、DSH Desktop 转发流的 BoringSSL PSK 回退，以及活跃 SSH 连接下卸载插件导致 Host 退出的修复。没有不兼容变更；未开启 SSH 时行为与 `v0.1.23` 相同。`0.2.3-alpha.1` 不受支持：其已发布版本无法启动。各 beta 的逐项预发布说明保留在下方条目。
+
+### Added
+
+- **SSH 远端环境（实验性，默认关闭）**：Issue #32 的首个发布形态，只开放个人 SSH。插件详情设置卡中的开关（`multi-root-remote-tools.enabled`）默认关闭，首次开启需确认风险；关闭后卸载远端工具、以取消信号收束在飞操作并关闭远端控制面。连接与 Workspace Root 绑定分开管理：连接（主机、端口、账号、平台、主机指纹、凭据引用、Helper 与执行/传输能力上限）保存在插件级 `remoteEnvironments.personalPath`（默认 `$DSH_HOME/storages/multi_root_workspace.remote-personal.json`，schemaVersion 2），Workspace 绑定保存在同名 `.bindings.json`，同一 Workspace 可在同一连接上绑定多个互不重叠的远端目录。两份文件都要求当前 uid 的普通文件、非符号链接、权限至多 0600，父目录不得由 group/other 写，位置须在所有绑定的本地主根之外；每次 snapshot/list/admit/add/remove 前复核保护与内容，并发变更由内核租约 + CAS 串行化，多 Host 不丢记录。凭据根（默认 `$DSH_HOME/storages/multi_root_workspace.ssh`，0700）保存生成的密钥、导入的私钥、`secrets/`、托管的 `ssh_config` 与 `known_hosts`，任何端点都不返回私钥或密码字节。主机密钥经 `ssh-keyscan` 或本机 known_hosts 核对后以 60 秒令牌确认；托管连接在 `~/.ssh/config` 首行写入 `Include`（先备份、幂等；`~/.ssh/config` 是符号链接时写到解析目标、绝不替换链接），未链接时连接报 `ssh-config-not-linked`。Helper 安装按包内 `lib/*` 与安装后的文件集摘要校验，早于 `integrity: 2` 的 Helper 需重装；托管密码先经 0600 一次性口令文件与 `SSH_ASKPASS` 安装访问密钥，失败按目标回滚或返回 `access-key-reconcile-required`。本机 `~/.ssh/config` 的字面 `Host` 别名可直接选用，通配与否定项被跳过。
+- **`remote_copy`：三个方向的单文件传输**：本机 → 远端（SFTP staging）、远端 → 本机（目标父目录内 0600 独占 staging）、远端 → 远端（Host 中继，两端同时准入）。传输前绑定源 inode 并复核 realpath、普通文件、大小与 mtime，按分块读取；写入前累计校验 `maxBytes`，源在绑定后增长也以 `transfer-too-large` 拒绝，不会先把超限字节写到 staging；回读校验字节后以原子 no-replace hardlink 发布。应答丢失返回 `unknown` 与 reconcileId，绝不重试；清理只碰本次操作的 staging，且仅在同一会话代次仍存活时进行。`transfer.timeoutMs` 是涵盖准入、握手、读写、校验与发布的整次预算；每个复制端点独占一条 SFTP 通道，清理使用独立的一秒预算。
+- **`remote_bash`：两阶段准入的远端命令**：一次准入用于验证与 confine，第二次准入内才 spawn，撤权或后端代次变化不会漏到启动；从 spawn 返回 handle 起观察取消、超时与授权变化（owner 通知 + 每秒复核，单轮无结论 5.5 秒截止）。结果区分 `not-started` / `may-start` / `exited` / `scope-exited` / `unknown`，终止原因 `revoked | cancelled | timeout`；`terminateGraceMs` 内无法确认时返回 `unknown` 与 reconcileId，不无限等待、不重放。执行与传输独立授权，命令准备前拒绝重定向目录与越界 cwd。
+- **SSH 管理界面**：插件详情的「SSH 远端」经独立的 `/multi-root-workspace-ssh-settings` Connection 通道打开，连接与 SSH Key 分页管理，绑定仍走 `PANEL_CHANNEL` 由当前会话派生主根；「添加连接」是两步向导（连接 → 连接设置），Workspace Folders 新增「远端工作目录」与绑定向导，和主要/附属工作目录共用行形态，地址为可复制的 `ssh://user@host:port/path`。异步请求以原位转圈、`aria-busy`、延迟淡入的状态行与顶部进度条反馈，会改写配置的请求按 revision 串行。面板、插件详情页与预览的 8 份语言词典同步补齐 SSH 文案，键集、键序与占位符由 `tests/locale-parity.spec.ts` 钉住。
+- **SSH 兼容门禁**：`@deepseek-ai/dsh-ssh`、`dsh-fs-ssh`、`dsh-sandbox-ssh`、`dsh-subprocess-ssh` 作为可选 peer（peer range 与核心 allowlist 相同），运行时经 `src/compat/ssh-packages.ts` 从宿主锚点按需加载，绝不静态导入；`SUPPORTED_SSH_RELEASES`（`0.2.2-rc.1`–`0.2.3-alpha.2`）必须是 27 个精确发布 allowlist 的后缀。SSH 包缺失、漂移或私有副本只让 SSH 能力缺席，不改变本地兼容判定；`pack:check` 拒绝静态 SSH 导入与打包后的 SSH broker 入口。
+- **SSH 依赖修复引导**：Host 在 SSH 开关开启后检查当前 Profile 中的 `@deepseek-ai/dsh-ssh`、`@deepseek-ai/dsh-fs-ssh`、`@deepseek-ai/dsh-subprocess-ssh`、`@deepseek-ai/dsh-sandbox-ssh` 四个精确同版包，把全部缺失、部分缺失、版本不符、私有副本、无法解析与「已安装但需重启」分开；未就绪时自动打开「安装 SSH 依赖」对话框（也可从「管理 SSH 远端」进入），逐包显示状态，并在 Profile 由 CLI 管理时给出 `DSH_HOME=… dsh plugin --profile <name> add --save-exact <四个包>@<Host 版本>` 命令与复制按钮。「重新检测依赖」只读取状态，运行中的 Host 不替用户运行包管理器；依赖装好后仍需完全退出 Host、以同一 Profile 重启，刷新 Web 页面不等于重启。
+- **Helper 安装诊断**：安装失败归入 `host-preflight`、`ssh-connect`、`remote-prerequisites`、`remote-install`、`artifact-verification`、`entry-generation`、`config-commit` 之一，并携带是否可重试、修复方向、退出码、受限的 stderr 摘录、期望/实际版本、远端状态（`may-have-changed` / `installed` / `verified`）与登记状态（`not-committed` / `unconfirmed`）。连接页在瞬时提示之后保留可展开的详情，区分「远端可能已改动」「远端已安装或已校验但 Host 未登记」等需要人工核对的情况；OpenSSH 退出 255 只识别标准的 host key、认证、不可达、超时与中断诊断，无法识别时单独归为未知错误，远端写操作绝不因诊断自动重发。
+- **随插件发行的 SSH 依赖安装命令**：发布 tarball 新增 `scripts/install-ssh-deps.mjs` 与 `lib/install-ssh-deps.js`。命令从可信安装上下文确定精确 DSH CLI、Profile、DSH Home 与 Host 版本，校验版本与 Profile 后以结构化 argv 执行一次 `dsh plugin --profile <name> add --save-exact`，把四个 SSH 包对齐到 Host 版本；重复执行直接报告已就绪，路径中的空格、单引号与非 ASCII 字符均受支持。
+- **Desktop 一键安装入口**：依赖对话框在 Desktop 启动器明确支持时显示 **安装并重启**，保留复制命令与重新检测；启动器只接受固定的动作，由可信端生成 Profile、版本与参数。Web 与旧版 Desktop 继续使用复制命令。
+- **失败文案与端点候选**：两个工具保留 `status`/`code`/`stage`/`staging`/`operationId`/`reconcileId` 语义，并为可诊断的失败补充有界 `message` 与 `hint`；文案只由稳定错误码与安全字段生成，不把捕获异常、SSH 诊断原文或凭据路径送入模型上下文。`invalid-cwd`、`destination-parent-missing`、`local-root-unavailable` 各有针对性提示；端点类错误可附每个方向至多 6 个 `environmentId:rootId` 候选，候选取自当前 Session 主根的 Registry 快照，按登记状态、所需动作、读写/执行权限与已知对端配对筛选，读取不建连、不消耗准入。快照不可用时保留原错误码与通用提示；`unknown` 与 `admitted-may-start` 提示先核对远端状态，不建议盲重试。
+- **输出预算与字节计数**：`remote_bash` 默认给 stdout 与 stderr 各 64 KiB 预览预算，原始窗口与 JSON 字符串内容分别受同一上限约束；`maxOutputBytes` 可在该流的部署上限内显式调节。结果逐流报告 `truncated`、`totalBytes` 与 `droppedBytes`；`droppedBytes` 扣除的是未进入预览的原始字节，涵盖上游丢头、UTF-8 尾部舍弃与 JSON 预算裁剪，无法核实时为 `null`。新个人 SSH 连接保留 stdout 1 MiB、stderr 256 KiB 的采集上限，已保存连接沿用原配置。
+
+### Changed
+
+- **精确支持 DSH `0.2.3-alpha.2`**：支持合同、全部 DSH peer、开发 pin、SSH 地板与 Auto Review 联合合同（12 个精确发布）一并前移到 alpha.2；上游 `engines` 要求 Node `^24.22.3 || >=26.13.1`，0.2.3 车道改用 Node `24.22.3`。`0.2.3-alpha.1` 排除在合同之外：其发布包仍 pin cordis 4.1 / loader 1.1，而源码已使用 4.2 根符号与 loader 1.2 导出，`dsh --version` 会因缺少 `EntryValidationError` 导出而退出；alpha.2 补上 vendor 4.2 升级后才可启动。alpha.2 相对 `0.2.2-rc.5` 的 `src` 差异只在 app-boot profile resolver、boot/hmr manifest 与 ptc-runtime-node vm-modules 三处不涉及插件接缝的行，全部服务端接缝差异来自 `rc.5 → alpha.1` 源码，两个 tag 共用一份适配。
+- **Session 原始目录是唯一身份**：从 `0.2.3-alpha.1` 起上游把 sandbox policy 的 `workspaceRoot` 解析为有效工作目录。Registry 键、scope 授权、指令发现、Review 上下文、命令主根、Files 路由与进程围栏改用 `session.header.cwd`（`originDirectory` / `policyOriginRoot`），`policy.workspaceRoot` 只保留为上游执行边界与路径基。进入附加根后，已登记的只读根不会因有效目录而获得写权限，`toolAccess` 上限也不会消失。
+- **客户端复刻与 resume 归因**：同步 Files 页头与 open-in-app 的上游客户端改动，Files 页头路径跟随页面的有效目录，管理对话框仍使用 Session 原始身份；resume 重放同时接受 `workspace-root/change`（stateVersion 3）与已弃用的 `working-directory/change`，Auto Review 指令来源按 Host 注册的工作目录投影 `stateVersion` 结构性判定事件代际，证据不足的旧相对活动跳过而不误归因。
+- **Auto Review 双 cordis 根探测**：cordis 4.2 移除 `ctx.root` 并改用 `Context.root` 符号，而真实的 alpha.1 Host 安装 cordis 4.1；新增 `src/compat/cordis-root.ts` 结构化探测，遇到未知 API 直接失败，fork 差分门禁新增第 9 项拒绝直接拼写任一 API。
+- **`remote_copy` 参数统一**：`from` 与 `to` 引用同一份端点定义 `{environmentId?, rootId, relativePath}`，只有省略 `environmentId` 才取 `local`，`null` 与空串是参数错误，远端端点必须显式给出环境 ID；本地主根写作 `local:primary`，附加根使用登记的 `aliasId`。工具广告的 schema 与 execute 边界校验来自同一份声明，缺字段、错误类型、未知字段与嵌套对象都在工具层以带字段位置的 `invalid-arguments` 结束，早于 Registry 准入与任何 SSH/SFTP I/O。工具描述与用户指南补充一次上传和一次下载示例，用户指南与技术参考同时记录单文件传输属性（目标以 0600 创建、不保留源 mtime 与执行位、目标存在即拒绝）与延后的元数据、覆盖与递归设计。
+- **Helper 前置条件在首次远端写入前检查完**：远端必须是 Linux 或 macOS，Node.js ≥ 24.9.0 且为规范化绝对路径，npm 可运行，`$HOME` 与 `~/.dsh-helper/<版本>`（或最近的现存父目录）可写；远端 PATH 选中旧版 Node 时可在连接卡片的安装表单里指定新版 Node 的绝对路径。`npm install` 仍只执行一次且不重试，入口脚本以 0600 临时文件加原子改名部署，安装结果与 Host 登记结果分别确认。
+- **新增集成默认不改变既有行为**：SSH 行随 bundle 挂载，但 `enabled: false` 时不注册远端工具、verifier、能力投影或 profile guard，Registry 的远端控制面保持 `disabled`；`team` / `hardened` / broker 档位按停用处理，发布包移除 broker 入口与安装脚本，相关设计与探针只留作研发记录。
+
+### Fixed
+
+- **有效目录切换后的附加根边界**：Files 的 `list` 与目录 `changes` 回退分支同时拒绝请求拼写与解析后的规范目标落在登记但被扣留的根下；存储 Session 的 wire root 来自投影缓存时，以持久 header 的 `cwd` 作为身份；Registry 权威不可用时，进程夹紧与 Files wire-origin 回退同样使用 Session 原始目录。
+- **Workspace Folders 对话框的附加根列表在根多、窗口矮或行换行时被裁掉**：对话框此前没有窗口相对的封顶，附加根区也不滚动——16 个根加数量上限提示、或窄宽下批量操作标题换行时，行被裁在区域里、添加控件被挤出可视区。现在对话框封顶 `min(80vh, 100%)`，附加根区先让高、行列表取剩余空间并在原位滚动，主根行、两个分区标题与添加行保持固定；列表最小高度取最高一行实测高度（`--mrfw-root-row-height`，空列表为 0，无法测量时回落 70px），保证至少一整行完整可见；视口过矮时由对话框 body 接管回退滚动，滚轮在列表末端交给 body，页脚与添加控件始终可达。正常高度下的对话框尺寸与滚动行为不变。
+- **DSH Desktop 登记远端目录时报 `NO_CIPHER_MATCH`**：Electron 的 BoringSSL 不实现上游 `@deepseek-ai/dsh-ssh` 为转发流固定的 `PSK-AES256-GCM-SHA384`，Host 在本地创建 TLS 上下文时就失败，目录核验与登记授权因此中断。插件现在在 BoringSSL 运行时把上游 `authenticateStream` 的那一次调用替换为 `ECDHE-PSK-CHACHA20-POLY1305`（AEAD 且带前向保密；只匹配精确参数形状，调用方自己的 cipher 排除项保持原样），并额外生成 `helper-entry-v3.mjs`，在加载上游 Helper 前给服务端 cipher 列表追加同一套件；`helper-entry.mjs` 保持 beta.2 的逐字节模板，记录的 `integrity`、`helperPath` 与 `bindingDigest` 都不变，plain Node Host 继续协商原套件，beta.2 回退仍可校验并启动。桌面端旧 Helper 缺 v3 入口时以 `helper-outdated` 提示重装，已登记 Root 无需重新登记；面板会原样透传该错误码。实现与备选方案见 [ADR-0051](./docs/decisions/ADR-0051-ssh-stream-psk-boringssl-fallback.md)。
+- **卸载仍持有活 SSH 连接的插件会让 Host 以未捕获异常退出**：上游 `SshConnection` 在转发流 TLS `secureConnect` 后移除认证期的一次性 `error` 监听，连接丢失落在挂上永久监听之前时，`socket.destroy(error)` 把 `SshRpcPeer.close()` 构造的 `SSH connection lost` 变成未处理的 `'error'` 事件。插件在 `tls.connect` 返回时同步为上游转发流套接字附加错误保护，并在 native 与 BoringSSL 运行时都安装；不替换连接自身的监听，不改变真实掉线的失效与上报，也不使用进程级异常吞噬。管理器的关闭改为幂等事务：先停止接纳新操作，取消并等待在途传输，再逐项清理 Helper、SFTP 会话与 fiber；关闭开始后才完成的连接会被回收，单个资源失败只记录诊断并继续清理其余资源。
+
+## [0.1.24-beta.6] - 2026-11-24
+
+本版是 `0.1.24` 线的第六个 beta，把开发树与精确支持合同推进到 DSH `0.2.3-alpha.2`（27 个精确发布），并适配上游新的 Session workspace root：插件以 Session 的原始目录作为全部 Registry/scope 身份，不再跟随有效工作目录；同时同步 Files 页头与 open-in-app 的客户端复刻、为 Auto Review 增加双 cordis 根探测，并为 0.2.3 线启用 Node `24.22.3` 车道。`0.2.3-alpha.1` 不受支持：其已发布版本无法启动。已保存的 SSH 连接与配置沿用原样，SSH 仍为实验性、默认关闭。
+
+### Changed
+
+- **精确支持 DSH `0.2.3-alpha.2`**：支持合同、全部 DSH peer、开发 pin、SSH 地板与 Auto Review 联合合同（12 个精确发布）一并前移到 alpha.2；上游 `engines` 要求 Node `^24.22.3 || >=26.13.1`，0.2.3 车道改用 Node `24.22.3`。`0.2.3-alpha.1` 排除在合同之外：其发布包仍 pin cordis 4.1 / loader 1.1，而源码已使用 4.2 根符号与 loader 1.2 导出，`dsh --version` 会因缺少 `EntryValidationError` 导出而退出；alpha.2 补上 vendor 4.2 升级后才可启动。alpha.2 相对 `0.2.2-rc.5` 的 `src` 差异只在 app-boot profile resolver、boot/hmr manifest 与 ptc-runtime-node vm-modules 三处不涉及插件接缝的行，全部服务端接缝差异来自 `rc.5 → alpha.1` 源码，两个 tag 共用一份适配。
+- **Session 原始目录是唯一身份**：从 `0.2.3-alpha.1` 起上游把 sandbox policy 的 `workspaceRoot` 解析为有效工作目录。Registry 键、scope 授权、指令发现、Review 上下文、命令主根、Files 路由与进程围栏改用 `session.header.cwd`（`originDirectory` / `policyOriginRoot`），`policy.workspaceRoot` 只保留为上游执行边界与路径基。进入附加根后，已登记的只读根不会因有效目录而获得写权限，`toolAccess` 上限也不会消失。
+- **客户端复刻与 resume 归因**：同步 Files 页头与 open-in-app 的上游客户端改动，Files 页头路径跟随页面的有效目录，管理对话框仍使用 Session 原始身份；resume 重放同时接受 `workspace-root/change`（stateVersion 3）与已弃用的 `working-directory/change`，Auto Review 指令来源按 Host 注册的工作目录投影 `stateVersion` 结构性判定事件代际，证据不足的旧相对活动跳过而不误归因。
+- **Auto Review 双 cordis 根探测**：cordis 4.2 移除 `ctx.root` 并改用 `Context.root` 符号，而真实的 alpha.1 Host 安装 cordis 4.1；新增 `src/compat/cordis-root.ts` 结构化探测，遇到未知 API 直接失败，fork 差分门禁新增第 9 项拒绝直接拼写任一 API。
+
+### Fixed
+
+- **有效目录切换后的附加根边界**：Files 的 `list` 与目录 `changes` 回退分支同时拒绝请求拼写与解析后的规范目标落在登记但被扣留的根下；存储 Session 的 wire root 来自投影缓存时，以持久 header 的 `cwd` 作为身份；Registry 权威不可用时，进程夹紧与 Files wire-origin 回退同样使用 Session 原始目录。
+
 ## [0.1.24-beta.5] - 2026-11-24
 
 本版是 `0.1.24` 线的第五个 beta，收紧个人 SSH 两个远端工具的参数、失败文案与输出预算：`remote_copy` 的两端使用同一份定义，只有省略 `environmentId` 才表示本机，结构错误在任何 Registry 准入与 SSH/SFTP I/O 之前以带字段位置的 `invalid-arguments` 结束；可诊断的失败补充有界 `message`/`hint`，端点类错误列出与对端匹配的候选；`remote_bash` 默认每路只预览 64 KiB 输出，JSON 转义同样受该预算约束，结果逐流报告可证实的字节计数。没有配置或协议层面的不兼容变更，已保存的 SSH 连接沿用原配置；SSH 仍为实验性、默认关闭。
@@ -418,7 +468,9 @@ English: [CHANGELOG.en.md](./CHANGELOG.en.md)
 
 - 发布前外部评审提出的 8 项发现（其中 3 项发布阻断）全部修复，每项各带一个回归测试：登记目录被替换为符号链接后授权转移（引入 `recordedPath`，**重新解析路径不等于重新授权**）、并发修改注册表丢写或复活已撤销的授权（每个主根的变更串行）、刷新不重新检查目录、手输路径被目录选择器覆盖、`reveal` 的应答契约与失败码、重复 id 未校验、主根未纳入嵌套校验、CI 先测后构建。
 
-[Unreleased]: https://github.com/cherrchen/dsh-plugin-multi-root-workspace/compare/v0.1.24-beta.5...HEAD
+[Unreleased]: https://github.com/cherrchen/dsh-plugin-multi-root-workspace/compare/v0.1.24...HEAD
+[0.1.24]: https://github.com/cherrchen/dsh-plugin-multi-root-workspace/compare/v0.1.24-beta.6...v0.1.24
+[0.1.24-beta.6]: https://github.com/cherrchen/dsh-plugin-multi-root-workspace/compare/v0.1.24-beta.5...v0.1.24-beta.6
 [0.1.24-beta.5]: https://github.com/cherrchen/dsh-plugin-multi-root-workspace/compare/v0.1.24-beta.4...v0.1.24-beta.5
 [0.1.24-beta.4]: https://github.com/cherrchen/dsh-plugin-multi-root-workspace/compare/v0.1.24-beta.3...v0.1.24-beta.4
 [0.1.24-beta.3]: https://github.com/cherrchen/dsh-plugin-multi-root-workspace/compare/v0.1.24-beta.2...v0.1.24-beta.3

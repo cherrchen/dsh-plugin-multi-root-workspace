@@ -1,6 +1,6 @@
 # Workspace 发现提示（Worktree Toast）位置与形态重构
 
-> 状态：**需求同步与初始计划（2026-11-15 评审完成）**，分支 `feat/workspace-toast`。评审决定与最终实施/退出验收见 [实施计划](./2026-11-15-workspace-toast-implementation.md)；两文冲突时以实施计划为准。
+> 状态：**已完成——需求同步与初始计划（2026-11-15 评审完成）**，分支 `feat/workspace-toast`；实施随 `v0.1.20` 发版。评审决定与最终实施/退出验收见 [实施计划](./2026-11-15-workspace-toast-implementation.md)；两文冲突时以实施计划为准。
 
 ## 0. 结论摘要
 
@@ -30,7 +30,7 @@
 - 组件：`src/client/WorktreePrompt.tsx`，注册在 `shell.overlay`（`src/client/index.ts`），会话激活时调用一次 `worktreePrompt(sessionId, { fresh: true })`，有候选则渲染提示。
 - 提示 DOM：`WorktreePrompt.tsx` 第 488–522 行，一个 `div.mrfw-toast[role=status][aria-live=polite]`，内含文本、`button.mrfw-btnPrimary`（查看）、原生 `select.mrfw-select`（稍后）、`button.mrfw-iconBtn`（× 文本字形）。
 - 样式：`src/client/styles.ts` 第 1420–1490 行。右下角固定定位、`width: max-content`、`max-width: min(360px, calc(100vw - 48px))`、`padding: 14px 16px`、`border: 0.5px solid var(--dsw-alias-border-l2)`、`background: var(--dsw-alias-bg-layer-2)`、`box-shadow: var(--dsw-elevation-prominent)`、`border-radius: var(--dsw-radius-md)`。
-- 触发与生命周期规则：`docs/decisions/ADR-0039-worktree-aware-root-suggestions.md` §20.1–§20.3，以及 `docs/plans/active/2026-11-09-worktree-aware-root-suggestions.md` 第二十次修订小节。
+- 触发与生命周期规则：`docs/decisions/ADR-0039-worktree-aware-root-suggestions.md` §20.1–§20.3，以及 `docs/plans/completed/2026-11-09-worktree-aware-root-suggestions.md` 第二十次修订小节。
 - 测试：`tests/client-worktree.spec.tsx` 用 `getByLabelText('worktree.toastLater')` + `fireEvent.change` 驱动原生 select；样式测试 `tests/client-styles.spec.ts` 目前没有覆盖 Toast。
 - 用户截图（2026-11-15）：
   - 截图 1：提示卡本体——文本 14px，操作行为「黑色胶囊查看 / 带原生箭头的稍后下拉 / 裸 ×」三种不同控件语言。
@@ -228,7 +228,7 @@
 | `tests/client-styles.spec.ts` | 新增提示卡规则断言：无右下角定位、border 0 + elevation、R16、动效、窄屏/粗指针、无字面颜色 |
 | `tests/client-icons.spec.ts` | 新增 `IconClose` 双名兼容断言 |
 | `docs/decisions/ADR-0039-worktree-aware-root-suggestions.md` | 新增第二十一次修订（UI 落点/形态/控件/compat/a11y） |
-| `docs/plans/active/2026-11-09-worktree-aware-root-suggestions.md` | 新增 P11 小节（实施项 + 验收） |
+| `docs/plans/completed/2026-11-09-worktree-aware-root-suggestions.md` | 新增 P11 小节（实施项 + 验收） |
 | `docs/plans/README.md` | 评审通过后登记本计划 |
 | `README.md` / `README.en.md` | 更新 Worktree 建议的用户可见描述（位置/操作） |
 | `CHANGELOG.md` / `CHANGELOG.en.md` | 随下一个发版记录该用户可见变化 |
@@ -299,10 +299,10 @@
 ### 4.7 文档计划
 
 - [ADR-0039](../../decisions/ADR-0039-worktree-aware-root-suggestions.md) 第二十一次修订：落点模型（Hero 顶部居中 / 对话页 Header 下右上）、不移动输入框、primitives 清单与版本降级、DOM 探针与失败方向、a11y、与官方 Toast 的关系、明确「不改行为」。
-- 本计划转为实施计划并在 `docs/plans/active/2026-11-09-worktree-aware-root-suggestions.md` 增加 P11 小节（与现有 P 系列同构）。
+- 本计划转为实施计划并在 `docs/plans/completed/2026-11-09-worktree-aware-root-suggestions.md` 增加 P11 小节（与现有 P 系列同构）。
 - 评审通过后登记 `docs/plans/README.md` 的 active 列表。
 - README / README.en 更新用户可见描述；发版时补 CHANGELOG 双语条目。
-- 进度证据只记[路线账本](./2026-09-12-multi-root-workspace.md#进度总账)，不在计划里预写。
+- 进度证据只记[路线账本](../active/2026-09-12-multi-root-workspace.md#进度总账)，不在计划里预写。
 
 ## 5. 验收标准
 

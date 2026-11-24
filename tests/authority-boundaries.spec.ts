@@ -95,6 +95,26 @@ describe('unknown registry authority never grants shared temp writes', () => {
     } finally { await ctx.fiber.dispose(); fixture.dispose() }
   })
 
+  it('clamps a moved Session to its origin while authority is unknown', async () => {
+    const fixture = createFixtureWorkspace('authority-moved')
+    const ctx = await sandbox()
+    try {
+      const provider = pin(ctx, 'seatbelt')
+      // The header origin is the Registry identity; only the resolved policy root
+      // may follow the effective directory (ADR-0012).
+      ctx.provide('sessions', {
+        get: (id: string) => id === 'moved-session' ? { header: { cwd: fixture.workspace } } : undefined,
+      } as never)
+      ctx.multiRootScope.setRegistryAuthority(false)
+      const policy = { mode: 'workspace-write' as const, workspaceRoot: fixture.outside, sessionId: 'moved-session' }
+      const result = await provider.confine(['true'], policy)
+      // Regression: this used to graft the effective policy root, giving the
+      // process a writable directory the fs fence already denied.
+      expect(parseConfined(result.argv, ['true']).subpaths.filter(path => path !== '/dev/null')).toEqual([canonicalPath(fixture.workspace)])
+      expect(result.argv).not.toContain(canonicalPath(fixture.outside))
+    } finally { await ctx.fiber.dispose(); fixture.dispose() }
+  })
+
   it('does not graft a draining registry\'s fixed-write members into read-only', async () => {
     const fixture = createFixtureWorkspace('authority-drain')
     const ctx = await sandbox()

@@ -1,6 +1,6 @@
 # Workspace 发现提示位置与形态重构 — 实施计划与退出验收
 
-> 状态：**已实施，待退出验收**（2026-11-15，分支 `feat/workspace-toast`）：代码、单元/组件测试与构建门禁已通过，Draft PR [#60](https://github.com/cherrchen/dsh-plugin-multi-root-workspace/pull/60) 已创建；GUI 视觉复核（E5）待评审者完成。需求分析、缺点清单与初始方案见 [需求同步与修改计划报告](./2026-11-15-workspace-toast-placement.md)；本文件是评审后的最终实施计划，冲突处以本文件为准。
+> 状态：**已完成**（2026-11-15，分支 `feat/workspace-toast`；PR [#60](https://github.com/cherrchen/dsh-plugin-multi-root-workspace/pull/60) `2208048` 已合入并随 `v0.1.20` 发版）：代码、单元/组件测试、构建门禁、退出验收与 GUI 视觉复核（E5）均已通过。需求分析、缺点清单与初始方案见 [需求同步与修改计划报告](./2026-11-15-workspace-toast-placement.md)；本文件是评审后的最终实施计划，冲突处以本文件为准。
 
 ## 1. 评审决定（2026-11-15）
 
@@ -59,7 +59,7 @@
 | `tests/client-worktree.spec.tsx` | select → Menu 交互；删除 × 用例；新增 placement/a11y/菜单用例 |
 | `tests/client-styles.spec.ts` | 新增提示卡规则断言（无右下角、无描边 + elevation、R16、主题 token、紧凑、动画） |
 | `docs/decisions/ADR-0039-worktree-aware-root-suggestions.md` | 第二十一次修订：落点、形态、删除 ×、primitives、DOM 探针、主题、a11y |
-| `docs/plans/active/2026-11-09-worktree-aware-root-suggestions.md` | P11 实施项与验收 |
+| `docs/plans/completed/2026-11-09-worktree-aware-root-suggestions.md` | P11 实施项与验收 |
 | `docs/plans/README.md` | active 索引登记本计划与报告 |
 | `README.md` / `README.en.md` | Worktree 建议的呈现描述（位置、操作） |
 

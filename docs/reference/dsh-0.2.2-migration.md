@@ -159,7 +159,7 @@
 
 ### 第三个接口面：预览导航搜索（2026-11-16 追加）
 
-本节标题保留 2026-11-14 的“两个接口面”（入站锚点不变）；本小节追加同日决策、次日落地的第三个宿主面，证据与决策见 [ADR-0043](../decisions/ADR-0043-additional-root-preview-navigator-search.md) 与 [实施计划](../plans/active/2026-11-16-additional-root-preview-navigator-search.md)。
+本节标题保留 2026-11-14 的“两个接口面”（入站锚点不变）；本小节追加同日决策、次日落地的第三个宿主面，证据与决策见 [ADR-0043](../decisions/ADR-0043-additional-root-preview-navigator-search.md) 与 [实施计划](../plans/completed/2026-11-16-additional-root-preview-navigator-search.md)。
 
 | 接口面 | 引入版本 | 插件消费方式 | 缺席时 |
 |---|---|---|---|

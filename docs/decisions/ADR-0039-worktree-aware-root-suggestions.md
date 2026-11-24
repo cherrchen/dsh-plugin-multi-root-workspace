@@ -10,7 +10,7 @@ Accepted（2026-11-16 第二十六次修订；2026-11-15 第二十一至二十�
 
 ## 首次实施审计修正（2026-11-09，历史）
 
-独立审计在 `ceb708e` 上复现的六类缺陷不改变本 ADR 的决策，只把实现收回已经写明的边界；返工条目见[实施计划](../plans/active/2026-11-09-worktree-aware-root-suggestions.md#r1r6-审计返工2026-11-09完成)。这里固定五条容易再次偏离的判据：
+独立审计在 `ceb708e` 上复现的六类缺陷不改变本 ADR 的决策，只把实现收回已经写明的边界；返工条目见[实施计划](../plans/completed/2026-11-09-worktree-aware-root-suggestions.md#r1r6-审计返工2026-11-09完成)。这里固定五条容易再次偏离的判据：
 
 - B 候选必须绑定**正在枚举的 common 与 admin 条目**，owner 也必须要求 primary/candidate 的 common 相同；仅比较 admin 名称不足以证明属于同一仓库。
 - 指针目标先做**字面路径的逐段拒绝**，再做 `realpath`；`realpath` 结果还必须与拒绝前观察到的目录身份相同。admin/common 目标本身是 symlink 时一律 inactive。
@@ -217,14 +217,14 @@ PR #60 自动评审核验后的实现对齐修复，不改变授权模型与安�
 - **Follower 的 `addNew` IPC 与浏览器契约同档**：owner 的 `addNew` 参数 schema（`src/worktrees/protocol.ts`，经 `src/authority/protocol.ts` 的共享参数表）此前仍只接受 `inherit`，第二十二次修订新增的 `read-only` / `read-write` 在共享 Registry 部署中会被 owner 拒绝。现接受三档；缺省仍为 `inherit`，owner 的复验、grant 字段写入（`recordedPath` / `readOnlyRecordedPath` / `readWriteRecordedPath`）与 `skillsEnabled` 规则不变。
 - **Files 管理器的手动入口**：`RootSwitcher` 构造嵌套 `WorkspaceFoldersDialog` 时透传 `worktrees` 与 `worktreePromptEnabled`，使 Files 页签入口与 footer / Hero 入口一样提供「Worktree 建议」按钮；Dialog 归属与生命周期不变（Files 入口仍是本地 Dialog，不接管 footer 的共享 controller）。
 - **展示元数据的刷新**：主 checkout 的分支是展示字段，不属于 `expectedFor` 的授权 expectation，也不参与 owner 复验。`refreshInventory` 在 expectation 相等而复用候选记录时，仍以最新 candidate 刷新展示元数据（当前为 `mainHead`），保留 `promptId`、`discoveryKey` 与 `expected`；`viewRevision` 因而随分支变化，重开 Dialog 或轮询会得到新视图。candidate 未变化时保留原记录对象，避免无关刷新改变记录身份。
-- **验收**：契约测试覆盖 owner IPC 三档与非法值；follower→owner 集成测试覆盖 `read-only` / `read-write` 的 grant 字段与 effective access；组件测试覆盖 Files 入口的入口可见性；host 测试覆盖「只切换主 checkout 分支」时 branch 与 `viewRevision` 更新、prompt id 不变。计划与证据见 [评审修复计划](../plans/active/2026-11-15-worktree-review-fixes.md)。
+- **验收**：契约测试覆盖 owner IPC 三档与非法值；follower→owner 集成测试覆盖 `read-only` / `read-write` 的 grant 字段与 effective access；组件测试覆盖 Files 入口的入口可见性；host 测试覆盖「只切换主 checkout 分支」时 branch 与 `viewRevision` 更新、prompt id 不变。计划与证据见 [评审修复计划](../plans/completed/2026-11-15-worktree-review-fixes.md)。
 
 ## 第二十四次修订（2026-11-15）
 
 - **页面兼容探针**：`src/compat/client-conversation-layout.ts` 集中读取上游会话和 Toast DOM，按内容标记或旧版 Header 取得几何数据。会话节点挂载或替换时，探针重新绑定会话根、输入卡、内容区和 Header 的尺寸观察。`src/client/notice-placement.ts` 负责落点计算、重测调度和 React 生命周期。
 - **手动入口归属**：Workspace Folders 管理器请求打开其自身会话的建议。Overlay 核对当前会话与实时设置后才接受请求，管理器收到确认后关闭。仍绑定旧会话的 Files 页签可以继续管理该会话的目录。
 - **勾选与权限**：刷新后的现存行保留勾选和逐行权限。新 worktree 默认勾选，主 checkout 默认待确认；被拒绝的行取消勾选。单行和多行使用同样的勾选及提交规则。
-- **展示与确认并发**：主 checkout 分支从当前仓库快照的 common `HEAD` 派生。展示分支变化更新 `viewRevision`，候选记录及其确认身份随原有 owner expectation 复用。见[第二轮审查报告](../plans/active/2026-11-15-worktree-review-fixes.md#12-第二轮审查报告a18c0ae)。
+- **展示与确认并发**：主 checkout 分支从当前仓库快照的 common `HEAD` 派生。展示分支变化更新 `viewRevision`，候选记录及其确认身份随原有 owner expectation 复用。见[第二轮审查报告](../plans/completed/2026-11-15-worktree-review-fixes.md#12-第二轮审查报告a18c0ae)。
 
 ## 第二十五次修订（2026-11-15）
 
@@ -234,7 +234,7 @@ PR #60 自动评审核验后的实现对齐修复，不改变授权模型与安�
 - **语义：纯关闭**：点击只隐藏本次激活的提示，不调用 `snooze` / `resolve`，不写 sidecar 与 Registry，不打开 Dialog。提示出现时 `seen` 已把候选记入本 Host 的 `offered`，因此关闭后本 Host 生命周期内不再自动提示、Host 重启后候选重新可见；这让「关闭」与写持久延迟的「稍后提醒」和写 ignore 的「永久不再提示」三分。
 - **生命周期**：关闭立即递增 `workEpoch` 并清空下拉开关状态，在飞的提醒完成不能再回写已关闭的提示（与 `openDialogFor` 相同的归属规则）；不新增 Escape 关闭。
 - **可访问性**：关闭按钮使用独立词典键 `worktree.toastClose`（中「关闭提示」/英 "Dismiss"）作为 `aria-label`，位于操作 `role="group"` 之外；Tab 顺序为查看 → 稍后提醒 → 关闭。
-- **验收**：组件测试覆盖「× 存在且不属于操作组」「× 是自绘控件而非 primitives 尺寸」「× 只关闭、不发 snooze/resolve、`seen` 仍只一次」「关闭后在飞提醒完成不复活提示」「compact 形态仍有 ×」；样式测试固化 18px 正圆、角上定位、外凸、24px 命中环、**没有 hover/active 规则**与 token 配色；README 双语同步。实现计划见 [2026-11-15-worktree-toast-close](../plans/active/2026-11-15-worktree-toast-close.md)。
+- **验收**：组件测试覆盖「× 存在且不属于操作组」「× 是自绘控件而非 primitives 尺寸」「× 只关闭、不发 snooze/resolve、`seen` 仍只一次」「关闭后在飞提醒完成不复活提示」「compact 形态仍有 ×」；样式测试固化 18px 正圆、角上定位、外凸、24px 命中环、**没有 hover/active 规则**与 token 配色；README 双语同步。实现计划见 [2026-11-15-worktree-toast-close](../plans/completed/2026-11-15-worktree-toast-close.md)。
 
 ## 第二十六次修订（2026-11-16）
 
@@ -1028,5 +1028,5 @@ $DSH_HOME/storages/multi_root_workspace.worktree-prompts/
 - [ADR-0027：revive 目标与受保护路径](./ADR-0027-revive-target-and-protected-paths.md)
 - [ADR-0028：上游主根身份与共享模式](./ADR-0028-upstream-primary-identity-and-shared-only-registry.md)
 - [需求文档](../requirements/multi-root-workspace.md#7-行为约束)（§7.16–§7.18）
-- [实施计划](../plans/active/2026-11-09-worktree-aware-root-suggestions.md)
+- [实施计划](../plans/completed/2026-11-09-worktree-aware-root-suggestions.md)
 - [路线账本](../plans/active/2026-09-12-multi-root-workspace.md)

@@ -394,7 +394,7 @@ describe('current host review context and real tool fences', () => {
   it('reviews real PTC inner fs calls once and retains the outer run_code tool cap',async(test)=>{
     const w=await world({}, {}, true)
     const target=join(w.f.outside,'ptc.txt')
-    const result=await w.run('run_code',{code:`return await tools.write(${JSON.stringify({file_path:target,content:'ptc-ok'})});`,description:'Write one fixture'})
+    const result=await w.run('run_code',{code:`await tools.write(${JSON.stringify({file_path:target,content:'ptc-ok'})});`,description:'Write one fixture'})
     if(result.isError && /sandbox|SANDBOX|Operation not permitted/.test(JSON.stringify(result)) && w.adapter.requests.length===0){
       test.skip(requireKernelRunner(process.platform==='darwin'?'seatbelt':process.platform==='win32'?'windows-acl':'bwrap',JSON.stringify(result)));return
     }
@@ -402,7 +402,7 @@ describe('current host review context and real tool fences', () => {
     expect(readFileSync(target,'utf8')).toBe('ptc-ok');expect(w.adapter.requests).toHaveLength(1)
     expect(pendingOf(w.adapter.requests[0]!).mode).toBe('ptc-inner')
     writeFileSync(join(w.ro,'ptc-keep'),'keep')
-    await w.run('run_code',{code:`return await tools.write(${JSON.stringify({file_path:join(w.ro,'ptc-keep'),content:'no'})});`,description:'Try a readonly root'})
+    await w.run('run_code',{code:`await tools.write(${JSON.stringify({file_path:join(w.ro,'ptc-keep'),content:'no'})});`,description:'Try a readonly root'})
     expect(readFileSync(join(w.ro,'ptc-keep'),'utf8')).toBe('keep');expect(w.adapter.requests).toHaveLength(2)
     const direct=await w.run('run_code',{code:`await (await import('node:fs/promises')).writeFile(${JSON.stringify(join(w.ro,'ptc-keep'))},'kernel bypass');`,description:'Direct process write must remain fenced'})
     expect(direct.isError,JSON.stringify(direct)).toBe(true)
@@ -410,7 +410,7 @@ describe('current host review context and real tool fences', () => {
     expect(w.adapter.requests).toHaveLength(2)
     const capped=await world({run_code:'read-only'}, {}, true)
     const refused=join(capped.f.outside,'capped-ptc.txt')
-    await capped.run('run_code',{code:`return await tools.write(${JSON.stringify({file_path:refused,content:'no'})});`,description:'Capped inner write'})
+    await capped.run('run_code',{code:`await tools.write(${JSON.stringify({file_path:refused,content:'no'})});`,description:'Capped inner write'})
     expect(()=>readFileSync(refused)).toThrow()
     expect(capped.adapter.requests).toHaveLength(1)
     expect(environment(capped.adapter.requests[0]!).writableRoots).toEqual([])

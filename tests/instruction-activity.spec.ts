@@ -1,6 +1,6 @@
 import { resolve } from 'node:path'
 import { describe, expect, it } from 'vitest'
-import { opsActivityEvidenceKey, replayedInstructionTargets } from '../src/compat/instruction-activity.ts'
+import { opsActivityEvidenceKey, replayedInstructionTargets, workingDirectorySemantics } from '../src/compat/instruction-activity.ts'
 it('replays native and PTC success without treating failures or uncompleted calls as work',()=>{
   const origin=resolve('origin'),next=resolve('next')
   const paths=replayedInstructionTargets([
@@ -20,6 +20,78 @@ it('checks candidate chains across cwd changes without manufacturing a durable t
   const events=[{type:'tool/call',data:{callId:'r',name:'read',arguments:'{"file_path":"a"}'}},{type:'working-directory/change',data:{cwd:end}},{type:'tool/result',data:{message:{source:{callId:'r'}}}}]
   expect(replayedInstructionTargets(events,start)).toEqual([resolve(start,'a'),resolve(end,'a')])
   expect(events).toHaveLength(3)
+})
+it('replays the current workspace-root/change event beside a pre-rename log',()=>{
+  const origin=resolve('origin'),legacy=resolve('legacy'),current=resolve('current')
+  const paths=replayedInstructionTargets([
+    {type:'working-directory/change',data:{cwd:legacy}},
+    {type:'tool/call',data:{callId:'r',name:'read',arguments:'{"file_path":"a"}'}},
+    {type:'workspace-root/change',data:{cwd:current}},
+    {type:'tool/result',data:{message:{source:{callId:'r'}}}},
+  ],origin)
+  expect(paths).toEqual([resolve(legacy,'a'),resolve(current,'a')])
+})
+it('prefers workspace-root/change over a later legacy spelling in the same log',()=>{
+  const start=resolve('start'),moved=resolve('moved'),stale=resolve('stale')
+  const paths=replayedInstructionTargets([
+    {type:'workspace-root/change',data:{cwd:moved}},
+    {type:'working-directory/change',data:{cwd:stale}},
+    {type:'tool/call',data:{callId:'r',name:'read',arguments:'{"file_path":"a"}'}},
+    {type:'tool/result',data:{message:{source:{callId:'r'}}}},
+  ],start)
+  expect(paths).toEqual([resolve(moved,'a')])
+})
+
+describe('workingDirectorySemantics — durable Host evidence for replay', () => {
+  const origin = resolve('origin')
+  const legacy = resolve('legacy')
+  const current = resolve('current')
+  const legacyChange = { type: 'working-directory/change', data: { cwd: legacy } }
+  const currentChange = { type: 'workspace-root/change', data: { cwd: current } }
+  const relativePair = [
+    { type: 'tool/call', data: { callId: 'r', name: 'read', arguments: '{"file_path":"a"}' } },
+    { type: 'tool/result', data: { message: { source: { callId: 'r' } } } },
+  ]
+
+  it('proves the deprecated chain is still applied by the Host projection', () => {
+    expect(workingDirectorySemantics([legacyChange], origin, legacy)).toBe('honor-legacy')
+  })
+  it('proves the Host ignores the deprecated chain', () => {
+    expect(workingDirectorySemantics([legacyChange], origin, origin)).toBe('ignore-legacy')
+  })
+  it('stays unknown when the chains do not diverge or the projection names neither', () => {
+    expect(workingDirectorySemantics([], origin, origin)).toBe('unknown')
+    expect(workingDirectorySemantics([legacyChange], origin, undefined)).toBe('unknown')
+    expect(workingDirectorySemantics([legacyChange], origin, resolve('elsewhere'))).toBe('unknown')
+    expect(workingDirectorySemantics([legacyChange], undefined, legacy)).toBe('unknown')
+  })
+
+  it('uses the projection stateVersion as structural evidence even when both chains end together', () => {
+    const returned = [legacyChange, { type: 'working-directory/change', data: { cwd: origin } }]
+    expect(workingDirectorySemantics(returned, origin, origin)).toBe('unknown')
+    expect(workingDirectorySemantics(returned, origin, origin, 1)).toBe('honor-legacy')
+    expect(workingDirectorySemantics(returned, origin, origin, 2)).toBe('unknown')
+    expect(workingDirectorySemantics(returned, origin, origin, 3)).toBe('ignore-legacy')
+  })
+  it('attributes a relative operation inside a root the session returned from when the legacy semantics is proven', () => {
+    const returned = [legacyChange, ...relativePair, { type: 'working-directory/change', data: { cwd: origin } }]
+    expect(replayedInstructionTargets(returned, origin, undefined, undefined, { workingDirectory: 'honor-legacy' }))
+      .toEqual([resolve(legacy, 'a')])
+    expect(replayedInstructionTargets(returned, origin, undefined, undefined, { workingDirectory: 'ignore-legacy' })).toEqual([])
+  })
+
+  it('honors the legacy chain only for a Host that still applies it', () => {
+    expect(replayedInstructionTargets([legacyChange, ...relativePair], origin, undefined, undefined, { workingDirectory: 'honor-legacy' }))
+      .toEqual([resolve(legacy, 'a')])
+  })
+  it('drops a relative operation the durable evidence cannot attribute', () => {
+    expect(replayedInstructionTargets([legacyChange, ...relativePair], origin, undefined, undefined, { workingDirectory: 'ignore-legacy' })).toEqual([])
+    expect(replayedInstructionTargets([legacyChange, ...relativePair], origin, undefined, undefined, { workingDirectory: 'unknown' })).toEqual([])
+  })
+  it('attributes activity after a current workspace-root/change under either interpretation', () => {
+    expect(replayedInstructionTargets([legacyChange, currentChange, ...relativePair], origin, undefined, undefined, { workingDirectory: 'ignore-legacy' }))
+      .toEqual([resolve(current, 'a')])
+  })
 })
 
 describe('replayedInstructionTargets — OPS live-evidence contract',()=>{

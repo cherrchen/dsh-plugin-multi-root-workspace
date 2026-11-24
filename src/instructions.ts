@@ -65,9 +65,9 @@ import { instructionsApi } from './compat/agent-instructions.ts'
 import type { InstructionFile, InstructionsApi, LoadedInstructionFile } from './compat/agent-instructions.ts'
 import { createInstructionMessage } from './compat/llm-message.ts'
 import { toolResultFailed } from './compat/tool-result.ts'
-import { effectiveDirectory } from './compat/session-directory.ts'
+import { effectiveDirectory, originDirectory, workingDirectoryStateVersion } from './compat/session-directory.ts'
 import { aroundTool, type ToolCaller } from './compat/tool-context.ts'
-import { FILE_TOUCH_TOOL_NAMES, normalizeOpsFileActivity, opsActivityEvidenceKey, ptcFileActivity, replayedInstructionTargets, stableOpsJson, touchedPathOfToolCall } from './compat/instruction-activity.ts'
+import { FILE_TOUCH_TOOL_NAMES, normalizeOpsFileActivity, opsActivityEvidenceKey, ptcFileActivity, replayedInstructionTargets, stableOpsJson, touchedPathOfToolCall, workingDirectorySemantics } from './compat/instruction-activity.ts'
 import { opsCompatibilityToken } from './compat/ops-settings.ts'
 import { nativeInstructionCopies } from './compat/instruction-overlap.ts'
 import { isCanonicallyUnder } from './roots.ts'
@@ -305,6 +305,12 @@ export function apply(ctx: Context, config: Config = {}): void {
   if (maxBytes <= 0 || !Number.isFinite(maxBytes)) return
 
   const states = new WeakMap<object, SessionState>()
+  // Seed events (the log loaded by a resume) never publish `session/event`; they
+  // are replayed exactly once, for the events that existed before this row saw
+  // the Session. Later activity arrives through the live listener below, whose
+  // `effectiveDirectory` is the Host's resume semantics (a 0.2.3 host ignores a
+  // legacy `working-directory/change` and resumes at the origin).
+  const liveEventCounts = new WeakMap<object, number>()
   const callsBySession = new WeakMap<object, PendingCalls>()
   const executions = new AsyncLocalStorage<ToolCaller>()
 
@@ -503,6 +509,7 @@ export function apply(ctx: Context, config: Config = {}): void {
   // arguments, `tool/result` names the call it answers, and a pairing is a
   // directory the session has worked in.
   ctx.on('session/event', (session, event) => {
+    liveEventCounts.set(session, (liveEventCounts.get(session) ?? 0) + 1)
     const pendingCalls = callsBySession.get(session) ?? new Map()
     callsBySession.set(session, pendingCalls)
     const ptc = ptcFileActivity(event)
@@ -538,13 +545,19 @@ export function apply(ctx: Context, config: Config = {}): void {
   })
 
   ctx.inject(['fs'], (scope: Context) => {
+    // Cordis wraps service lookups in fresh proxies. Keep the successful probe
+    // with this mounted service and let an unavailable checkpoint be retried.
+    let directoryStateVersion: ReturnType<typeof workingDirectoryStateVersion>
     scope.provide('multiRootInstructions', {
       knownRoots(session) { return [...(states.get(session)?.provenanceRoots ?? [])] },
       async snapshot(agent, roots, target, signal, pending) {
         const modeToken = opsCompatibilityToken(scope)
-        const snapshot = await withRegistryRead(scope, scope.sandboxPolicy.resolve({ session: agent.session }).workspaceRoot, 'instructions', async () => {
+        // Registry identity is the Session origin; the effective cwd is only
+        // the relative base and must never re-key the root table (ADR-0012).
+        const origin = originDirectory(scope, agent.session) ?? scope.sandboxPolicy.resolve({ session: agent.session }).workspaceRoot
+        const snapshot = await withRegistryRead(scope, origin, 'instructions', async () => {
         if (opsCompatibilityToken(scope) !== modeToken) throw new Error('review-context: OPS compatibility changed during the snapshot; retry')
-        const allowed = new Set(scope.multiRootScope.scopeOf(scope.sandboxPolicy.resolve({ session: agent.session }).workspaceRoot))
+        const allowed = new Set(scope.multiRootScope.scopeOf(origin))
         roots = roots.filter(root => allowed.has(root))
         signal.throwIfAborted()
         const existing = states.get(agent.session)
@@ -559,13 +572,38 @@ export function apply(ctx: Context, config: Config = {}): void {
           worked: new Set(),
           liveOpsEvidence: new Map(existing?.liveOpsEvidence ?? []),
         }
-        // Seed events do not publish session/event on resume. Read their
-        // successful activity without mutating the main agent's delivery index.
+        // Seed events do not publish session/event on resume, while activity
+        // after this row mounted was already resolved against the Host's
+        // effective directory by the live listener above. Replay is still run
+        // over the WHOLE log so OPS history is validated every snapshot, but
+        // only events before the resume boundary may contribute touched paths:
+        // re-deriving a live event's relative path through a superseded legacy
+        // `working-directory/change` chain would misattribute it.
+        // A later recovery has no in-process counter for an earlier run's live
+        // events, so the boundary must not be the only evidence: the version the
+        // Host registers its working-directory projection at names the
+        // directory-event generation structurally, and the projection state
+        // itself is rebuilt from this same durable log. The version wins
+        // whenever it is readable (a Session that entered another directory and
+        // returned leaves both interpreted chains at the same endpoint); the
+        // chain comparison remains the fallback evidence for compositions that
+        // expose no projection registry. Replay skips relative activity whose
+        // directory that evidence cannot settle instead of guessing a directory
+        // the operation may not have used.
         // oxlint-disable-next-line typescript/no-deprecated -- No public activity projection exists.
-        for (const path of replayedInstructionTargets(agent.session.snapshotEvents(), agent.session.header.cwd,
+        const seedEvents = agent.session.snapshotEvents()
+        const boundary = Math.max(0, seedEvents.length - (liveEventCounts.get(agent.session) ?? 0))
+        const effectiveCwd = effectiveDirectory(scope, agent.session)
+        // Only a log that actually carries the deprecated spelling can be
+        // ambiguous; every other log attributes from agreeing chains, so the
+        // registry probe stays off the common path.
+        const legacySpelling = seedEvents.some(event => (event as { readonly type?: unknown }).type === 'working-directory/change')
+        if (legacySpelling) directoryStateVersion ??= workingDirectoryStateVersion(scope, agent.session)
+        const workingDirectory = workingDirectorySemantics(seedEvents, agent.session.header.cwd, effectiveCwd, directoryStateVersion)
+        for (const path of replayedInstructionTargets(seedEvents, agent.session.header.cwd,
           modeToken === undefined ? undefined : existing?.liveOpsEvidence,
           modeToken === undefined ? undefined : pending,
-          { opsCompatibility: modeToken !== undefined })) state.touched.add(path)
+          { opsCompatibility: modeToken !== undefined, touchBoundary: boundary, workingDirectory })) state.touched.add(path)
         const targets = typeof target === 'string' ? [target] : target ?? []
         for (const item of targets) state.touched.add(item)
         if (roots.length === 0) return []
@@ -574,8 +612,7 @@ export function apply(ctx: Context, config: Config = {}): void {
         // Native discovery can already cover this directory before any file
         // tool succeeds. Recollect that chain before replacing native frames,
         // without recording cwd as successful activity or delivery state.
-        const cwd = effectiveDirectory(scope, agent.session)
-        const reviewCwd = cwd === undefined ? undefined : canonicalPath(cwd)
+        const reviewCwd = effectiveCwd === undefined ? undefined : canonicalPath(effectiveCwd)
         const result: CurrentRootInstruction[] = []
         for (const root of roots) {
           const plan = await planRoot(scope, api, root, config, state, signal, true, reviewCwd)

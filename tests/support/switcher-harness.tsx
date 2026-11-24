@@ -447,9 +447,11 @@ afterEach(() => {
 /**
  * Render the occupant inside a header that mirrors the upstream Files pane,
  * itself inside a dockkit tab host. The returned `pane` is where the forked
- * tree must portal into.
+ * tree must portal into. `wrapped` plays 0.2.3-alpha.1's Files page, which
+ * puts the slot anchor inside a `.externalActions` box under the header;
+ * without it the anchor is the header's direct child, as it was before.
  */
-export function renderInPane(harness: Harness, owner: { absolutePath?: string; renderFactorySlot?: unknown; useContextMenu?: unknown } = { absolutePath: '/repos/primary' }, strictMode = false, modern = false): {
+export function renderInPane(harness: Harness, owner: { absolutePath?: string; renderFactorySlot?: unknown; useContextMenu?: unknown } = { absolutePath: '/repos/primary' }, strictMode = false, modern = false, wrapped = false): {
   pane: HTMLElement
   host: HTMLElement
   header: HTMLElement
@@ -466,6 +468,14 @@ export function renderInPane(harness: Harness, owner: { absolutePath?: string; r
   const reload = document.createElement('button')
   reload.setAttribute('data-files-reload', '')
   header.append(path, reload)
+  const slot = document.createElement('div')
+  slot.setAttribute('data-slot', 'sidebar.right.tab.files.actions')
+  if (wrapped) {
+    const actions = document.createElement('div')
+    actions.className = 'externalActions'
+    actions.append(slot)
+    header.append(actions)
+  }
   const body = document.createElement('div')
   body.setAttribute(modern ? 'data-files-content' : 'data-files-body', '')
   pane.append(header, body)
@@ -473,7 +483,7 @@ export function renderInPane(harness: Harness, owner: { absolutePath?: string; r
   document.body.append(host)
   appended.push(host)
   const occupant = harness.occupant(owner) as ReactElement
-  const mounted = render(strictMode ? <StrictMode>{occupant}</StrictMode> : occupant, { container: header })
+  const mounted = render(strictMode ? <StrictMode>{occupant}</StrictMode> : occupant, { container: wrapped ? slot : header })
   return {
     pane,
     host,

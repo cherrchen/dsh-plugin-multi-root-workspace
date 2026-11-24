@@ -161,7 +161,7 @@ broker 运行**自己的** root 保护依赖树——与 Host/Agent 任何一方
 # root 执行；目录随后属 root、不可被 Host/broker 写
 mkdir -p /opt/dsh-broker && cd /opt/dsh-broker
 pnpm init
-pnpm add --save-exact /path/to/dsh-plugin-multi-root-workspace-0.1.24-beta.5.tgz \
+pnpm add --save-exact /path/to/dsh-plugin-multi-root-workspace-0.1.24.tgz \
   @deepseek-ai/dsh@0.2.2-rc.5 @deepseek-ai/cordis@4.1.0 \
   @deepseek-ai/dsh-ssh@0.2.2-rc.5 @deepseek-ai/dsh-fs-ssh@0.2.2-rc.5 \
   @deepseek-ai/dsh-subprocess-ssh@0.2.2-rc.5 @deepseek-ai/dsh-sandbox-ssh@0.2.2-rc.5
