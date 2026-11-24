@@ -331,7 +331,7 @@ rc.1 相对 alpha.3 的 patch 只改包版本。沿用既有适配器，保留�
 - **复用而非复制**：`FilesPane` 新增 `mode='preview'`，预览导航接管在 `filesTree.search` seat 存在时 portal 同一个 `FilesPane`，而不是第二套搜索状态机（[ADR-0043](../../docs/decisions/ADR-0043-additional-root-preview-navigator-search.md)）。预览形态的差异只有四项：栏常显（不读不写 `barOpen`）、挂载不抢焦点、调用方提供打开路由（`openFileIn` → `replaceTab`）、结果命中被预览文件时标当前行（`TreeView.current.ref` 变可选，只标记不滚动）。搜索记录键是 `(pane, root)`，与 Files 页的 `(tab, root)` 分开；偏好仍写宿主同名 localStorage 键、按根隔离。
 - **接管记录原子化**：预览接管与 Files 页 `RootSwitcher` 的 takeover 都在一次 state 提交里携带 `{ root, rootId }`，搜索 key 与请求的 `rootId` 同源；换根过渡帧不再发出“新根 rootId + 旧根 query”的请求，也不会把旧根记录写成无人结算的 `pending`（v0.1.20 已发布缺陷的修复）。
 - **降级**：有面板通道但无 `workspaceFiles.search`（rc.2 之前或裁掉 search 服务的组合）→ 仍 portal `FilesTree`，DOM、生命周期与隐藏规则逐项不变；无面板通道 → 不建立接管、导航树全程原生；主根文件在任何宿主上都不接管、原生搜索零变化。
-- **结构依赖与目检**：原生搜索节点由 `styles.ts` 的 DIRECT-CHILD 规则隐藏，bar 选择器带 `:not([data-mrfw-files-pane])` 守卫，插件 pane 根携带 `data-mrfw-files-pane`；焦点交接在 `[data-files-page], aside[data-files-navigator]` 容器内查找原生 body（覆盖 pane 包装、直挂与 Files 页新包装三种形态）。升级目检清单见第 12 节；测试面与已接受偏差见[实施计划](../../docs/plans/active/2026-11-16-additional-root-preview-navigator-search.md)。
+- **结构依赖与目检**：原生搜索节点由 `styles.ts` 的 DIRECT-CHILD 规则隐藏，bar 选择器带 `:not([data-mrfw-files-pane])` 守卫，插件 pane 根携带 `data-mrfw-files-pane`；焦点交接在 `[data-files-page], aside[data-files-navigator]` 容器内查找原生 body（覆盖 pane 包装、直挂与 Files 页新包装三种形态）。升级目检清单见第 12 节；测试面与已接受偏差见[实施计划](../../docs/plans/completed/2026-11-16-additional-root-preview-navigator-search.md)。
 
 
 ## 23. DSH 0.2.2-rc.4 支持

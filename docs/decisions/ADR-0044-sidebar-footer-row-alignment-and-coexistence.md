@@ -444,7 +444,7 @@ A 修订后 GUI 复核继续报告两行 hover **宽度**不一致。真实 DOM 
 - [ADR-0015](./ADR-0015-files-tab-plugin-owned-browsing.md)、
   [ADR-0014](./ADR-0014-root-limit-and-provider-conflict.md)（接管提示与冲突处置的既有立场）
 - [ADR-0009](./ADR-0009-dsh-compat-contract.md)（结构探测、精确版本矩阵与两代兼容写法）
-- [计划](../plans/active/2026-11-16-sidebar-footer-row-alignment-and-coexistence.md)
+- [计划](../plans/completed/2026-11-16-sidebar-footer-row-alignment-and-coexistence.md)
 - 上游：`packages/client/ui-sidebar/src/client/SidebarRoot.tsx:467-475`（footer 渲染点）、
   `packages/client/ui-renderer/src/client/scoped-slots.tsx:1313-1352,1481-1509`（anchor 与 list
   渲染）、`packages/client/ui-settings-general/src/client/SettingsRoot.module.css`（两代配方）、

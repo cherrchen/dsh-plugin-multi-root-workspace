@@ -2,7 +2,7 @@
 
 ## Status
 
-Accepted（决策定案；实施状态与证据见[计划](../plans/active/2026-11-08-workspace-menu-folders-dialog.md)）。
+Accepted（决策定案；实施状态与证据见[计划](../plans/completed/2026-11-08-workspace-menu-folders-dialog.md)）。
 
 ## Date
 
@@ -102,4 +102,4 @@ Accepted（决策定案；实施状态与证据见[计划](../plans/active/2026-
 - [ADR-0008：面板主根由 host session 推导](./ADR-0008-panel-session-derived-authority.md)
 - [ADR-0005：出树 client 半部与 Connection RPC 通道](./ADR-0005-out-of-tree-client-transport.md)
 - [ADR-0015：Files 页签根选择器](./ADR-0015-files-tab-plugin-owned-browsing.md)
-- [实施计划](../plans/active/2026-11-08-workspace-menu-folders-dialog.md)
+- [实施计划](../plans/completed/2026-11-08-workspace-menu-folders-dialog.md)

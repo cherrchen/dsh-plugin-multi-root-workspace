@@ -1,6 +1,6 @@
 # F4 — Registry 权威后台恢复与故障诊断（实施稿 rev.5）
 
-> **状态：Accepted / Phase 1–3 已在 `feat/host-f4` 实施，macOS 本机与三平台 CI 验证通过；真实 dsh-tui soak 暂缓（[ADR-0026](../../decisions/ADR-0026-registry-background-recovery.md)）。**本文是[共享 Registry 计划](./2026-10-30-shared-registry-authority.md) F 表 **F4** 项的专项计划；rev.4 经三轮技术评审通过，rev.5 吸收实施前源码审核门（Phase 0）的发现，合同由 ADR-0026 定案，批次已登记入[进度总账](./2026-09-12-multi-root-workspace.md)。文中"Current State"逐条对应当前源码，"Design"为已采纳合同，实施完成前不得宣称能力已实现。
+> **状态：Completed / Phase 1–3 已在 `feat/host-f4` 实施，macOS 本机与三平台 CI 验证通过并随 `v0.1.13` 发版；真实 dsh-tui soak 暂缓，残余验收由[共享 Registry 计划](../active/2026-10-30-shared-registry-authority.md)继续跟踪（[ADR-0026](../../decisions/ADR-0026-registry-background-recovery.md)）。**本文是[共享 Registry 计划](../active/2026-10-30-shared-registry-authority.md) F 表 **F4** 项的专项计划；rev.4 经三轮技术评审通过，rev.5 吸收实施前源码审核门（Phase 0）的发现，合同由 ADR-0026 定案，批次已登记入[进度总账](../active/2026-09-12-multi-root-workspace.md)。文中"Current State"逐条对应当前源码，"Design"为已采纳合同，实施完成前不得宣称能力已实现。
 
 ## 评审修订记录
 
@@ -32,7 +32,7 @@
 
 ## Background
 
-[共享 Registry 计划](./2026-10-30-shared-registry-authority.md) F 表对 F4 的原始定义：相对初版"按需重连、unknown-state 隔离至重启"，演进为**有界退避/jitter、取消/退出、诊断状态、存储核对及重开条件；心跳不得夺锁**；最小验收目标为"空闲故障不会形成忙循环；恢复不复用旧 grant；修复前始终保守拒绝"。
+[共享 Registry 计划](../active/2026-10-30-shared-registry-authority.md) F 表对 F4 的原始定义：相对初版"按需重连、unknown-state 隔离至重启"，演进为**有界退避/jitter、取消/退出、诊断状态、存储核对及重开条件；心跳不得夺锁**；最小验收目标为"空闲故障不会形成忙循环；恢复不复用旧 grant；修复前始终保守拒绝"。
 
 2026-10-31 对当前实现完成可行性核对：恢复引擎（`ensureAuthority` 全部分支）已存在且对重复调用安静；两轮评审又确认了四处必须先修的实机缺口（见 Current State「现状缺口」）。本文件把核对证据、评审发现与设计候选写成可评审的条目。
 

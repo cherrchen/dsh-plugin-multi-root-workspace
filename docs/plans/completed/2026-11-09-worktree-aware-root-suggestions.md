@@ -1,6 +1,6 @@
 # Worktree 感知的附加根建议与 Git 元数据授权实施计划
 
-> 状态：**P1–P10 与第十九次修订随 `v0.1.17` 发版；第二十次修订（会话激活时一次只读检查 + 非模态 Toast + 显式确认 Dialog + snooze）已实施，验证状态以[路线账本](./2026-09-12-multi-root-workspace.md#进度总账)为准**。先完成 B（P1–P7），再实施 A（P8–P10）；第十九次修订把 A 的目标改为主 checkout、开关改为实验性默认关闭，并加入单/多候选提示分流；第二十次修订把自动发现从常驻长轮询收敛为会话激活时一次只读检查。
+> 状态：**已完成——P1–P10 与第十九次修订随 `v0.1.17` 发版；第二十次修订（会话激活时一次只读检查 + 非模态 Toast + 显式确认 Dialog + snooze）及后续提示位置/Dialog/关闭按钮修订随 `v0.1.20` 与 `v0.1.21` 发版，验证状态以[路线账本](../active/2026-09-12-multi-root-workspace.md#进度总账)为准**。先完成 B（P1–P7），再实施 A（P8–P10）；第十九次修订把 A 的目标改为主 checkout、开关改为实验性默认关闭，并加入单/多候选提示分流；第二十次修订把自动发现从常驻长轮询收敛为会话激活时一次只读检查。
 > 决策：[ADR-0039](../../decisions/ADR-0039-worktree-aware-root-suggestions.md)（Accepted，2026-11-14 第二十次修订）。
 > 需求：[§7.16–§7.18](../../requirements/multi-root-workspace.md#7-行为约束)。
 
@@ -200,7 +200,7 @@ ADR-0039 已经过多轮只读复审，覆盖：
 - 将 owner 复验移到队列内最后一次异步读取之后，调用 Host 在权威恢复后校验再送交。屏障覆盖此时关闭开关、原址替换和 mode 切换。
 - 发现与轮询按设置和激活代次失效，保留 lost 的显式恢复规则和已观察到的路径重建警告。回归覆盖在途关闭、开关切换和路径重建。
 - 补齐[共享 Registry 线协议](../../architecture/registry-authority-service.md#3-授权与版本协议)的旧版握手、Worktree 能力协商、重放答复和完整 owner 快照。
-- 两条受限 Git 旅程使用平台原生 Node 写入探针和 PATH 上的 Git。按 provider 返回的实际方言决定内核探针结果。实际执行和 skip 证据只记[路线账本](./2026-09-12-multi-root-workspace.md#worktree-感知建议-ba-实施2026-11-09)。
+- 两条受限 Git 旅程使用平台原生 Node 写入探针和 PATH 上的 Git。按 provider 返回的实际方言决定内核探针结果。实际执行和 skip 证据只记[路线账本](../active/2026-09-12-multi-root-workspace.md#worktree-感知建议-ba-实施2026-11-09)。
 
 ### 第十九次修订实施（2026-11-10，完成）
 
@@ -223,7 +223,7 @@ ADR-0039 已经过多轮只读复审，覆盖：
 
 ### 第二十次修订实施（2026-11-14，完成）
 
-> 决策见 ADR-0039 第二十次修订。授权语义不变：不自动添加/删除根，`addNew` 仍是唯一写入路径，owner 复验与 `worktree/prompt-stale` 行为不变。本阶段记录实施范围与验收清单；实际验证证据只记[路线账本](./2026-09-12-multi-root-workspace.md#进度总账)，不在本小节预写。
+> 决策见 ADR-0039 第二十次修订。授权语义不变：不自动添加/删除根，`addNew` 仍是唯一写入路径，owner 复验与 `worktree/prompt-stale` 行为不变。本阶段记录实施范围与验收清单；实际验证证据只记[路线账本](../active/2026-09-12-multi-root-workspace.md#进度总账)，不在本小节预写。
 
 - [x] **宿主：`fresh` 只读检查**。`worktreePrompt` 增加可选 `fresh`（默认 `false`，strict）；`fresh: true` 只返回「未被 Host `offered` 认领且不被当前 snooze 覆盖」的候选，纯查询、无副作用；`prompt()` 的 `ensureWorkspace` 固定 `'first'`，自动检查不复活 `lost`；返回 `{ prompts, viewRevision }` 不变。
 - [x] **宿主：`worktreePromptSeen` 与 `offered`**。新增端点，把命中当前 queue 且仍 eligible 的 `promptIds` 的 discovery key 写入 Host 内存 `WorkspaceState.offered`；不写 sidecar/Registry、不要求 owner 队列；`offered` 按 workspace 共享，`reset`/`disposeAll`/Host 重启清空，不持久化。
@@ -234,7 +234,7 @@ ADR-0039 已经过多轮只读复审，覆盖：
 - [x] **客户端：Dialog 与调用**。只有「查看」打开现有 Dialog；打开时 `worktreePrompt(sessionId)`（不带 `fresh`）取全量可见候选，再启动 `worktreePromptWait(sessionId, { seenViewRevision })`，关闭立即 abort；Toast 显示后与 Dialog 打开后各调用一次 `seen`；「稍后」调用 `client.snooze`，「添加所选」继续 `resolve('add')`；X/ESC 关闭不写状态。
 - [x] **面板/样式/词典 + journey**。面板 `list` 与 `worktrees.notify()` 不触发自动检查；`src/client/styles.ts` 增加 Toast 样式（`mrfw-` 前缀、`var(--dsw-*)` token）；词典补齐 Toast 文案与稍后选项；`smoke:journey` 的 web leg 走真实 HTTP 通道的 fresh → 查看 → 确认序列；`tests/worktrees-git.e2e.ts` 若直接调用 wait 可保持。
 - [x] **单测与客户端测试**。宿主覆盖 `fresh`/`seen`/snooze 语义、sidecar 往返与降级、owner 拒绝路径；客户端覆盖触发收敛、Toast/Dialog、下拉、StrictMode 幂等；契约测试覆盖 strict/互斥/枚举/去重/上限。
-- [x] **文档**。ADR-0039 第二十次修订与本计划小节；[路线账本](./2026-09-12-multi-root-workspace.md#进度总账)由维护者在验证后写入实际证据。
+- [x] **文档**。ADR-0039 第二十次修订与本计划小节；[路线账本](../active/2026-09-12-multi-root-workspace.md#进度总账)由维护者在验证后写入实际证据。
 
 **验收**（按 ADR-0039 第二十次修订的契约与失败方向；证据只记路线账本）：
 
@@ -289,7 +289,7 @@ ADR-0039 已经过多轮只读复审，覆盖：
 - **定时选择的完成路径不拥有后续会话的提示**：`snoozeNotice` 的失败路径只检查组件是否挂载，成功路径只比较 session id。A 会话选择 7 天后切到 B，A 的请求拒绝会清掉 B 刚显示、其候选已被 `seen` 认领的 Toast；A→B→A 往返后旧请求成功也会清掉第二次激活的提示。改为调用时捕获 `workEpoch`，两个完成路径都要求 `mounted && epoch === workEpoch.current`（成功路径仍校验 session）才修改 Toast，生命周期已变的完成一律丢弃；同生命周期内失败仍静默关闭、不重试。回归：`tests/client-worktree.spec.tsx` 的跨会话失败与同会话往返成功两条。
 - **请求批次与完整响应**：`seen`（Toast/Dialog）与 snooze/resolve 原先一次发送整个可见集合；仓库超过 64 个 worktree 时请求会被 `promptIds` 的 64 上限拒绝。更早的失败点是响应 schema 同样 `max(64)`：真实客户端整份拒绝回答，Toast 完全不出现（自动检查静默失败）、Dialog 关闭——因此 review 描述的直接请求溢出在旧代码中先被响应解析挡住，但根因相同且影响更糟。改为响应可携带完整可见列表（请求上限仍 64），`WorktreeClient` 的 `seen`/`resolve`/`snooze` 按 64 个 id 顺序分批并合并答复（`seen` 求和；`resolved`/`skipped` 合并；`viewRevision`/`prompts` 取最后一批）。回归：合同 65 项响应、客户端 65/100/130 个 id 的分批、真实客户端 + 65 候选的 Toast 与两批 `seen`。
 - **广泛审查：异步完成的归属**：`confirmAdd`/`applyLater` 也捕获 `workEpoch`，A→B→A 后旧 Dialog 的 resolve 完成不再关闭或改写第二次激活的 Dialog；`openDialog` 与 Toast 的「×」立即递增 epoch，打开 Dialog 或显式关闭 Toast 之后的旧 snooze 完成不能再改 UI。回归：Dialog 的 add/later 往返两条，以及关闭 Toast 后部分 refused 的 snooze 不重新出现。
-- **验证**：worktree + client + locale + authority-native + `worktree-client` 专项 15 文件 **204 通过 / 15 环境 skip / 0 失败**；`lint`、双端 `typecheck`、`build`、`docs:check`、`compat:check`、`pack:check` 通过；全量与冒烟结果记[路线账本](./2026-09-12-multi-root-workspace.md#第二十次修订验收2026-11-14)。
+- **验证**：worktree + client + locale + authority-native + `worktree-client` 专项 15 文件 **204 通过 / 15 环境 skip / 0 失败**；`lint`、双端 `typecheck`、`build`、`docs:check`、`compat:check`、`pack:check` 通过；全量与冒烟结果记[路线账本](../active/2026-09-12-multi-root-workspace.md#第二十次修订验收2026-11-14)。
 
 ### P11 发现提示位置与形态（2026-11-15）
 

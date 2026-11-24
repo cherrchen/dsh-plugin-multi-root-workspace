@@ -1,6 +1,6 @@
 # Files 页被第三方整页接管时的官方 Toast 提示（Issue #47）
 
-> 状态：**已实施、本机门禁与 CI 全绿，Draft PR 待评审（2026-11-15，分支 `feat/file-slot-error`，PR [#61](https://github.com/cherrchen/dsh-plugin-multi-root-workspace/pull/61)）**。本文件是 Issue #47 限定范围的实施计划、进入/退出验收机制与证据账本；验收结果见 §12，PR 合并后随计划归档。
+> 状态：**已完成——已实施、本机门禁与 CI 全绿（2026-11-15，分支 `feat/file-slot-error`；PR [#61](https://github.com/cherrchen/dsh-plugin-multi-root-workspace/pull/61) `a3baafd` 已合入并随 `v0.1.21` 发版）**。本文件是 Issue #47 限定范围的实施计划、进入/退出验收机制与证据账本；验收结果见 §12。
 >
 > 关联：Issue [#47](https://github.com/cherrchen/dsh-plugin-multi-root-workspace/issues/47)、[ADR-0015](../../decisions/ADR-0015-files-tab-plugin-owned-browsing.md)、[故障排查：Files 页签选择器退化](../../troubleshooting/files-switcher-degraded.md)、[Files 页签根浏览计划](../completed/2026-10-12-files-header-root-browsing.md)。
 

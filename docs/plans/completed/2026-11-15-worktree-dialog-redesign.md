@@ -1,6 +1,6 @@
 # Worktree 建议 Dialog 视觉重构 — 需求同步与修改报告（草案）
 
-> 状态：**已实施（方案 B + 分支展示），待 CI/GUI 验收**（2026-11-15，分支 `feat/workspace-toast`）。PR #60 自动评审的 3 个实现缺口与修复计划见 [评审修复计划](./2026-11-15-worktree-review-fixes.md)。Draft PR #60 上的 5 个 CI run（queued/in_progress）已全部取消；随后按本报告的实现方案提交了新 commit，CI 随新 push 重新触发。
+> 状态：**已完成——已实施（方案 B + 分支展示）并通过 CI/GUI 验收**（2026-11-15，分支 `feat/workspace-toast`；随 `v0.1.20` 发版）。PR #60 自动评审的 3 个实现缺口与修复计划见 [评审修复计划](./2026-11-15-worktree-review-fixes.md)。Draft PR #60 上的 5 个 CI run（queued/in_progress）已全部取消；随后按本报告的实现方案提交了新 commit，CI 随新 push 重新触发。
 
 ## 1. 需求同步
 

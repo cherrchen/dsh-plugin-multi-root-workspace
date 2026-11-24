@@ -1,8 +1,8 @@
 # remote_copy 远端 staging 的流式字节预算（PR #73 Codex 评审 P2）
 
-> 状态：**已实施，待复跑 PR CI**（2026-11-22，分支 `feat/ssh-workspace`，reviewed commit `1c4e267`）。本文是本轮评审修复的核验结论、实施计划与退出验收；首轮 CI 的单平台失败见 §7。
+> 状态：**已完成——已实施并通过 PR CI 复验**（2026-11-22，分支 `feat/ssh-workspace`，reviewed commit `1c4e267`；PR [#73](https://github.com/cherrchen/dsh-plugin-multi-root-workspace/pull/73) `506a52f` 已合入 `main` 并随 `v0.1.24-beta.1` 发版）。本文是本轮评审修复的核验结论、实施计划与退出验收；首轮 CI 的单平台失败见 §7。
 >
-> 关联：PR [#73](https://github.com/cherrchen/dsh-plugin-multi-root-workspace/pull/73)、[ADR-0034](../../decisions/ADR-0034-binary-transfer.md)（复制阶段与字节预算）、[控制面参考](../../reference/multi-environment-control-plane.md#sftp-传输g2三个方向单文件无用户入口)、[路线图总账](./2026-09-12-multi-root-workspace.md#个人-ssh-外部评审后续2026-11-22)。
+> 关联：PR [#73](https://github.com/cherrchen/dsh-plugin-multi-root-workspace/pull/73)、[ADR-0034](../../decisions/ADR-0034-binary-transfer.md)（复制阶段与字节预算）、[控制面参考](../../reference/multi-environment-control-plane.md#sftp-传输g2三个方向单文件无用户入口)、[路线图总账](../active/2026-09-12-multi-root-workspace.md#个人-ssh-外部评审后续2026-11-22)。
 
 ## 1. 评审问题
 
@@ -77,7 +77,7 @@ ADR-0034 的「流与校验」阶段本来就要求“按块背压，限定单�
 
 **变更文件**
 
-`src/remote/transfer.ts`（`RemoteStage` 预算收紧；本地源先按 `nlink` 分类）、`tests/remote-copy.spec.ts`（写计数与三条回归）、`tests/remote-copy-local-link-classification.spec.ts`（F_GETPATH 命名另一链接时的确定性分类）、`docs/reference/multi-environment-control-plane.md`（流式预算语义）、本计划、[路线图总账](./2026-09-12-multi-root-workspace.md#个人-ssh-外部评审后续2026-11-22)。
+`src/remote/transfer.ts`（`RemoteStage` 预算收紧；本地源先按 `nlink` 分类）、`tests/remote-copy.spec.ts`（写计数与三条回归）、`tests/remote-copy-local-link-classification.spec.ts`（F_GETPATH 命名另一链接时的确定性分类）、`docs/reference/multi-environment-control-plane.md`（流式预算语义）、本计划、[路线图总账](../active/2026-09-12-multi-root-workspace.md#个人-ssh-外部评审后续2026-11-22)。
 
 ## 7. CI 首轮单平台失败（2026-11-22）
 

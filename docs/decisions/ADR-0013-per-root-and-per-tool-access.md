@@ -78,7 +78,7 @@ Status 保持 **Accepted**；`toolAccess` 封顶机制、`recordedPath`/`readOnl
 
 - [B9 开发计划](../plans/completed/2026-10-13-b9-root-access-and-sandbox-modes.md)
 - [ADR-0017：附加根三态权限与跨 SandboxMode 执行一致性](./ADR-0017-three-state-root-access-and-sandbox-modes.md)
-- [B4–B8 开发计划](../plans/active/2026-10-11-b4-b8-p2.md)
+- [B4–B8 开发计划](../plans/completed/2026-10-11-b4-b8-p2.md)
 - [ADR-0004 注册表持久化与校验](./ADR-0004-root-registry-persistence-and-validation.md)（单布局编码的同一套兼容策略）
 - [ADR-0012 session origin 与进程快照](./ADR-0012-session-origin-and-effective-cwd.md)
 - [架构文档 §4/§5](../architecture/multi-root-workspace.md)

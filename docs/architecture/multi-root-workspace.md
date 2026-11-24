@@ -232,7 +232,7 @@ bash 与 PTY 都**不掌握根集合**，它们的 confinement 全部委托给 `
 - `src/worktrees-contract.ts` / `contract.ts`：独立 `WORKTREE_ENDPOINTS`，两端严格判别联合（禁止 `retryAfterMs`）；根面板 schema 保持 `.strict()` 不变。
 - A：linked primary 且 `workspace-write` 时提示主 checkout 根 `<main> = dirname(common)`，对话框披露源码树、共享 config/hooks/refs/objects 与所有 worktree admin 数据；登记是普通 `inherit` 根，无 B 清理映射，普通 Remove 撤回；只读/Full-access 不提示。默认 pool 的主根包含 primary（`primary-overlap`），因此没有 A；`--separate-git-dir` 的路径歧义在对话框披露。开关实验性、默认关闭。
 
-失败方向：首次门禁失败 `unactivated`、曾 active 后失效 `lost`，二者都停止后台动作并释放 watcher；只有面板/命令 list 或新的显式 wait 能重新检测。等待 owner 期间任何身份/指针/HEAD/祖先索引变化都 `worktree/prompt-stale`，不写 Registry。完整决策、验收矩阵与实施证据见 [ADR-0039](../decisions/ADR-0039-worktree-aware-root-suggestions.md)、[实施计划](../plans/active/2026-11-09-worktree-aware-root-suggestions.md) 与[进度总账](../plans/active/2026-09-12-multi-root-workspace.md#worktree-感知建议-ba-实施2026-11-09)。
+失败方向：首次门禁失败 `unactivated`、曾 active 后失效 `lost`，二者都停止后台动作并释放 watcher；只有面板/命令 list 或新的显式 wait 能重新检测。等待 owner 期间任何身份/指针/HEAD/祖先索引变化都 `worktree/prompt-stale`，不写 Registry。完整决策、验收矩阵与实施证据见 [ADR-0039](../decisions/ADR-0039-worktree-aware-root-suggestions.md)、[实施计划](../plans/completed/2026-11-09-worktree-aware-root-suggestions.md) 与[进度总账](../plans/active/2026-09-12-multi-root-workspace.md#worktree-感知建议-ba-实施2026-11-09)。
 
 ## 8. 演进形态
 

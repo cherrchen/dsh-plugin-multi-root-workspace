@@ -10,7 +10,7 @@ Accepted（合同定案；实现已完成并经 macOS 本机与三平台 CI 验�
 
 ## Context
 
-ADR-0025 的共享权威服务把恢复做成按需路径：contended、follower 断线、可重试的 `storage-failed` 都汇入 `ensureAuthority()`，但只有用户操作或 `refresh()` 才驱动它——owner 退出后 follower 在下一个操作之前保持降级，满足"保守拒绝"却不满足"无需用户操作即恢复"。F4 技术评审（[专项计划](../plans/active/2026-10-31-f4-background-recovery.md) rev.1–rev.4）对当前实现做了实机核对，确认恢复引擎本身可复用，但五处缺口会在后台重试下变成真实缺陷：
+ADR-0025 的共享权威服务把恢复做成按需路径：contended、follower 断线、可重试的 `storage-failed` 都汇入 `ensureAuthority()`，但只有用户操作或 `refresh()` 才驱动它——owner 退出后 follower 在下一个操作之前保持降级，满足"保守拒绝"却不满足"无需用户操作即恢复"。F4 技术评审（[专项计划](../plans/completed/2026-10-31-f4-background-recovery.md) rev.1–rev.4）对当前实现做了实机核对，确认恢复引擎本身可复用，但五处缺口会在后台重试下变成真实缺陷：
 
 1. follower `hello` 成功后无任何投影同步，已跟踪主根可能无限期 withheld；
 2. `remoteUnavailable`/`enterStorageFailed` 写 withheld 后清 `published`，使空快照签名 `''` 撞缺省值、旧 scope 边界清不掉（实机复现：发布 0 次、scope 残留 read-only 拒绝边界）；
@@ -49,7 +49,7 @@ owner 挂起时单次 tick 仍占 `authorityChain` 约 5 秒（单次连接超�
 
 ## Related Documents
 
-- [F4 专项计划](../plans/active/2026-10-31-f4-background-recovery.md)：评审记录、设计与验证表
+- [F4 专项计划](../plans/completed/2026-10-31-f4-background-recovery.md)：评审记录、设计与验证表
 - [共享服务架构与协议](../architecture/registry-authority-service.md)
 - [ADR-0025](./ADR-0025-shared-registry-authority.md)：共享权威服务合同
 - [ADR-0024](./ADR-0024-registry-operation-admission.md)：撤权与在飞操作语义
