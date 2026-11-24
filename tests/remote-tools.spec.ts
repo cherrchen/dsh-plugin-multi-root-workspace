@@ -250,9 +250,13 @@ describe.skipIf(process.platform === 'win32')('remote tool arguments and endpoin
     const remote = world.remotes.get('build')!
     const admission = vi.spyOn(world.stack.registry, 'withRemoteOperation')
     const valid = { environmentId: 'build', rootId: 'app', command: 'true', timeoutMs: 10 }
+    // Arguments cross the wire as JSON: a missing `command` is an absent key.
+    // A live `undefined` is rejected by some supported releases before this
+    // row's validator runs, so the case stays JSON-representable.
+    const withoutCommand = { environmentId: valid.environmentId, rootId: valid.rootId, timeoutMs: valid.timeoutMs }
     const cases: readonly { args: unknown; located: string }[] = [
       { args: { ...valid, sessionId: 'forged', toolName: 'other_tool' }, located: '"sessionId" is not an accepted field' },
-      { args: { ...valid, command: undefined }, located: '"command" is required' },
+      { args: withoutCommand, located: '"command" is required' },
       { args: { ...valid, environmentId: null }, located: '"environmentId" must be a string' },
       { args: { ...valid, environmentId: '' }, located: '"environmentId" must not be empty' },
       { args: { ...valid, environmentId: 'local' }, located: '"environmentId" must name a remote environment' },
