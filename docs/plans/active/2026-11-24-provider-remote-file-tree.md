@@ -232,7 +232,8 @@
 
 ### 未跑项与限制（诚实记录）
 
-- **全版本 × OS CI 矩阵未跑**：矩阵源 `SUPPORTED_DSH_RELEASES` 共 **26** 个精确发布、SSH 地板 `SUPPORTED_SSH_RELEASES` 共 **5** 个（`0.2.2-rc.1`–`rc.5`）。本次只在**本机真实安装的 `0.2.2-rc.5`（macOS arm64）**上跑过门禁；其余 25 个发布与 CI 的 macos/ubuntu/windows 车道全部未跑。`scripts/ci/run-group.mjs` 按 `process.versions.node === nodeForRelease(version)` 精确自检（`0.2.2-rc.5` 要求 Node `24.9.0`，本机 `24.18.0`），且需要逐版本安装全部 26 个上游 release 与 ubuntu/windows 镜像；属共享 CI 派发面，本机不可行，不推送不派发。
+- **全版本 × OS CI 矩阵待复验。** 合并 `main` 后，分支按更新后的 27 个精确 DSH 版本在四个镜像上运行矩阵。两个 Ubuntu 镜像全部通过，Windows 八组均在远端文件服务规格失败。macOS 第 4 组的 DSH `0.2.1-alpha.5` 在 worktree 用例删除 `.git` 之前返回 `lost`，第 6、8 组取消且无步骤日志。[首次矩阵运行](https://github.com/cherrchen/dsh-plugin-multi-root-workspace/actions/runs/45416659541)
+- 依赖真实 SSH 控制面的列举和租约规格限 macOS/Linux 执行。所有平台仍校验 UTF-8 路径预算和 RPC 不可用响应，Windows 另断言开启实验时控制面为 `platform-deferred`（[ADR-0030](../../decisions/ADR-0030-environment-and-root-identity.md)）。worktree 重新挂载规格先用被动检查建立有效快照，确认没有 watcher 后再删除 `.git`，由重新挂载触发失效判断。独立的 watcher 失效和恢复规格继续验证通知路径。
 - **远端树仍为 list-only**：无 watch/search/preview/menu/open-in-app/内容读取；预览端口为 fake-port 结论、未接线。
 - **live e2e 环境口径**：旧专用 VPS（`64.118.149.252`）SSH 层失联，本次以 `~/.dsh` 的 `ali` 环境承载 `remote-ssh.live.e2e.ts`（`live-ali.json` + `~/.dsh-ssh-test/ssh_config` 的 `dsh-ali`/`Host *` 块——均为测试环境文件，`~/.dsh` 本体未写）。四个 helper/sftp 环境共用一个 `root` 账号与同一台主机，账户/主机隔离语义弱于原双账号双别名夹具；`xfer` 的「托管 SFTP 账户」语义以同机同用户近似。旧 VPS 恢复后可用原 `live.json` 复跑。
 - **GUI 截图局限**：真实宿主 GUI 证据已由 `live-remote-gui` 驱动补齐（真实 `dsh web` + 真实 Chrome + 真实 VPS，见上表）；此前的 Chromium 替身截图仍只作行为证据。真实桌面壳（非 `dsh web` 浏览器面）未截图。

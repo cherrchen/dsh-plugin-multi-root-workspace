@@ -259,7 +259,11 @@ describe('activation lifecycle', () => {
     initRepo(main)
     git(main, ['worktree', 'add', '-q', join(area.base, 'wt'), '-b', 'wt'])
     const { worktrees } = await mount(join(area.base, 'store'), { session: { cwd: main }, config: { waitTimeoutMs: 20 } })
-    expect(promptOf(await worktrees.wait(SESSION)).id).toBeDefined()
+    // Establish an active snapshot through the passive check so the re-mount
+    // must discover the deletion itself on every platform.
+    const { prompts } = await worktrees.prompt(SESSION, { fresh: true })
+    expect(prompts, worktrees.activationOf(main).detail).toHaveLength(1)
+    expect(worktrees.activationOf(main)).toMatchObject({ activation: 'active', watching: false })
     rmSync(join(main, '.git'), { recursive: true })
     // The revalidation every mount performs is authoritative by itself.
     expect((await worktrees.wait(SESSION)).status).toBe('lost')

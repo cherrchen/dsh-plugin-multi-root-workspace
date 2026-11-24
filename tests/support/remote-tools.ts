@@ -6,7 +6,7 @@
  * remote experiment default-off in every shipped profile.
  */
 import { writeFileSync } from 'node:fs'
-import { join } from 'node:path'
+import { basename, join } from 'node:path'
 import type { Context } from '@deepseek-ai/cordis'
 import type { Agent } from '@deepseek-ai/dsh-agent'
 import Sessions, { SessionId } from '@deepseek-ai/dsh-session'
@@ -168,7 +168,7 @@ export async function mountRemoteTools(fixture: FixtureWorkspace, options: Remot
     } as never)
     await stack.ctx.plugin(CommandModule, {})
   }
-  const session = stack.ctx.sessions.create(SessionId(`g5-${fixture.base.split('/').pop()}`), { meta: { cwd: fixture.workspace } })
+  const session = stack.ctx.sessions.create(SessionId(`g5-${basename(fixture.base)}`), { meta: { cwd: fixture.workspace } })
   const agent = { id: session.id, session } as Agent
   let sequence = 0
   return {

@@ -68,7 +68,8 @@ const request = (over: Record<string, unknown> = {}) => ({
 beforeEach(() => { fixture = createFixtureWorkspace('remote-files') })
 afterEach(async () => { await service?.dispose(); service = undefined; await world?.dispose(); world = undefined; fixture.dispose() })
 
-describe('remoteFiles.list admission', () => {
+// These integration cases need an active SSH control plane (ADR-0030).
+describe.skipIf(process.platform === 'win32')('remoteFiles.list admission', () => {
   it('mints browseAuthorization only for an opted-in registered path grant', async () => {
     await mount()
     const view = await world!.panel('remotes', { sessionId: world!.session.id })
@@ -407,24 +408,6 @@ describe('remoteFiles.list admission', () => {
     expect(answer.error?.code).toBe('invalid-listing')
   })
 
-  it('bounds the relative path in UTF-8 bytes, not characters', () => {
-    const base = { sessionId: 's', environmentId: 'device', rootId: 'out', authorization: 'a'.repeat(64) }
-    // A short multibyte path parses — names are byte-counted, not rejected.
-    const multi = `uni-${'目'.repeat(8)}录/deep`
-    expect(validRemoteRelativePath(multi)).toBe(true)
-    expect(remoteFilesListRequest.safeParse({ ...base, relativePath: multi }).success).toBe(true)
-    // 64 otherwise-legal multibyte segments (93 bytes each, all under the
-    // per-segment 255-byte cap and the 64-segment cap, under the 4096-char
-    // schema max) still total over 4096 UTF-8 bytes: the byte floor is the
-    // only rule that refuses this path.
-    const segment = '段'.repeat(31)
-    const oversized = Array.from({ length: 64 }, () => segment).join('/')
-    expect(oversized.length).toBeLessThanOrEqual(4096)
-    expect(new TextEncoder().encode(oversized).byteLength).toBeGreaterThan(REMOTE_FILES_LIMITS.pathBytes)
-    expect(validRemoteRelativePath(oversized)).toBe(false)
-    expect(remoteFilesListRequest.safeParse({ ...base, relativePath: oversized }).success).toBe(false)
-  })
-
   it('an over-byte path through the panel is refused with zero channel opens', async () => {
     await mount({ seed: { device: { '/srv/root/a.txt': 'a' } } })
     await registerRemote(world!, 'device', 'out')
@@ -438,7 +421,7 @@ describe('remoteFiles.list admission', () => {
   })
 })
 
-describe('remoteFiles.wait authorization lease', () => {
+describe.skipIf(process.platform === 'win32')('remoteFiles.wait authorization lease', () => {
   const lease = (over: Record<string, unknown> = {}) => ({
     sessionId: world!.session.id as string, environmentId: 'device', rootId: 'out',
     authorization: '', ...over,
@@ -636,4 +619,32 @@ describe('remoteFiles.wait authorization lease', () => {
     }
     expect(manager.opens).toBe(0)
   })
+})
+
+it('bounds the relative path in UTF-8 bytes, not characters', () => {
+  const base = { sessionId: 's', environmentId: 'device', rootId: 'out', authorization: 'a'.repeat(64) }
+  const multi = `uni-${'目'.repeat(8)}录/deep`
+  expect(validRemoteRelativePath(multi)).toBe(true)
+  expect(remoteFilesListRequest.safeParse({ ...base, relativePath: multi }).success).toBe(true)
+
+  // The segment count and size are legal, but the whole UTF-8 path exceeds the byte limit.
+  const segment = '段'.repeat(31)
+  const oversized = Array.from({ length: 64 }, () => segment).join('/')
+  expect(oversized.length).toBeLessThanOrEqual(4096)
+  expect(new TextEncoder().encode(oversized).byteLength).toBeGreaterThan(REMOTE_FILES_LIMITS.pathBytes)
+  expect(validRemoteRelativePath(oversized)).toBe(false)
+  expect(remoteFilesListRequest.safeParse({ ...base, relativePath: oversized }).success).toBe(false)
+})
+
+it('refuses remote file listing and leases when the SSH plane is unavailable', async () => {
+  const windows = process.platform === 'win32'
+  world = await mountRemoteTools(fixture, { withPanel: true, withTools: false, remote: { enabled: windows } })
+  expect(world.stack.registry.remoteStatus.state).toBe(windows ? 'platform-deferred' : 'disabled')
+  const { relativePath, ...lease } = request({ authorization: 'a'.repeat(64) })
+  for (const [endpoint, payload] of [
+    ['remoteFiles.list', { ...lease, relativePath }],
+    ['remotes.waitForAuthorizationChange', lease],
+  ] as const) {
+    expect(await world.panel(endpoint, payload)).toMatchObject({ ok: false, error: { code: 'provider-unavailable' } })
+  }
 })
