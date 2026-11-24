@@ -1,6 +1,6 @@
 # Provider 化文件树与远端 Workspace Root 浏览（2026-11-24）
 
-> 状态：**active — P1/P2 已提交 `4fa56c4`，P3 Host 列举服务已在工作树实现并过门禁**。决策拟议见 [ADR-0052](../../decisions/ADR-0052-provider-file-browsing.md)（Proposed）。
+> 状态：**active — P0–P6 已完成；P7 PARTIAL PASS。** 实现检查点 `ede0ee1`，未完成的强制门禁见 §8。设计取舍见 [ADR-0052](../../decisions/ADR-0052-provider-file-browsing.md)（Proposed）。
 >
 > 关联：[ADR-0052](../../decisions/ADR-0052-provider-file-browsing.md)、[ADR-0015](../../decisions/ADR-0015-files-tab-plugin-owned-browsing.md)、[ADR-0016](../../decisions/ADR-0016-files-tab-native-tree-fork.md)、[ADR-0030](../../decisions/ADR-0030-environment-and-root-identity.md)、[ADR-0031](../../decisions/ADR-0031-filesystem-routing.md)、[ADR-0041](../../decisions/ADR-0041-additional-root-workspace-search.md)、[ADR-0049](../../decisions/ADR-0049-ssh-custody-modes.md)、[外部评审（2026-11-21）](../../reviews/2026-11-21-ssh-branch-review.md)、[SSH 远端环境参考](../../reference/ssh-remote-environments.md)。
 
@@ -51,11 +51,11 @@
 | P0 | 机械基线与文档（本阶段） | **已完成** | `bc39529` |
 | P1 | 端口与身份合同 | **已完成** | `4fa56c4` |
 | P2 | 本地实现迁移 + 本地门禁 | **已完成** | `4fa56c4` |
-| P3 | Host 授权读服务与远端实现 | **已完成** | 工作树（未提交，基于 `4fa56c4`） |
-| P4 | 三类根 UI 与对齐 | 未开始 | `bc39529` |
-| P5 | 生命周期：撤权/复授、重试、tab 记忆 | 未开始 | `bc39529` |
-| P6 | 预览端口评估（fake port + 架构/安全评审） | 未开始 | `bc39529` |
-| P7 | 全量门禁、真实 SSH、截图与矩阵 | 未开始 | `bc39529` |
+| P3 | Host 授权读服务与远端实现 | **已完成** | `a45e62c` |
+| P4 | 三类根 UI 与对齐 | **已完成** | `ede0ee1` |
+| P5 | 生命周期：撤权/复授、重试、tab 记忆 | **已完成** | `ede0ee1` |
+| P6 | 预览端口评估（fake port + 架构/安全评审） | **已完成** | `ede0ee1` |
+| P7 | 全量门禁、真实 SSH、截图与矩阵 | **PARTIAL PASS（待补：完整生产 DSH↔SSH、真实宿主 GUI 视觉对齐、全版本×OS 矩阵）** | `ede0ee1` |
 
 ### P0 · 机械基线与文档（已完成）
 
@@ -76,7 +76,7 @@
 - 内容：现有 fork 树、`RootSwitcher`、搜索态、导航记忆迁移到端口与身份键控；本地 Provider 保持 `workspaceFiles` 拼写；primary/additional 行为逐字节对齐。
 - 强制门禁：相关 jsdom 客户端测试全绿 + `pnpm compat:check` 通过——**这是进入 P3 的前置闸门**，门禁不过不得开始 Host 远端实现。
 - 结果：`providers/local.ts` 收编 `createList`/`createWatch` 与唯一的 `fileAddressFor` 调用点；`face.ts`/`store.ts`/`directory-node.ts`/`tree-view.tsx`/`FilesTree.tsx`/`pane.tsx` 按 provider + `treeBucketId` 重写；接管与保存记忆按 owner + `providerKey` 键控；`RootSwitcher`/`navigator.tsx` 组合 `resolveProvider`；`tests/client-files-provider.spec.ts` 新增回归；`FORK.md` 差集清单同步更新。证据见 §6 P1/P2 表。
-- 检查点：迁移工作树（未提交）。
+- 检查点：`4fa56c4`。
 
 ### P3 · Host 授权读服务与远端实现
 
@@ -86,35 +86,38 @@
 - 结果：`remoteFiles.list` 独立契约（`src/remote/files-contract.ts`：严格请求/响应 schema、entries/responseBytes/wireBytes/deadline/concurrent 五预算、17 个稳定错误码 + 固定 message/retryable）；`src/remote/files-service.ts` 为唯一列举路径——并发 4 且零排队、12s 含准入总期限、claim 先于工作、令牌 `remoteFilesAuthorization(epoch, incarnation, bindingDigest, environmentDigest)` 在 SSH 前与字节返回前双准入比对、仅本端点失配才取消（无关 owner 变更不打断）；`binding.directoryListing:'stable-path'` 是 SFTP path 后端唯一准入条件（manifest 校验限定 sftp transport），缺席即 `capability-unsupported` 零 I/O，object 授权一律 fail closed；`SshEnvironmentManager.openFilesSftp` 与 `openTransferSftp` 共享自有通道机制但独立 `directorySessions` 表与上限 8，files 用途不要求 transfer block/hardlink/fsync，spawn 前复核 manifest digest；`readdirBounded` 严格类型 + 致命 UTF-8 + 名称校验去重 + 三预算；`SshEndpointVerifier` 对 opt-in binding 改走自有通道校验；`remotesViewOf` 仅在 snapshot 与 live manifest digest 一致且 ready/registered/read/path-target/supports 全满足时签发 `browseAuthorization`；`command.ts` 独立分支严格校验后调服务，错误信封只含稳定码 + `{retryable}`。
 - 隔离条件定稿：SFTP path 后端的 ABA 竞争窗口无法以 SFTP 原语消解，唯一准入条件是部署方 opt-in `stable-path`——运维断言浏览期间无非可信进程可替换 workspace 或其祖先/后代目录、可改变挂载/符号链接解析；此为部署断言而非运行期证明。Helper 后端本轮否决：无 fd-bound 目录列举原语且 verifiedTarget 为 object，一律 fail closed；Broker 无目录流同样 fail closed。
 - Helper 后端结论：**否决**（fail closed），理由如上；后续如有 fd-锚定证明再评估。
-- 检查点：工作树（未提交，基于 `4fa56c4`）。
+- 检查点：`a45e62c`。
 
-### P4 · 三类根 UI 与对齐
+### P4 · 三类根 UI 与对齐（已完成）
 
 - 进入条件：P3 门禁通过。
 - 内容：`RootSwitcher` 扩展 remote 类根；树/搜索面/导航记忆按新键控对三类根一致工作；远端无 watch 的显式初始读呈现；行意图经端口分派。
 - 强制门禁：三类根的既有行为对齐测试（展开/折叠、搜索记录、导航记忆、退化路径）全绿；旧宿主（无远端能力）零变化。
-- 检查点：UI 提交。
+- 结果：`src/client/remote-files-client.ts`（`RemoteFilesClient`：`list`/`wait` 走 `PANEL_CHANNEL`，严格 `remoteFilesListing`/`{unchanged:true}` 解析，固定词表错误、传输失败归 `provider-unavailable`、caller abort 归 `cancelled`）；`src/client/files-tree/providers/ssh.ts`（`createSshWorkspaceProvider`：`treeRoot='/mrfw'`、`belongsTo`+`validRemoteRelativePath` 双闸、symlink 归 `other` 惰性行、无 watch/search/preview/menu/openInApp 端口、`retainHiddenLevels:false`；`directory-not-found`/`not-directory`/`path-escapes-root` 映射上游 `workspace-file/*` 码，其余归本地化 `gateway/internal`，仅 7 个授权类码触发 invalidated）；`providers/resolver.ts`（`FilesRootSelection = LocalRootSelection | RemoteRootSelection` 顶层 `kind` 判别式、`remoteRootSelection` 仅在 registered+read+合法 token 时签发、`resolveWorkspaceFilesProvider` 单开关、`ssh` 工厂缺席即 `undefined`）；`adapter.tsx`（surface 增加 `resolveProvider(root, onInvalidated)` 与 `observeAuthority`、remoteFiles client/localize 进 seats、provider 级 `takeover.invalidate(owner,key)`）；`RootSwitcher`（`remotes.list` 独立发现 + generation/abort/session 闸，菜单远端行 `rootId · 显示名 (environmentId) · path · SSH`、无 token 行禁用并标注 `switcher.remoteDisabled`、trigger 标签/path 遵循远端选择、绝不展示凭据或 `target` URI）；个人配置在既有 Workspace 绑定编辑器加默认关闭 `directoryListing` 复选框（Helper 环境隐藏，8 语言文案 + 警告说明），`SshBindingDraft`/`SshBindingView`/`BindingDraft`/`bindingDraftOf` 往返保存、`sshBindingSave` 空提交比对含该字段。旧宿主（无 `remoteFiles` 通道、无远端视图）行为零变化。
+- 检查点：`ede0ee1`。
 
-### P5 · 生命周期：撤权/复授、重试与 tab 记忆
+### P5 · 生命周期：撤权/复授、重试与 tab 记忆（已完成）
 
 - 进入条件：P4 门禁通过。
 - 内容：授权撤消使远端树即时失效（owner 变更通知链路）；复授换代后旧状态不复活；列举失败的显式重试；tab/pane 级状态记忆在多 tab 下互不串扰。
 - 强制门禁：撤权/复授、跨 tab 记忆、重试路径的专项测试全绿。
-- 检查点：生命周期提交。
+- 结果：远端授权租约 `remotes.waitForAuthorizationChange`（`RemoteFilesService.waitForAuthorizationChange`：独立上限 16 零排队、监听先于首次准入、脏标志合并通知、仅在 lease 结束前的最终准入仍匹配时才回 `{unchanged:true}`、每次准入 4s 上界、租约随 caller/hide/disconnect/unmount 释放；注释明确其为**授权元数据租约而非文件系统 watch**，无 SSH/FS 探测）；`command.ts` 独立 wait 分支 + `remotesViewOf` 在 `remoteList` 之后重读 manifest 比对 snapshot digest 才签 token；`RootSwitcher` 远端选择仅当**新鲜** RemotesView 含同 environmentId+rootId 且 `browseAuthorization` 等于 selection incarnation 才挂 provider——token 换代/撤权/未注册即整记录失效并落回 primary（绝不自动升级到新 token）、lease 循环失败走同一 `invalidateNow`（keyed invalidate + primary + 重刷视图）；隐藏即结束远端 takeover（`retainHiddenLevels:false`，无缓存行可在授权复核前重绘）、owner 死亡的死亡观察器连带清理该 owner 的持久选择（回收 id 不继承）；单槽 provider 缓存；`openInApp` 删除 triggerPath 回退（仅 provider 端口给出路径才渲染）；`searchSeat` 恒取 filesTree 座（hook 顺序不变），仅 provider 具 search 能力时启用。
+- 检查点：`ede0ee1`。
 
-### P6 · 预览端口评估（fake port + 架构/安全评审）
+### P6 · 预览端口评估（已完成）
 
 - 进入条件：P5 门禁通过。
 - 内容：以一个进程内 fake 预览 Provider 验证端口对 preview/打开路径的表达能力；产出预览端口的架构结论与安全评审（远端文件内容进入 Viewer 的信任边界）。
 - 强制门禁：架构/安全评审记录归档；若结论为「预览端口暂不放行」，端口保留 fake 实现与失败关闭行为。
-- 检查点：评估提交。
+- 结果：fake-port 探针的既有三条回归已验证「选择 + 失效 + replaceTab 路由」机制可复用——`tests/client-files-provider.spec.ts` 的 `hands the preview port the exact resource reference and the replace-tab route`、`swallows gestures whose tree key maps to no resource, and dies with the signal`、`reports no open and no openable rows when the provider has no preview port`（不重跑其余套件）。结论：**预览端口暂不放行**——远端文件内容读取协议（`remoteFiles.read` 或等价物）未定义、未接线，端口保留 fake 实现与失败关闭行为；架构与安全记录归档于 `docs/architecture/file-browsing-providers.md` §6/§7 与 ADR-0052。
+- 检查点：`ede0ee1`。
 
 ### P7 · 全量门禁、真实 SSH、截图与矩阵
 
 - 进入条件：P6 完成。
 - 内容：仓库全套脚本（`pnpm lint`、`pnpm typecheck`、`pnpm build`、`pnpm test`、`pnpm smoke`、`pnpm pack:check`、`pnpm compat:check`、`pnpm docs:check`）；至少一个真实 SSH 环境的浏览验收；GUI 截图目检；受支持 DSH 版本矩阵核对。
 - 强制门禁：上述全部通过；真实远端与 GUI 证据归档。
-- 检查点：最终提交。
+- 检查点：`ede0ee1`；先补齐 §8 列出的门禁，再迁入 completed。
 
 ## 5. 风险
 
@@ -140,7 +143,7 @@
 
 环境备注：切换分支后 `pnpm` 的 deps-status 检查要求重装 `node_modules`，已以 `CI=true pnpm install` 恢复（14.7s，含 `prepare` 构建）。
 
-### P1/P2（工作树，未提交，基于 `bc39529`）
+### P1/P2（检查点 `4fa56c4`）
 
 | 检查 | 结果 | 退出码 |
 | --- | --- | --- |
@@ -152,7 +155,7 @@
 
 新增回归 `tests/client-files-provider.spec.ts` 覆盖：`providerKey`/`treeBucketId` 区分同路径的会话/环境/根/代次；无 watch 的 list-only Provider 经真实 face+store 显式初始读（恰好一次 list 一条 entry）；hold 释放后迟到的旧响应不落盘；fake preview port 收到精确 `WorkspaceResourceRef` + `replaceTab`，死 signal 与缺 port 为 no-op；本地跨根资源零 wire 访问且 preview/openInApp 仍拼出 `dsh-resource://file` 地址。存量路径键控断言已迁移为 provider 键（fixture 的 `id`/`addedAt` + 实际 session）。
 
-### P3（工作树，未提交，基于 `4fa56c4`）
+### P3（检查点 `a45e62c`）
 
 | 检查 | 结果 | 退出码 |
 | --- | --- | --- |
@@ -164,6 +167,69 @@
 
 新增 `tests/remote-files-service.spec.ts`（14 用例）覆盖：伪造/未知会话与未登记端点零开通道、opt-out 与 object 授权零开通道、过期令牌拒于 I/O 前、根与子级含字面反斜杠/空格/Unicode 名、符号链接祖先 `path-escapes-root` 且从不 READDIR、canonical 根重定向 `root-identity-changed`、挂起列举取消只关自有通道、4 并发 + 第 5 个 `resource-budget` 零排队、无关授权变更不打断在飞列举、撤权后旧数据不落盘、面板端点端到端 + 遍历/短令牌/多余键 `panel/bad-request`。`tests/remote-sftp.spec.ts` 新增 6 用例：严格 NAME/HANDLE/ATTRS 类型、斜杠名/空 NAME/重复名/致命 UTF-8 全 `invalid-listing`、wireBytes 超限截断、realpath/lstat 严格类型。未实现项：无（阶段内要求的用例均已落地）。
 
+### P4/P5（检查点 `ede0ee1`）
+
+| 检查 | 结果 | 退出码 |
+| --- | --- | --- |
+| `pnpm test tests/client-switcher.spec.tsx tests/client-files-provider.spec.ts tests/client-files.spec.tsx tests/client-navigator.spec.tsx tests/client-search.spec.tsx tests/client-search-ownership.spec.ts tests/remote-files-service.spec.ts tests/client-ssh-panel.spec.tsx tests/remote-personal.spec.ts`（指定九份规格） | 9 文件 274 用例过，8.26s | 0 |
+| `pnpm typecheck` | host + client tsc 全过 | 0 |
+| `pnpm lint` | 0 errors（2 条既有 require-yield warning：parked-watch 生成器为契约所需空 yield 迭代器，未改动） | 0 |
+| `pnpm docs:check` | 0 errors / 0 warnings | 0 |
+| `git diff --check` | 无空白错误 | 0 |
+
+`tests/client-switcher.spec.tsx` 新增远端切换器块（15 用例）：远端行发现与禁用行/标签、选远端后仅根级列举、`literal\` 目录字面 RPC 路径与 Unicode 名、primary↔远端↔本地往返、跨环境同路径 bucket 隔离、同环境两次授权 bucket 隔离、文件行无本地 viewer/菜单/搜索/open-in-app、刷新与瞬时 SSH 故障保留树与错误、授权撤消/换代（租约失败与 `remotes.list` 刷新两条路径）即时失效落回 primary 且复选走新 token、被取代 provider 的迟到 invalidated 回调不弹出新选择、settings 关闭远端项、unmount 在飞取消与重挂不绘旧行。`tests/remote-files-service.spec.ts` 新增租约用例：同授权 `{unchanged:true}` 仅最终准入后返回、无关变更不唤醒、撤权/换代即时唤醒、预中止/4s 准入上界/15s 租约、上限 16 零排队、取消后槽位保留至底层准入 settle（取消+重提交不得绕过预算）、全程零 SSH 通道。
+
+复审返工已并：`RootSwitcher` 远端证明先于 provider 缓存命中（`remoteRootSelection(endpoint)?.incarnation === selected.incarnation`）；`invalidateNow` 与发现失败/对账失效一律按「live takeover 键 + 当前选择推导键」双闸键匹配，不波及无关 local takeover；授权租约改 `AbortSignal.any` 且仅当 takeover 键与当前选择匹配才装；`refreshRemotes` 每次发现换新 `AbortController` 并于替换/会话切换/卸载时中止；依赖取 `filesTree?.takeover`/`observeAuthority`/`sessionId` 稳定座而非整个 surface；远端 provider 开门限定 `pane !== null` + 非空 session；`RemoteFilesService.wait` 的 lease 内准入限流为「同 token 在飞准入复用 + pending 集合于 slot 释放前 `allSettled` 排空」，编码失败先 `stateAbort.abort(error)` 再排空（caller 取消仍胜出）。
+
+当前限制（诚实记录）：远端树 list-only——无 watch/search/preview/menu/open-in-app/内容读取；open-in-app 无 `triggerPath` 回退（provider 无端口即无按钮）；隐藏即结束远端 takeover——`RootSwitcher` 对远端记录既不调用 save 也不供给 saved，**不做**展开/滚动持久化：仅在手动刷新存活期间 expanded/scrollTop 保留，隐藏后新 hold 一律从空白展开开始（本地根的既有保留行为不变）；后端矩阵为 SFTP-path opt-in 可入 / Helper 否决（无 fd-bound 列举）/ Broker 无目录流——Helper/Broker 条件**未通过**，非「全部后端通过」。未实现项：无（阶段内要求的用例均已落地）；GUI 真机与真实 SSH 留待 P7。
+
 ## 7. 退出验收
 
 **全部强制门禁通过才可报告 PASS**：P2 本地 jsdom/compat 闸、P3 abort/budget/symlink 闸与隔离条件定稿、P4 三root对齐、P5 生命周期专项、P6 评审归档、P7 全量脚本 + 真实 SSH + 截图 + 矩阵。任一阶段以「环境原因跳过」记帐而非 PASS；P3 内 Helper 后端的否决结论是合法结果（fail closed 即完成），不算阻塞，但 Helper 证据缺失（既未证明 fd-bound 列举成立、也未给出否决结论）时整体不得记 PASS。
+
+## 8. 复审返工后的验收报告（P7 范围）
+
+### 实际跑过的证据
+
+| 证据 | 内容 | 位置/退出码 |
+| --- | --- | --- |
+| 真实 SSH（loopback） | 用户态 OpenSSH `sshd`（127.0.0.1，一次性 host/user 密钥，不触碰 `~/.ssh`、不用外部主机），生产 `SftpClient` 经生成 `ssh_config`（`-F`）连接——即 `listRemoteDirectories` 对托管个人环境使用的同一机制；SFTP v3 握手、根/嵌套 `readdirBounded`、字面 POSIX 名（空格 / Unicode / 字面反斜杠）逐字节透传、`realpath`/`lstat` 一致 | `tests/ssh-loopback.e2e.ts`（`DSH_MULTI_ROOT_SSH_LOOPBACK=1` 门禁，默认 skip），1/1 通过 |
+| GUI 截图（真 Chromium） | 同一 `client.apply` + 真实 `RootSwitcher`/`FilesPane` 在 headless Chromium（vitest browser mode + Playwright）渲染：菜单远端行、远端树绘制（含 Unicode/反斜杠名）、展开产生第二条 `remoteFiles.list` RPC、`withheld` 行禁用态；Host 侧为录制 stub（文档化） | `tests/client-remote-tree.browser.tsx` + `vitest.remote-tree-browser.config.ts`；截图 `.dsh-smoke/gui/remote-*.png`（4 张） |
+| `ssh -G` 身份校验边界 | `SshEnvironmentManager.openFilesSftp` 的身份检查走 `ssh -G <alias>`，当前调用没有传入隔离配置；本次没有改用户配置，也没有用 loopback 覆盖这段生产路径 | 本次仅由进程内规格覆盖；`DSH_MULTI_ROOT_SSH_LIVE` 未执行 |
+
+### 门禁（复审返工后重跑）
+
+| 检查 | 结果 | 退出码 |
+| --- | --- | --- |
+| `pnpm test tests/client-switcher.spec.tsx tests/client-files-provider.spec.ts tests/remote-files-service.spec.ts tests/locale-parity.spec.ts`（**最终补丁聚焦复测**） | 4 文件 109 用例全过 | 0 |
+| `pnpm test:panel-browser` | 3/3 | 0 |
+| `pnpm vitest run --config vitest.remote-tree-browser.config.ts` | 2/2（真实 Chromium） | 0 |
+| `DSH_MULTI_ROOT_SSH_LOOPBACK=1 pnpm vitest run tests/ssh-loopback.e2e.ts` | 1/1 | 0 |
+| `pnpm compat:check` | allowlist/peers/pin/安装树一致 | 0 |
+| `pnpm docs:check` | 0 errors / 0 warnings | 0 |
+| `git diff --check` | 无空白错误 | 0 |
+| `pnpm verify:all`（lint→typecheck→build→licenses→kernel:probe→test→smoke→pack:check→smoke:packed→auto-review:fork→smoke:auto-review） | 全段通过（上一批改动时的完整跑通；最终补丁未重跑全量，以上一条聚焦复测为准）：lint 0 errors（2 条既有 warning）、typecheck/build/licenses 干净、kernel:probe seatbelt ok、test **171 文件 2771 用例过 / 134 skipped**、smoke:compose 58 + smoke:behavior 137 + smoke:journey 98、pack:check 334 成员、smoke:packed 136、auto-review:fork + 4×auto-review 全过 | 0 |
+| `pnpm typecheck`（最终补丁后） | host + client tsc 全过 | 0 |
+| `pnpm lint`（最终补丁后） | 0 errors（同 2 条既有 require-yield warning） | 0 |
+| `pnpm docs:check`（最终补丁后） | 0 errors / 0 warnings | 0 |
+| `git diff --check`（最终补丁后） | 无空白错误 | 0 |
+
+全量门禁的原始关键行见[核验日志摘录](../../reference/file-browsing-verification-20261124.txt)。
+
+### 复审返工期间新发现并已修的问题（全量套件才暴露）
+
+- `tests/remote-personal-ops.spec.ts` 的手写 registry stub 缺 `setRemoteFilesService` 端口 → `mountRemoteTools` 内 `ctx.effect` 抛 TypeError 连带取消 `ctx.tools.register` → stub 已补该端口（74/74）。
+- `locale-parity` 枚举的扫描类（`SshEnvironmentError`/`RemoteAdmissionError`）新增 `capability-unsupported`、`session-unavailable` 两个字面码（P3 引入、focus 清单未含该规格）→ 八语字典补 `error.*` 键（11/11）。
+
+### 未跑项与限制（诚实记录）
+
+- **全版本 × OS CI 矩阵未跑**：矩阵源 `SUPPORTED_DSH_RELEASES` 共 **26** 个精确发布、SSH 地板 `SUPPORTED_SSH_RELEASES` 共 **5** 个（`0.2.2-rc.1`–`rc.5`）。本次只在**本机真实安装的 `0.2.2-rc.5`（macOS arm64）**上跑过门禁；其余 25 个发布与 CI 的 macos/ubuntu/windows 车道全部未跑。`scripts/ci/run-group.mjs` 按 `process.versions.node === nodeForRelease(version)` 精确自检（`0.2.2-rc.5` 要求 Node `24.9.0`，本机 `24.18.0`），且需要逐版本安装全部 26 个上游 release 与 ubuntu/windows 镜像；属共享 CI 派发面，本机不可行，不推送不派发。
+- **远端 bash/copy 实机用例未跑**：loopback 只覆盖目录浏览的 SFTP stdio 面；`remote_bash`/`remote_copy` 的真实 SSH 用例仍属 `DSH_MULTI_ROOT_SSH_LIVE` e2e（本次未提供 live.json）。
+- **远端树仍为 list-only**：无 watch/search/preview/menu/open-in-app/内容读取；预览端口为 fake-port 结论、未接线。
+- **GUI 截图局限**：目检了远端目录展开和禁用行。截图使用真 Chromium、模拟 Host 和 DSH UI 替身，部分样式和文案以测试替身呈现；仅作为行为证据，不作为真实宿主的视觉对齐证据。
+- 既有 `require-yield` warning ×2（`face.ts`/`local.ts` 的 parked-forever 迭代器为契约所需）保持不变。
+- CHANGELOG 无 Unreleased 节且用户禁止发版动作——本批变更的发布叙述留在本文件，不写入已发布节、不 bump 版本。
+
+### 最终结论
+
+**PARTIAL PASS**。实现及最终补丁已提交至 `ede0ee1`。定向单元/组件门禁通过，已取得真 Chromium 行为截图和用户态 `sshd` loopback 的 SFTP 传输证据。完整 DSH↔SSH 端到端、真实 DSH 宿主 GUI 视觉对齐、全版本×OS 矩阵均未验收，本计划保留 active。

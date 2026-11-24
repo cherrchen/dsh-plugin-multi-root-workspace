@@ -189,3 +189,7 @@ exec 与 transfer 独立授权：执行前用 helper 的只读受限 stat/realpa
 ## 传输截止时间
 
 `transfer.timeoutMs` 是一次复制的总 I/O 预算，涵盖准入、握手、读写、校验和发布。个人模式每个复制端点独占 SFTP 通道，取消或超时只影响该次复制。传输清理使用独立的一秒预算，清理结束后回收通道。CREATE 或 LINK 缺少应答时返回 unknown 和 reconcileId。LINK 已确认时，清理失败仍返回 committed 与残留状态。
+
+## Files 标签页目录浏览
+
+绑定声明 `directoryListing: 'stable-path'`（仅无 Helper 的 SFTP 连接可在绑定对话框勾选，见[使用指南](../guide/user/ssh-remote-environments.md#在-files-标签页浏览远端目录可选)）后，宿主在面板通道上提供两个端点：`remoteFiles.list`（受限目录列举，17 个固定错误码）与 `remotes.waitForAuthorizationChange`（授权元数据租约，非文件监视）。二者与上面传输端点共用同一套会话/登记/令牌权威。组件依赖、时序、生命周期与安全姿态的唯一真源见 [file-browsing-providers.md](../architecture/file-browsing-providers.md)，决策见 [ADR-0052](../decisions/ADR-0052-provider-file-browsing.md)。

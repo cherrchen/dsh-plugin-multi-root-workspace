@@ -1,0 +1,38 @@
+# verify:all 关键门禁行 — 2026-11-24（工作树基于 a45e62c，P4/P5 复审返工后）
+# 全量日志当时在 /tmp/verify-all.log；本文件为其门禁行摘录。
+
+$ pnpm lint && pnpm typecheck && pnpm build && pnpm licenses:check && pnpm kernel:probe && pnpm test && pnpm smoke && pnpm pack:check && pnpm smoke:packed && pnpm auto-review:fork && pnpm smoke:auto-review
+$ oxlint
+$ tsc -p tsconfig.host.json --noEmit && tsc -p tsconfig.client.json --noEmit && node scripts/build-auto-review.mjs
+$ pnpm run build:types && pnpm run bundle
+$ tsc -p tsconfig.host.json && tsc -p tsconfig.client.json && node scripts/build-auto-review.mjs
+$ node scripts/clean-lib.mjs && tsdown
+$ node scripts/generate-third-party-licenses.mjs --check
+[licenses] THIRD_PARTY_LICENSE is current
+$ node scripts/check-kernel-runner.mjs
+  - seatbelt: ok — a confined command executed
+$ vitest run
+ Test Files  171 passed | 9 skipped (180)
+      Tests  2771 passed | 134 skipped (2905)
+$ pnpm smoke:compose && pnpm smoke:behavior && pnpm smoke:journey
+$ node scripts/smoke-compose.mjs
+[smoke:compose] 58 passed, 0 failed, 0 skipped
+$ node scripts/smoke-behavior.mjs
+[smoke:behavior] 137 passed, 0 failed, 0 skipped
+$ node scripts/smoke-journey.mjs
+[smoke:journey] 98 passed, 0 failed, 0 skipped
+$ node scripts/check-pack.mjs
+$ node scripts/smoke-packed.mjs
+[smoke:behavior] 136 passed, 0 failed, 0 skipped
+[smoke:packed] the packed artifact passed the behavior battery
+$ node scripts/check-auto-review-fork.mjs
+[auto-review:fork] baselines, upstream hashes, explicit deltas, policy, identity, roles, protocol and owner teardown verified
+$ node scripts/verify-auto-review.mjs
+[auto-review] web-true: single row toggle, both bundle orders, repeated reload, owner drain and official restore passed
+[auto-review] web-false: single row toggle, both bundle orders, repeated reload, owner drain and official restore passed
+[auto-review] headless-true: single row toggle, both bundle orders, repeated reload, owner drain and official restore passed
+[auto-review] headless-false: single row toggle, both bundle orders, repeated reload, owner drain and official restore passed
+[auto-review] web-true: single row toggle, both bundle orders, repeated reload, owner drain and official restore passed
+[auto-review] web-false: single row toggle, both bundle orders, repeated reload, owner drain and official restore passed
+[auto-review] headless-true: single row toggle, both bundle orders, repeated reload, owner drain and official restore passed
+[auto-review] headless-false: single row toggle, both bundle orders, repeated reload, owner drain and official restore passed

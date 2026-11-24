@@ -82,6 +82,32 @@ Connections are plugin-global, while directory bindings belong to each workspace
 > [!TIP]
 > Before deleting a connection, unbind all workspace bindings referencing it — in the bindings dialog, or via **Remove** in the remote row's `…` menu (in personal mode, remove revokes the registration and unbinds at once) — `environment-in-use` otherwise. If editing permissions or updating the connection marks an endpoint **Withheld**, click **Register** again from the `…` menu. To change a bound directory's path, actions, or local transfers, click **Edit** in that row's `…` menu — it opens the bindings dialog directly into that binding's edit form.
 
+## Browsing a remote directory in the Files tab (optional)
+
+A registered binding can also appear in the **Files tab's root-switcher menu**, letting you browse the remote directory level by level just like a local additional root. This is an off-by-default, per-binding opt-in, and it is only offered for connections **without a Helper installed** (pure SFTP transport).
+
+### Enabling it
+
+In the project binding dialog (adding or editing a binding), tick **List in Files (stable SFTP path)**. The hint next to the checkbox states its precondition:
+
+> Enable only if untrusted processes cannot replace the root, its ancestors, or directories below it while browsing.
+
+This is a **deployment assertion**: you declare that the paths on the remote machine are stable while you browse. Host-side manifest validation stays authoritative — if the connection has a Helper (transport is not pure SFTP), the checkbox is not shown and the declaration cannot take effect.
+
+Toggling the checkbox **changes the binding's identity**: after saving, the binding enters the `withheld` state; click **Register** in the row's `…` menu to complete a real connection check and restore it.
+
+### Supported and unsupported actions
+
+- **Supported**: selecting the remote binding as the current root in the Files tab (the menu row reads like `out · Build Box (device) · /srv/root · SSH`), expanding level by level to browse names and types; names containing spaces, Unicode or a literal backslash are displayed verbatim.
+- **Unsupported**: opening or previewing files (clicking a file row does not open a local viewer), workspace search, context menus, "open in app", and any file-content reads.
+- **No watching**: the remote tree does no filesystem watching, no polling and no automatic re-listing. Directories are listed on demand — on expansion or a manual refresh.
+
+### Refresh and invalidation
+
+While browsing, the plugin holds an **authorization metadata lease** with the host (it only re-checks the token and the registration state — it produces no remote file I/O). The remote tree invalidates immediately and falls back to the primary root when any of these happen: re-registration, token replacement, binding edit or removal, remote environment or connection loss. Re-selecting browses under the new authorization. Hiding the tab or switching sessions releases the lease at once; reopening re-validates authorization rather than reusing cached listings.
+
+Failures (for example permission denied or a remote timeout) render as an in-row error without emptying the tree; only authorization-class changes end the current browse.
+
 ## Using the remote tools
 
 The model reaches a registered remote directory only through `remote_copy` and `remote_bash`. Both copy endpoints take the same fields, and an **omitted** `environmentId` means the local workspace: the local primary root is `local:primary` (omit `environmentId`, use `rootId` `primary`), an additional root uses its registered `aliasId` (for example `docs`), and a remote endpoint must name `environmentId` explicitly with the `rootId` registered in the bindings dialog. `relativePath` is a normalized relative POSIX path to one regular file inside the root; it may not start with `/` or contain `.` or `..` segments.
