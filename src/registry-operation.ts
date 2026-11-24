@@ -4,7 +4,7 @@
  */
 import { AsyncLocalStorage } from 'node:async_hooks'
 import { randomUUID } from 'node:crypto'
-import type { SandboxMode } from '@deepseek-ai/dsh-sandbox'
+import type { SandboxExecutionPolicy } from '@deepseek-ai/dsh-sandbox'
 import type { FilesystemScope } from './scope.ts'
 
 export type RegistryOperationKind = 'fs-write' | 'fs-edit' | 'process' | 'pty' | 'lsp' | 'files' | 'instructions' | 'skills'
@@ -27,10 +27,13 @@ export function operationFrameState(proof: object): OperationFrameState {
   return frame === undefined || frame.proof !== proof ? 'absent' : frame.active === true ? 'active' : 'expired'
 }
 
+type OperationPolicy = Pick<SandboxExecutionPolicy, 'mode' | 'sessionId'>
+
 export interface RegistryOperationIdentity {
   readonly operationId: string
   readonly kind: RegistryOperationKind
-  readonly mode: SandboxMode | undefined
+  readonly mode: OperationPolicy['mode']
+  readonly sessionId: OperationPolicy['sessionId']
   readonly primaryRoot: string
   /** Absent when the registry cannot grant additional authority. */
   readonly authorityEpoch: string | undefined
@@ -62,12 +65,12 @@ export async function runRegistryOperation<T>(
   authorityEpoch: string | undefined,
   revision: number,
   body: (operation: RegistryOperation) => T | Promise<T>,
-  proof?: object,
-  mode?: SandboxMode,
+  proof: object,
+  policy: OperationPolicy,
 ): Promise<T> {
   let active = true
   const operation: RegistryOperation = Object.freeze({
-    identity: Object.freeze({ operationId: randomUUID(), kind, authorityEpoch, revision, mode, primaryRoot: scope.primaryRoot }),
+    identity: Object.freeze({ operationId: randomUUID(), kind, authorityEpoch, revision, mode: policy.mode, sessionId: policy.sessionId, primaryRoot: scope.primaryRoot }),
     get scope(): FilesystemScope {
       if (!active) throw new Error('multi-root registry: operation admission has expired')
       return scope
@@ -102,10 +105,10 @@ export async function withRegistryAdmission<T>(ctx: import('@deepseek-ai/cordis'
 }
 
 /** Preserve a legacy synchronous entry while granting only the safe primary-root fallback. */
-export function runPrimaryOperation<T>(scope: FilesystemScope, mode: SandboxMode, proof: object, body: () => T): T {
+export function runPrimaryOperation<T>(scope: FilesystemScope, policy: OperationPolicy, proof: object, body: () => T): T {
   let active = true
   const operation: RegistryOperation = Object.freeze({
-    identity: Object.freeze({ operationId: randomUUID(), kind: 'process' as const, authorityEpoch: undefined, revision: 0, mode, primaryRoot: scope.primaryRoot }),
+    identity: Object.freeze({ operationId: randomUUID(), kind: 'process' as const, authorityEpoch: undefined, revision: 0, mode: policy.mode, sessionId: policy.sessionId, primaryRoot: scope.primaryRoot }),
     get scope() { if (!active) throw new Error('operation admission has expired'); return scope },
   })
   const frame = { proof, operation, active: true, profiles: [] as Array<{ argv: string[]; capped: boolean }> }

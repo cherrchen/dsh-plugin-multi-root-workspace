@@ -9,6 +9,11 @@ export function adaptPathWatch(service: WorkspaceFiles, wrap: (original: PathWat
   return wrapMethod(service, 'changes', original => original.length < 3 ? original : wrap(original as unknown as PathWatch) as unknown as typeof original)
 }
 
+/** The public scope resolver arrived with the switch to the effective workspace root. */
+export function usesEffectiveWorkspaceFileRoot(service: WorkspaceFiles | undefined): boolean {
+  return typeof (service as { readonly scopeOf?: unknown } | undefined)?.scopeOf === 'function'
+}
+
 /** Match both legacy `readRelated` and modern `readBytes({ baseFile })` tail resolution. */
 export function resolveRelatedWorkspacePath(absoluteBase: string, tail: string): string {
   const paths = absoluteBase.startsWith('/') ? posix : win32

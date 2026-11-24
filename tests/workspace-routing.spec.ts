@@ -5,14 +5,14 @@ import { LocalFileSystem } from '@deepseek-ai/dsh-fs-local'
 import { Lsp, LspProviderId } from '@deepseek-ai/dsh-lsp'
 import { WorkspaceFiles } from '@deepseek-ai/dsh-api-workspace-files'
 import { canonicalPath } from '@deepseek-ai/dsh-sandbox'
-import { afterEach, beforeEach, describe, expect, it } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import * as LspRouting from '../src/lsp.ts'
 import * as FilesRouting from '../src/workspace-files.ts'
 import { MultiRootScopeService } from '../src/scope.ts'
 import { mountCompat } from './support/compat.ts'
 import { mountProviderGate } from './support/providers.ts'
 import { createFixtureWorkspace, symlinkUnsupportedReason, type FixtureWorkspace } from './support/temp-workspace.ts'
-import { adaptPathWatch } from '../src/compat/workspace-files.ts'
+import { adaptPathWatch, usesEffectiveWorkspaceFileRoot } from '../src/compat/workspace-files.ts'
 
 let ctx: Context
 let fixture: FixtureWorkspace
@@ -139,6 +139,45 @@ describe('workspace-files isolation', () => {
     const listing = await service.list(cold, fixture.outside, new AbortController().signal)
     expect(listing.path).toBe('')
     expect(listing.entries.map(entry => entry.name)).toContain('same.ts')
+  })
+  it('keeps the old Files fallback and retries a failed lookup on effective-root hosts', async () => {
+    const stat = vi.fn()
+      .mockRejectedValueOnce(new Error('session storage unavailable'))
+      .mockResolvedValue({ header: { cwd: fixture.workspace } })
+    ctx.provide('sessionPersistence', { stat } as never)
+    const { service, scope } = await files()
+    const signal = new AbortController().signal
+    if (usesEffectiveWorkspaceFileRoot(service)) {
+      const request = { ...scope, workspaceRoot: fixture.outside }
+      const list = () => service.list(request, '.', signal)
+      await expect(list()).rejects.toThrow('session storage unavailable')
+      await expect(list()).resolves.toMatchObject({ entries: [expect.objectContaining({ name: 'same.ts' })] })
+      expect(stat).toHaveBeenCalledTimes(2)
+    } else {
+      await expect(service.list(scope, '.', signal)).resolves.toMatchObject({ entries: [expect.objectContaining({ name: 'same.ts' })] })
+    }
+  })
+  it('rejects an effective Files scope whose Session header is no longer available', async () => {
+    const { service, scope } = await files()
+    if (!usesEffectiveWorkspaceFileRoot(service)) return
+    ctx.provide('sessionPersistence', { stat: async () => undefined } as never)
+    const request = { ...scope, workspaceRoot: fixture.outside }
+    await expect(service.list(request, '.', new AbortController().signal))
+      .rejects.toMatchObject({ code: 'workspace-file/outside-workspace' })
+  })
+  it('bounds listings to the captured origin while the shared Registry is unavailable', async () => {
+    const { service, scope } = await files()
+    ctx.provide('sessions', { get: () => ({ header: { cwd: fixture.workspace } }) } as never)
+    ctx.multiRootScope.setAdditionalRoots(fixture.workspace, [])
+    ctx.multiRootScope.setRegistryAuthority(false)
+    ctx.provide('multiRootRegistry', {
+      shared: true, list: () => [],
+      withOperation: async (_policy: unknown, _kind: string, body: () => Promise<unknown>) => body(),
+    } as never)
+    const signal = new AbortController().signal
+    await expect(service.list({ ...scope, workspaceRoot: fixture.outside }, '.', signal))
+      .rejects.toMatchObject({ code: 'workspace-file/outside-workspace' })
+    await expect(service.list(scope, '.', signal)).resolves.toMatchObject({ entries: [expect.objectContaining({ name: 'same.ts' })] })
   })
   it('rejects removed roots and restores upstream confinement on unload', async () => {
     const { service, scope, fiber } = await files()
@@ -316,6 +355,29 @@ describe('workspace-files isolation', () => {
       new AbortController().signal,
     )).rejects.toMatchObject({ code: 'workspace-file/outside-workspace' })
     expect(searches).toBe(0)
+  })
+
+  it.skipIf(!hasUpstreamSearch)('bounds native search to the captured origin while the shared Registry is unavailable', async () => {
+    const raw = new WorkspaceFiles(ctx, { maxBytes: 1024, maxFileBytes: 1024, maxLines: 5000, maxEntries: 1 })
+    const result = { matches: [], truncated: false, incomplete: false }
+    const search = vi.fn(async () => result)
+    Object.defineProperty(raw, 'search', { configurable: true, writable: true, value: search })
+    await ctx.plugin(FilesRouting)
+    ctx.provide('sessions', { get: () => ({ header: { cwd: fixture.workspace } }) } as never)
+    ctx.multiRootScope.setAdditionalRoots(fixture.workspace, [])
+    ctx.multiRootScope.setRegistryAuthority(false)
+    ctx.provide('multiRootRegistry', {
+      shared: true, list: () => [],
+      withOperation: async (_policy: unknown, _kind: string, body: () => Promise<unknown>) => body(),
+    } as never)
+    const sessionId = 's' as never
+    const query = { query: 'x', excludedPaths: [], includeHidden: false, respectGitignore: false }
+    const signal = new AbortController().signal
+    await expect(ctx.workspaceFiles.search({ sessionId, workspaceRoot: fixture.outside }, query, signal))
+      .rejects.toMatchObject({ code: 'workspace-file/outside-workspace' })
+    expect(search).not.toHaveBeenCalled()
+    await expect(ctx.workspaceFiles.search({ sessionId, workspaceRoot: fixture.workspace }, query, signal)).resolves.toEqual(result)
+    expect(search).toHaveBeenCalledTimes(1)
   })
 
   it.skipIf(!hasUpstreamSearch || symlinkUnsupportedReason() !== undefined)('keeps a search root that resolves outside the registration it is lexically spelled under', async () => {

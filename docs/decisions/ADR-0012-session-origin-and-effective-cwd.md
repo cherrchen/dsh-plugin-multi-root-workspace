@@ -90,6 +90,12 @@ Status 保持 **Accepted**；Session 原始项目、有效 cwd、授权集合与
 
 同时修正 Windows ACL widen 调用：第 4 个交叉校验参数必须是上游 profile 的 workspace（有效 policy root），Registry 授权仍从原始主根取得。回归见 `tests/sandbox-multi-root.spec.ts`（Windows）、`tests/authority-boundaries.spec.ts`、`tests/workspace-routing.spec.ts` 与 `tests/instructions.spec.ts`。
 
+## 修订三：准入快照与 Files 降级边界（2026-11-24）
+
+Registry 在等待准入前捕获 Session 原始根。登记查询、操作 scope 和不可用时的进程 clamp 共用这份身份。操作回调按当次记录的 Session ID 匹配快照，会话在等待期间释放时仍使用原始根。
+
+有效目录作为 wire root 的宿主必须从 live Session 或持久化头取得 Files 原始项目。持久化查询失败时拒绝本次请求，后续请求可以重试。旧宿主继续使用其原始根 wire 语义。共享 Registry 不可用时，原生列表按实际选中目录检查原始根边界，原生搜索按实际搜索根做同样的检查。已知的 withheld 边界继续生效。
+
 ## Alternatives Considered
 
 - 用 effective cwd 替换 policy root / Registry key：会隐式授权并错配持久化，拒绝。

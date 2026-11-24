@@ -36,7 +36,6 @@ import type { Config } from '@deepseek-ai/dsh-sandbox-local'
 import type {} from '@deepseek-ai/dsh-sandbox-policy'
 import type {} from './compat.ts'
 import { mapConfined, widenConfined } from './compat/sandbox-confine.ts'
-import { policyOriginRoot } from './compat/session-directory.ts'
 import type { ConfineCall, UpstreamConfined } from './compat/sandbox-confine.ts'
 import { denyProfileArgs, DialectUnrecognizedError, graftProfileArgs, splitConfined, widenProfileArgs } from './dialects.ts'
 import { restrictProfileArgs } from './dialects.ts'
@@ -101,7 +100,7 @@ export class MultiRootSandboxProvider extends LocalSandboxProvider {
       : policy.mode === 'read-only' ? 'read-only' : policy.mode === 'workspace-write' ? 'clamped' : 'ambient')
     const remember = (facts: ConfinedArgv): ConfinedArgv => { this.ctx.multiRootScope.rememberProfile(facts.argv, mint); return facts }
     if (policy.mode === 'workspace-write' && scope.authority === 'unavailable') {
-      const prefix = this.clampedExecution(policy, scope.deniedRoots, signal)
+      const prefix = this.clampedExecution(policy, scope.deniedRoots, signal, scope.primaryRoot)
       return widenConfined(() => prefix, facts => remember({ ...facts, argv: [...facts.argv, ...argv] }), argv, policy, signal)
     }
     const base = super.confine as unknown as ConfineCall
@@ -254,12 +253,14 @@ export class MultiRootSandboxProvider extends LocalSandboxProvider {
    * @param policy - the caller's execution policy.
    * @param deniedRoots - known negative boundaries, including protected home.
    * @param signal - cancellation forwarded to upstream.
+   * @param clampRoot - the primary root already resolved for this operation.
    * @returns the confined prefix ending at `--`, without the caller's command.
    */
   clampedExecution(
     policy: SandboxExecutionPolicy,
     deniedRoots: readonly string[],
     signal?: AbortSignal,
+    clampRoot = this.ctx.multiRootScope.resolve(policy).primaryRoot,
   ): UpstreamConfined {
     const probePolicy: SandboxPolicy = {
       mode: 'read-only',
@@ -273,7 +274,6 @@ export class MultiRootSandboxProvider extends LocalSandboxProvider {
     // the clamp grant is the Session origin: under an unavailable authority the
     // file fence (src/fs.ts) keeps only `scope.primaryRoot`, and a moved Session
     // must never turn its effective directory into a second writable root.
-    const clampRoot = canonicalPath(policyOriginRoot(this.ctx, policy))
     const clamp = (confined: ConfinedArgv): ConfinedArgv => {
       try {
         const shape = splitConfined(confined.argv, ['true'])

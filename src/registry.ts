@@ -1190,25 +1190,26 @@ export class MultiRootRegistry extends Service {
       const snapshot = this.client
         ? await this.remoteSnapshot('admit', [key])
         : await this.captureSnapshot(key)
-      const scope = freezeOperationScope(this.ctx.multiRootScope.resolveSnapshot(capturedPolicy, this.projectRoots(this.localSnapshotRoots(snapshot)), snapshot.available))
-      return await runRegistryOperation(scope, kind, snapshot.epoch, snapshot.revision, body, this.operationProof, capturedPolicy.mode)
+      const scope = freezeOperationScope(this.ctx.multiRootScope.resolveSnapshot(capturedPolicy.mode, origin, this.projectRoots(this.localSnapshotRoots(snapshot)), snapshot.available))
+      return await runRegistryOperation(scope, kind, snapshot.epoch, snapshot.revision, body, this.operationProof, capturedPolicy)
     }
     const admission = await this.serialize(key, () => {
       if (this.disposed) throw new Error('multi-root registry: cannot admit an operation after disposal')
       return {
-        scope: freezeOperationScope(this.ctx.multiRootScope.resolveSnapshot(capturedPolicy, this.projectRoots(this.cache.get(key) ?? []), false)),
+        scope: freezeOperationScope(this.ctx.multiRootScope.resolveSnapshot(capturedPolicy.mode, origin, this.projectRoots(this.cache.get(key) ?? []), false)),
         epoch: this.operationEpoch,
         revision: this.operationRevision,
       }
     })
-    return await runRegistryOperation(admission.scope, kind, admission.epoch, admission.revision, body, this.operationProof, capturedPolicy.mode)
+    return await runRegistryOperation(admission.scope, kind, admission.epoch, admission.revision, body, this.operationProof, capturedPolicy)
   }
 
   withPrimaryOperation<T>(policy: SandboxExecutionPolicy, body: () => T): T {
     // No IPC, no additional grant, and no shared temp authority. This is only
     // the compatibility fallback for a public entry that must stay synchronous.
-    const scope = this.ctx.multiRootScope.resolveSnapshot(policy, this.projectRoots(this.cache.get(primaryKey(policyOriginRoot(this.ctx, policy))) ?? []), false)
-    return runPrimaryOperation(freezeOperationScope(scope), policy.mode, this.operationProof, body)
+    const origin = policyOriginRoot(this.ctx, policy)
+    const scope = this.ctx.multiRootScope.resolveSnapshot(policy.mode, origin, this.projectRoots(this.cache.get(primaryKey(origin)) ?? []), false)
+    return runPrimaryOperation(freezeOperationScope(scope), policy, this.operationProof, body)
   }
 
   /**

@@ -54,6 +54,25 @@ function gatePut(stack: RegistryStack) {
 }
 
 describe('local Registry operation admission', () => {
+  it.each([true, false])('keeps the captured origin after Session detach (authority available: %s)', async available => {
+    const stack = await mountRegistryStack(join(fixture.base, 'store'), available ? {} : { sharedStorageRoot: '' })
+    stacks.push(stack)
+    const sessionId = 'moved-session'
+    let session: { header: { cwd: string } } | undefined = { header: { cwd: fixture.workspace } }
+    stack.ctx.provide('sessions', { get: (id: string) => id === sessionId ? session : undefined } as never)
+    const movedPolicy = { ...policy, workspaceRoot: fixture.outside, sessionId }
+    const admission = stack.registry.withOperation(movedPolicy, 'process', operation => {
+      expect(operation.scope).toMatchObject({
+        primaryRoot: canonicalPath(fixture.workspace),
+        authority: available ? 'available' : 'unavailable',
+      })
+      expect(stack.scope.resolve(movedPolicy)).toEqual(operation.scope)
+    })
+    // Admission resolves the Session synchronously and then waits for the Registry.
+    session = undefined
+    await admission
+  })
+
   it.each(['write', 'edit'] as const)('allows an admitted %s to finish after revocation, and refuses the next invocation', async kind => {
     const stack = await mount(), { ctx, registry } = stack
     await registry.add(fixture.workspace, { path: fixture.outside })
