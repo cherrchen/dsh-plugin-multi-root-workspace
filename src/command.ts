@@ -45,6 +45,7 @@ import { ManifestError, type RemoteEnvironment } from './remote/manifest.ts'
 import { CredentialError } from './remote/personal/credentials.ts'
 import { loadPersonalConfig, type PersonalEnvironment } from './remote/personal/config.ts'
 import { RemoteOperationError } from './remote/personal/operations.ts'
+import { SshEnvironmentError } from './remote/ssh-environment.ts'
 import {
   parseRemoteRequest,
   REMOTE_ENDPOINTS,
@@ -55,6 +56,8 @@ import {
 } from './remote/panel-contract.ts'
 import { parseSshCall, parseSshSettingsCall, SSH_SETTINGS_CHANNEL, type SshSettingsView, SSH_ENDPOINTS, type SshEndpoint } from './remote/personal-contract.ts'
 import { handlePersonalEndpoint } from './remote/personal-endpoints.ts'
+import { HelperInstallError } from './remote/personal/helper-error.ts'
+import { captureSshProfile, inspectSshProfile } from './compat/ssh-profile.ts'
 import type { SandboxMode } from '@deepseek-ai/dsh-sandbox'
 import type {} from '@deepseek-ai/dsh-sandbox-policy'
 import type { SessionId } from '@deepseek-ai/dsh-session'
@@ -226,6 +229,7 @@ export interface CommandConfig {
  * @param config - the row's config; `dshHome` feeds `isolate-profiles` only.
  */
 export function apply(ctx: Context, config: CommandConfig = {}): void {
+  captureSshProfile(ctx)
   ctx.commands.register({
     name: COMMAND_NAME,
     description: 'List, add, remove, alias, or reveal the additional workspace roots of this session, or isolate DSH profile imports',
@@ -786,7 +790,10 @@ async function remotesViewOf(
   if (session === undefined) throw new RootValidationError('session-not-found', 'the panel session closed during the request')
   const mode = ctx.sandboxPolicy.resolve({ session }).mode
   const status = registry.remoteStatus
-  const base = { primaryRoot: canonicalRoot(primaryRoot), mode, custodyMode: registry.remoteMode, status }
+  const base = {
+    primaryRoot: canonicalRoot(primaryRoot), mode, custodyMode: registry.remoteMode, status,
+    ...(registry.remoteEnabled && registry.remoteMode === 'personal' ? { dependencies: inspectSshProfile(ctx).view } : {}),
+  }
   const manifest = registry.remoteManifest
   if (manifest === undefined || status.state !== 'ready') {
     return { ...base, endpoints: [] }
@@ -862,6 +869,9 @@ async function dispatchPanelRequest(
         const value: SshSettingsView = {
           custodyMode: registry.remoteMode,
           status: registry.remoteStatus,
+          // The settings write may settle before the remote plane applies its
+          // switch. Dependency inspection is read-only and independent of it.
+          ...(registry.remoteMode === 'personal' ? { dependencies: inspectSshProfile(ctx).view } : {}),
           // The legacy wire field remains for older clients. Personal
           // connections are returned by sshState.
           connections: [],
@@ -1043,11 +1053,15 @@ async function dispatchPanelRequest(
         : error.code
       return { ok: false, error: { code, message: error.message, details: {} } }
     }
+    if (error instanceof HelperInstallError) {
+      return { ok: false, error: { code: error.code, message: error.message, details: error.details } }
+    }
     // Every coded domain error keeps its stable code: the panel localizes it
     // and `submit` branches on it (a `personal-config-conflict` reloads the
     // state). Laundering any of these into `panel/internal` loses both.
     if (error instanceof AuthorityRpcError || error instanceof WorktreeError || error instanceof RemoteAdmissionError
-      || error instanceof ManifestError || error instanceof CredentialError || error instanceof RemoteOperationError) {
+      || error instanceof ManifestError || error instanceof CredentialError || error instanceof RemoteOperationError
+      || error instanceof SshEnvironmentError) {
       return { ok: false, error: { code: error.code, message: error.message, details: {} } }
     }
     const workspaceFile = workspaceFileFailureOf(error)

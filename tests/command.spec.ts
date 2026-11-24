@@ -17,6 +17,7 @@ import type { CommandDefinition } from '@deepseek-ai/dsh-commands'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { AuthorityRpcError } from '../src/authority/protocol.ts'
 import * as CommandModule from '../src/command.ts'
+import { SshEnvironmentError } from '../src/remote/ssh-environment.ts'
 import { parseFoldersCommand, renderRootsReport, revealAccepted, revealArgv } from '../src/command.ts'
 import { PANEL_CHANNEL, type PanelRequest, type RootsView } from '../src/contract.ts'
 import { SSH_SETTINGS_CHANNEL } from '../src/remote/personal-contract.ts'
@@ -743,6 +744,15 @@ describe('the panel channel', () => {
     const answer = await callPanel('sshState', { sessionId: PANEL_SESSION })
     expect(answer.ok).toBe(false)
     expect(answer.error?.code).toBe(process.platform === 'win32' ? 'credential-root-unsafe' : 'invalid-manifest')
+  })
+
+  it('relays helper-outdated from remotes.add instead of laundering it', async () => {
+    const stack = await mount({ withConnection: true })
+    vi.spyOn(stack.registry, 'addRemote').mockRejectedValue(new SshEnvironmentError('helper-outdated', 'reinstall the Helper'))
+    const answer = await callPanel('addRemote', { sessionId: PANEL_SESSION, environmentId: 'dev-box', rootId: 'app' })
+    expect(answer.ok).toBe(false)
+    expect(answer.error?.code).toBe('helper-outdated')
+    expect(answer.error?.message).toContain('reinstall')
   })
 
   it('reports session-not-live when the session persists but is not live in this process', async () => {

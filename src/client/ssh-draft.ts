@@ -10,7 +10,10 @@
 import type { SshBindingDraft, SshEnvironmentView } from './ssh-client.ts'
 import type { Key } from './locales.ts'
 
-/** The exec stanza the "allow command execution" toggle materializes (ADR-0049). */
+/**
+ * The exec stanza the "allow command execution" toggle materializes (ADR-0049).
+ * The deployment limits leave room for an explicit larger tool preview.
+ */
 export const EXEC_DEFAULTS = {
   shell: ['/bin/sh', '-c'],
   env: { PATH: '/usr/local/bin:/usr/bin:/bin' },

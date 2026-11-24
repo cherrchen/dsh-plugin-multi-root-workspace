@@ -7,7 +7,7 @@
  *
  * @module @dsh-electron/dsh-plugin-multi-root-workspace/client/ssh-client
  */
-import { PANEL_CHANNEL } from '../contract.ts'
+import { PANEL_CHANNEL, parseErrorView } from '../contract.ts'
 import { SSH_SETTINGS_CHANNEL, sshSettingsViewSchema, parseSshAnswer, type SshSettingsView, type SshEndpoint, type SshStateView, type CredentialPublicView, type SshEnvironmentView, type SshBindingDraft, type SshBindingView, type SshAliasesView, type RemoteDirectoryListing } from '../remote/personal-contract.ts'
 import { PanelError } from './panel-client.ts'
 
@@ -68,11 +68,10 @@ async function request(connection: Channel, channel: string, endpoint: string, p
     throw new PanelError('unavailable', error instanceof Error ? error.message : String(error))
   }
   if (!result.ok) {
-    const failure = result.error as { code?: unknown; message?: unknown } | undefined
-    throw new PanelError(
-      typeof failure?.code === 'string' ? failure.code : 'unavailable',
-      typeof failure?.message === 'string' ? failure.message : 'the host answered with an unreadable failure',
-    )
+    const failure = parseErrorView(result.error)
+    throw failure === undefined
+      ? new PanelError('unavailable', 'the host answered with an unreadable failure')
+      : new PanelError(failure.code, failure.message, failure.ssh)
   }
   return result.value
 }

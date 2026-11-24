@@ -10,6 +10,7 @@
  * known_hosts line stays server-side.
  */
 import { z } from 'zod'
+import { sshDependencyViewSchema } from './ssh-diagnostics.ts'
 
 export const SSH_SETTINGS_CHANNEL = '/multi-root-workspace-ssh-settings'
 
@@ -170,6 +171,7 @@ export function parseSshSettingsCall(endpoint: string, payload: unknown): SshPar
 }
 
 export const sshSettingsViewSchema = z.strictObject({
+  dependencies: sshDependencyViewSchema.optional(),
   custodyMode: z.enum(['personal', 'team', 'hardened']),
   status: z.object({ state: z.string(), reason: z.string().optional(), code: z.string().optional() }),
   connections: z.array(z.strictObject({

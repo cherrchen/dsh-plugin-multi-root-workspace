@@ -9,10 +9,12 @@ import { join, posix } from 'node:path'
 import type { Context } from '@deepseek-ai/cordis'
 import type { MultiRootRegistry } from '../registry.ts'
 import { RemoteAdmissionError } from './contract.ts'
-import { checkRemotePath } from './manifest.ts'
+import { checkRemotePath, ManifestError } from './manifest.ts'
+import { inspectSshProfile } from '../compat/ssh-profile.ts'
+import { helperCommandError, HelperInstallError } from './personal/helper-error.ts'
 import type { SshCall, SshSettingsCall, SshStateView } from './personal-contract.ts'
 import { loadPersonalConfig, savePersonalConfig, type PersonalConfig, type PersonalEnvironment } from './personal/config.ts'
-import { CredentialStore, defaultExec, type ExecFile } from './personal/credentials.ts'
+import { CommandExecutionError, CredentialStore, defaultExec, type ExecFile } from './personal/credentials.ts'
 import { helperProtocol, HostKeyScans, installAccessKey, installHelper, pinAccessKeyTarget, removeAccessKey, testConnection } from './personal/operations.ts'
 import { link, linkStatus, listSshConfigAliases, recordKnownHost, renderSshConfig } from './personal/ssh-files.ts'
 import { listRemoteDirectories } from './personal/remote-paths.ts'
@@ -139,7 +141,7 @@ async function sshConfigIdentity(
   try {
     identity = parseSshConfig((await execAdapter('ssh', ['-G', alias])).stdout, { relaxed: true, managedKnownHostsFile })
   } catch (error) {
-    throw new RemoteAdmissionError('host-identity-unverifiable', error instanceof Error ? error.message : String(error))
+    throw new RemoteAdmissionError('host-identity-unverifiable', error instanceof Error ? error.message : String(error), { cause: error })
   }
   const files = [...identity.knownHostsFiles, ...identity.globalKnownHostsFiles]
   const { keys, fingerprint } = await hostKeyFingerprint(identity.lookupHost, files, execAdapter)
@@ -147,6 +149,17 @@ async function sshConfigIdentity(
     throw new RemoteAdmissionError('host-identity-unverifiable', `host "${identity.lookupHost}" resolves ${keys} usable known_hosts keys, exactly one required`)
   }
   return { endpoint: { hostname: identity.hostname, port: Number.parseInt(identity.port, 10) || 22, user: identity.user }, fingerprint }
+}
+
+async function verifyStoredAlias(exec: ExecFile, environment: PersonalEnvironment, credentialRoot: string): Promise<void> {
+  if (environment.credential.kind === 'ssh-config') {
+    const { endpoint, fingerprint } = await sshConfigIdentity(exec, environment.credential.alias, join(credentialRoot, 'known_hosts'))
+    if (endpoint.hostname !== environment.endpoint.hostname || endpoint.port !== environment.endpoint.port) {
+      throw new RemoteAdmissionError('host-identity-unverifiable', 'the resolved SSH hostname or port differs from the saved target')
+    }
+    if (endpoint.user !== environment.endpoint.user) throw new RemoteAdmissionError('account-mismatch', 'the SSH alias resolves a different account')
+    if (fingerprint !== environment.hostKey) throw new RemoteAdmissionError('host-key-mismatch', 'the SSH alias resolves a different host key')
+  }
 }
 
 /**
@@ -163,11 +176,88 @@ export async function handlePersonalEndpoint(
   return await runPersonalEndpoint(ctx, registry, primary, call, deps)
 }
 
+async function installAndRecordHelper(
+  ctx: Context, registry: MultiRootRegistry, primary: string | undefined, paths: PersonalPaths,
+  call: Extract<SshSettingsCall, { endpoint: 'sshHelperInstall' }>, exec: ExecFile,
+): Promise<SshStateView> {
+  const { view, gate } = inspectSshProfile(ctx)
+  const root = gate?.status === 'eligible' ? gate.locations?.['@deepseek-ai/dsh-ssh']?.root : undefined
+  if (gate?.status !== 'eligible' || root === undefined) {
+    throw new HelperInstallError(view.code, 'The Host SSH dependencies are not ready.', {
+      stage: 'host-preflight', retryable: false,
+      remediation: view.code === 'ssh-deps-restart' ? 'restart' : view.code.startsWith('ssh-host-') ? 'host' : 'dependencies',
+      ...(view.release === undefined ? {} : { expectedVersion: view.release }),
+    })
+  }
+  try {
+    new CredentialStore(paths.credentialRoot, exec)
+  } catch (error) {
+    throw new HelperInstallError('credential-root-unsafe', 'The Host could not open its protected SSH credential directory.', {
+      stage: 'host-preflight', retryable: false, remediation: 'host',
+    }, error)
+  }
+  let config: PersonalConfig
+  try {
+    config = loadPersonalConfig(paths.personalPath)
+  } catch (error) {
+    throw new HelperInstallError('helper-config-read', 'The Host could not load the SSH configuration.', {
+      stage: 'config-commit', retryable: false, remediation: 'reload', registration: 'not-committed',
+    }, error)
+  }
+  if (config.revision !== call.revision) {
+    throw new HelperInstallError('personal-config-conflict', 'The SSH configuration revision changed before installation.', {
+      stage: 'config-commit', retryable: true, remediation: 'reload', registration: 'not-committed',
+    })
+  }
+  const environment = findEnvironment(config, call.environmentId)
+  try {
+    await verifyStoredAlias(exec, environment, paths.credentialRoot)
+  } catch (error) {
+    const cause = error instanceof RemoteAdmissionError ? error.cause : error
+    if (cause instanceof CommandExecutionError) throw helperCommandError(cause, 'ssh-connect')
+    throw new HelperInstallError('ssh-connect-host-key', 'The confirmed SSH alias identity could not be verified.', {
+      stage: 'ssh-connect', retryable: false, remediation: 'host-key',
+    }, error)
+  }
+  const protocol = helperProtocol(root)
+  const helper = await installHelper(exec, environment, paths.credentialRoot, {
+    sshVersion: gate.release, hostHelperPath: join(root, 'lib', 'helper.js'), nodePath: call.nodePath,
+  })
+  const next = {
+    ...config,
+    revision: config.revision + 1,
+    environments: config.environments.map(entry => entry.environmentId === call.environmentId
+      ? { ...entry, helper: { ...helper, protocol } }
+      : entry),
+  }
+  try {
+    await savePersonalConfig(paths.personalPath, next, call.revision, () => {
+      requirePersonal(registry)
+      if (inspectSshProfile(ctx).gate?.status !== 'eligible') throw new Error('Host SSH dependencies changed during installation')
+    })
+  } catch (error) {
+    const conflict = error instanceof ManifestError && error.code === 'personal-config-conflict'
+    throw new HelperInstallError(conflict ? 'personal-config-conflict' : 'helper-config-commit',
+      'The remote Helper was deployed and verified. Host registration could not be confirmed.', {
+        stage: 'config-commit', retryable: false, remediation: 'reload', remoteState: 'verified', registration: 'unconfirmed',
+      }, error)
+  }
+  await registry.refreshRemotePersonal().catch(() => {})
+  try {
+    return await sshState(registry, paths, primary)
+  } catch (error) {
+    throw new HelperInstallError('helper-config-reload', 'The Helper was registered, but the Host could not return the updated configuration.', {
+      stage: 'config-commit', retryable: false, remediation: 'reload', remoteState: 'verified',
+    }, error)
+  }
+}
+
 async function runPersonalEndpoint(
   ctx: Context, registry: MultiRootRegistry, primary: string | undefined, call: SshCall | SshSettingsCall, deps: PersonalDeps,
 ): Promise<unknown> {
   const paths = requirePersonal(registry)
   const exec = deps.exec ?? defaultExec
+  if (call.endpoint === 'sshHelperInstall') return await installAndRecordHelper(ctx, registry, primary, paths, call, exec)
   const activeScans = scansFor(exec)
   const store = new CredentialStore(paths.credentialRoot, exec)
   const after = async () => await sshState(registry, paths, primary)
@@ -183,14 +273,7 @@ async function runPersonalEndpoint(
       }
       const config = loadPersonalConfig(paths.personalPath)
       const environment = findEnvironment(config, call.environmentId)
-      if (environment.credential.kind === 'ssh-config') {
-        const { endpoint, fingerprint } = await sshConfigIdentity(exec, environment.credential.alias, join(paths.credentialRoot, 'known_hosts'))
-        if (endpoint.hostname !== environment.endpoint.hostname || endpoint.port !== environment.endpoint.port) {
-          throw new RemoteAdmissionError('host-identity-unverifiable', 'the resolved SSH hostname or port differs from the saved target')
-        }
-        if (endpoint.user !== environment.endpoint.user) throw new RemoteAdmissionError('account-mismatch', 'the SSH alias resolves a different account')
-        if (fingerprint !== environment.hostKey) throw new RemoteAdmissionError('host-key-mismatch', 'the SSH alias resolves a different host key')
-      }
+      await verifyStoredAlias(exec, environment, paths.credentialRoot)
       return await listRemoteDirectories(environment, paths.credentialRoot, call.path)
     }
     case 'sshCredentialGenerate':
@@ -331,22 +414,6 @@ async function runPersonalEndpoint(
     case 'sshEnvironmentTest': {
       const config = loadPersonalConfig(paths.personalPath)
       return await testConnection(exec, findEnvironment(config, call.environmentId), paths.credentialRoot)
-    }
-    case 'sshHelperInstall': {
-      const config = loadPersonalConfig(paths.personalPath)
-      const environment = findEnvironment(config, call.environmentId)
-      const { sshPackageRoot, sshPackageVersion } = await import('../compat/dsh-version.ts')
-      const version = sshPackageVersion('@deepseek-ai/dsh-ssh')
-      const packageRoot = sshPackageRoot('@deepseek-ai/dsh-ssh')
-      if (version === undefined || packageRoot === undefined) throw new RemoteAdmissionError('helper-install-failed', 'the host dsh-ssh package is not resolvable')
-      const hostHelperPath = join(packageRoot, 'lib', 'helper.js')
-      const helper = await installHelper(exec, environment, paths.credentialRoot, { sshVersion: version, hostHelperPath, nodePath: call.nodePath })
-      return await mutate(registry, primary, paths, call.revision, current => ({
-        ...current,
-        environments: current.environments.map(entry => entry.environmentId === call.environmentId
-          ? { ...entry, helper: { ...helper, protocol: helperProtocol() } }
-          : entry),
-      }))
     }
     case 'sshAccessKeyInstall': {
       const config = loadPersonalConfig(paths.personalPath)

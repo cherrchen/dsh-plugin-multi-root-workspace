@@ -25,9 +25,27 @@ Personal SSH is experimental and off by default. Once enabled, the Agent can use
    - **Plugin detail page**: once enabled, a **Remote SSH → Manage** button appears at the top of the card (manages global connections without an active session).
    - **Workspace Folders dialog**: click **Folders** at the bottom of the sidebar (or the New Session hero entry) → under **Remote working directories**, click **Manage SSH remotes…**.
 
-## Setting up connections and bindings
+## Install the SSH dependencies for the current profile
 
-Personal mode is configured entirely in the GUI and requires no root privileges, dedicated OS account, or deployment manifest.
+Installing Multi-root Workspace makes the local workspace features available. After you confirm that you want to enable personal SSH, **Install SSH dependencies** opens automatically if the active profile needs attention. You can close it and check the four packages later in **Manage SSH environments**. If the dependencies are ready, proceed to connection setup.
+
+There are two entries for the repair; either one writes only to the current profile and never asks you to install packages one by one or type a version.
+
+1. **One-click Desktop install (when the launcher supports it)**: the dialog shows **Install and restart**. The Desktop launcher verifies the current Host, profile, and release, stops the Host and waits for it to exit, reuses the same install core as the command below, and restarts the same `desktop` profile with its original configuration. The button reports stopping, installing, restarting, and checking states. Web, older Desktop builds, and launchers without this capability do not show it.
+2. **Copy install command (every host)**: click **Copy install command**, fully quit the affected DSH Host, and run it on the machine hosting DSH. The command uses the CLI at the **exact** release shown in the dialog, the exact profile and DSH Home, and runs one `dsh plugin --profile <name> add --save-exact` operation to align all four packages. For Web, use the machine running the Web Host; for Desktop, quit the app completely before running the command for the `desktop` profile. Repeating it is safe: a profile that is already aligned reports **ready** without another write.
+3. Restart the Host with the same profile and reopen **Manage SSH environments**. If a dependency message remains, click **Recheck dependencies** and review the state of each package. The check only reads state. When the running Host detects repaired files, it still requires a restart.
+
+Keep the three results apart:
+
+- **Installed**: this command or launcher operation wrote the four packages;
+- **Restart required**: the packages on disk are aligned, but this process still uses the dependencies it loaded at startup;
+- **Ready**: the current Host resolves all four matching packages, so connection setup can proceed.
+
+After changing DSH versions, run the command shown by the new Host to align all four packages. See the [SSH technical reference](../../reference/ssh-remote-environments.md#host-profile-依赖) for version and deployment details.
+
+## Set up connections and directory bindings
+
+With the profile ready, configure connections and bindings in the GUI. No root access, separate system account, or deployment manifest is required.
 
 ### Step 1: Prepare credentials (pick one)
 
@@ -49,7 +67,7 @@ Personal mode is configured entirely in the GUI and requires no root privileges,
 3. **Step 2 (Connection setup)**:
    - **Password credentials**: click **Install access key** first so the plugin logs in once with the saved password and installs the access key.
    - **Linking managed config**: if prompted that the config is not linked, click **Link ~/.ssh/config**. The plugin backs up your existing `~/.ssh/config` and prepends a single `Include` line so the managed host alias resolves (required before connecting). If `~/.ssh/config` is a symlink, the change lands on the link target and the symlink itself is preserved.
-   - **Install helper** (recommended; required for command execution and object-identity verification): optionally click **Detect Node**, then click **Install helper**. The plugin installs the exact host-matching `@deepseek-ai/dsh-ssh` version under `~/.dsh-helper/<version>` and writes an entry script that re-verifies the whole installed dependency file set on every launch (requires Node.js on the remote host with `command -v node` resolving to an absolute path).
+   - **Install helper** (recommended; required for command execution and object-identity verification): optionally click **Detect Node**, then click **Install helper**. The plugin installs the exact host-matching `@deepseek-ai/dsh-ssh` version under `~/.dsh-helper/<version>` and writes an entry script that re-verifies the whole installed dependency file set on every launch (requires remote Node.js 24.9.0 or later at a normalized absolute path, a working npm, and a writable installation directory). If the remote PATH selects an older version, enter the absolute path to the newer Node executable in the connection card’s installation form.
    - Check **Allow command execution** (requires the helper) and/or **Allow file transfer**, then click **Finish**.
 
 ### Step 3: Bind a directory to the workspace and register
@@ -64,6 +82,28 @@ Connections are plugin-global, while directory bindings belong to each workspace
 > [!TIP]
 > Before deleting a connection, unbind all workspace bindings referencing it — in the bindings dialog, or via **Remove** in the remote row's `…` menu (in personal mode, remove revokes the registration and unbinds at once) — `environment-in-use` otherwise. If editing permissions or updating the connection marks an endpoint **Withheld**, click **Register** again from the `…` menu. To change a bound directory's path, actions, or local transfers, click **Edit** in that row's `…` menu — it opens the bindings dialog directly into that binding's edit form.
 
+## Using the remote tools
+
+The model reaches a registered remote directory only through `remote_copy` and `remote_bash`. Both copy endpoints take the same fields, and an **omitted** `environmentId` means the local workspace: the local primary root is `local:primary` (omit `environmentId`, use `rootId` `primary`), an additional root uses its registered `aliasId` (for example `docs`), and a remote endpoint must name `environmentId` explicitly with the `rootId` registered in the bindings dialog. `relativePath` is a normalized relative POSIX path to one regular file inside the root; it may not start with `/` or contain `.` or `..` segments.
+
+One upload and one download call:
+
+```json
+{"from":{"rootId":"primary","relativePath":"dist/app.tar"},
+ "to":{"environmentId":"build","rootId":"app","relativePath":"in/app.tar"}}
+```
+
+```json
+{"from":{"environmentId":"build","rootId":"app","relativePath":"out/app.tar"},
+ "to":{"rootId":"primary","relativePath":"dist/app.tar"}}
+```
+
+A copy handles one regular file and the destination must not exist: the target is created with mode 0600, the source mtime and executable bit are not preserved, and an existing file is never overwritten. To move several files, pack them inside an authorized root first (for example `tar -cf dist/app.tar -C dist .`), copy the archive as one file, and unpack it on the destination side.
+
+`remote_bash` gives stdout and stderr a 64 KiB preview budget each by default, including JSON escaping. Pass `maxOutputBytes` to request a larger preview within the connection limit. `totalBytes` is the raw byte count, and `droppedBytes` counts raw bytes omitted from the preview. A count is `null` when it cannot be determined exactly. For large output, redirect to a file inside an authorized remote root, for example with `command > /srv/work/build.log 2>&1`. Read the file in sections with `remote_bash` (`sed -n '1,200p' …` or `tail -n 200 …`) or copy it back.
+
+Failures carry a stable `code`, a short `message`, and a `hint`. Endpoint errors can list up to six compatible candidates per direction, including eligible local roots. For `unknown`, `admitted-may-start`, or `scope: "unconfirmed"`, verify the remote state before deciding whether to retry. An `unknown` result includes a `reconcileId` to help reconcile the operation.
+
 ## Disabling SSH and troubleshooting
 
 Turn off **SSH remote environments** in the plugin settings to shut down the remote tools and control plane. To reuse a profile from an earlier broker experiment, see the [configuration migration notes](../../reference/ssh-remote-environments.md#停用的旧配置).
@@ -74,7 +114,9 @@ Turn off **SSH remote environments** in the plugin settings to shut down the rem
 - **`endpoint-unverifiable`** — Check that the Host uses a supported DSH release and has all four matching SSH packages installed.
 - **`ssh-config-not-linked`** (Personal mode): a managed credential environment exists, but the generated config is not yet linked into `~/.ssh/config`. Click **Link ~/.ssh/config** under **Remote connections**.
 - **`access-key-reconcile-required`**: installation or rollback could not be confirmed. Use the key ID in the error message to check `authorized_keys` on the original SSH host before retrying.
-- **`helper-outdated`**: the recorded helper predates host-side entry verification; click **Install helper** again on that connection card.
+- **Helper installation failed**. The connection screen shows the stage, what to do next, and expandable technical details. If remote files may have changed, check the server’s installation directory and npm logs first. If the remote Helper was verified and Host registration is unconfirmed, reload the connection state before deciding whether to reinstall. See [SSH troubleshooting](../../troubleshooting/ssh-panel-operation-failed.md#helper-安装诊断).
+- **`helper-outdated`**: the recorded helper on a desktop Host has no BoringSSL transport entry; click **Install helper** again on that connection card. Registered Roots stay valid and do not need re-registration.
 - **`unknown` result with `reconcileId`**: connection dropped after a remote command started or after sending a file publish request. Tools never auto-retry to avoid duplicate execution or overwrites; reconcile on the remote host or in the Broker audit log using `reconcileId`.
+- **`invalid-arguments`**: the tool refused structurally invalid arguments before Registry admission and any SSH/SFTP I/O; `message` names the offending field (for example `"to.relativePath" is required`). Fix the fields named by `hint` and retry.
 
 For protocol schemas, full refusal codes, and architectural invariants, see the [SSH remote environments reference](../../reference/ssh-remote-environments.md) and the [control plane reference](../../reference/multi-environment-control-plane.md).

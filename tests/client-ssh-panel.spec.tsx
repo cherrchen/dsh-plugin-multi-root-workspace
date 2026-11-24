@@ -147,7 +147,7 @@ function fakeSsh(initial: SshStateView): SshClient & {
       return answer
     },
     environmentTest: async (sessionId: string, environmentId: string) =>
-      await record('environmentTest', [sessionId, environmentId], { platform: 'linux', nodePath: '/usr/bin/node', nodeVersion: 'v22.0.0' }),
+      await record('environmentTest', [sessionId, environmentId], { platform: 'linux', nodePath: '/usr/bin/node', nodeVersion: 'v24.9.0' }),
     helperInstall: async (sessionId: string, revision: number, environmentId: string, nodePath?: string) => {
       const helper = { nodePath: nodePath ?? '/usr/bin/node', helperPath: '/opt/dsh/helper.js', sha256: 'a'.repeat(64), protocol: 1 }
       const next: SshStateView = {
@@ -600,6 +600,9 @@ describe('the SSH management dialog', () => {
 
   it('detects Node, installs the Helper and saves execution from settings without a session or a new scan', async () => {
     const ssh = fakeSsh(sshState())
+    const detect = vi.spyOn(ssh, 'environmentTest').mockResolvedValueOnce({
+      platform: 'linux', nodePath: '/usr/bin/node', nodeVersion: 'v24.8.0',
+    })
     render(<SshManagementDialog initialTab="connections" ssh={ssh} fromSettings sessionId={undefined}
       custodyMode="personal" status={{ state: 'ready' }}
       onClose={() => {}} onChanged={() => {}} t={t} />)
@@ -610,7 +613,12 @@ describe('the SSH management dialog', () => {
     await scanAndConfirm(dialog, ssh)
 
     fireEvent.click(await within(dialog).findByRole('button', { name: 'ssh.add.detectNode' }))
+    expect(await within(dialog).findByText('error.node-too-old')).toBeTruthy()
+    expect((within(dialog).getByRole('button', { name: 'ssh.helperInstall' }) as HTMLButtonElement).disabled).toBe(true)
+    expect(detect).toHaveBeenCalledWith(undefined, 'env-build', expect.any(AbortSignal))
+    fireEvent.click(within(dialog).getByRole('button', { name: 'ssh.add.detectNode' }))
     expect(await callsOf(ssh, 'environmentTest')).toEqual([[undefined, 'env-build']])
+    await waitFor(() => expect((within(dialog).getByRole('button', { name: 'ssh.helperInstall' }) as HTMLButtonElement).disabled).toBe(false))
     fireEvent.click(within(dialog).getByRole('button', { name: 'ssh.helperInstall' }))
     // The wizard delegates node discovery to the host probe rather than an
     // input field: install is sent without a path.
@@ -970,7 +978,7 @@ describe('the SSH management dialog', () => {
     await within(dialog).findByText('ssh.environments')
     fireEvent.click(within(dialog).getByRole('button', { name: 'ssh.envTest' }))
     expect(await callsOf(ssh, 'environmentTest')).toEqual([['session-1', 'env-prod']])
-    await within(dialog).findByText('ssh.platform.linux · node v22.0.0')
+    await within(dialog).findByText('ssh.platform.linux · node v24.9.0')
   })
 
   it('asks the Workspace Folders panel to re-read the remote section after a mutation', async () => {

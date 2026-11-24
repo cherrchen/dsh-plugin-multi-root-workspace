@@ -1873,6 +1873,28 @@ export class MultiRootRegistry extends Service {
   }
 
   /**
+   * Read the Host-local narrowing policy shared by admission and copy hints.
+   * @param session - the trusted dispatch session.
+   * @param toolName - the trusted dispatch tool name.
+   * @returns the effective mode and tool cap, when the session policy resolves.
+   */
+  remoteToolPolicy(session: RemoteOperationRequest['session'], toolName: string): {
+    effectiveMode: 'read-only' | 'workspace-write'
+    capped: boolean
+  } | undefined {
+    if (session?.header?.cwd === undefined) return undefined
+    let policy: SandboxExecutionPolicy | undefined
+    try {
+      policy = this.ctx.get('sandboxPolicy')?.resolve({ session: session as never }) as SandboxExecutionPolicy | undefined
+    } catch { return undefined }
+    if (policy?.mode === undefined) return undefined
+    return {
+      effectiveMode: policy.mode === 'read-only' ? 'read-only' : 'workspace-write',
+      capped: this.ctx.multiRootScope.capsTool(toolName),
+    }
+  }
+
+  /**
    * Admit one remote operation at the owner's ordering point, then run its
    * body with a frozen handle that expires when the body settles.
    *
@@ -1896,20 +1918,17 @@ export class MultiRootRegistry extends Service {
     if (this.remotePlane.status.state !== 'ready') {
       deny('remote-unavailable', `the remote control plane is ${this.remotePlane.status.state}${this.remotePlane.status.reason === undefined ? '' : `: ${this.remotePlane.status.reason}`}`)
     }
-    let policy: SandboxExecutionPolicy | undefined
-    try {
-      policy = request.session === undefined ? undefined : this.ctx.get('sandboxPolicy')?.resolve({ session: request.session as never }) as SandboxExecutionPolicy | undefined
-    } catch { policy = undefined }
-    if (request.session?.header?.cwd === undefined || policy?.mode === undefined) {
+    const policy = this.remoteToolPolicy(request.session, request.toolName)
+    if (policy === undefined) {
       deny('session-policy-unavailable', 'no live sandbox policy could be resolved for this session')
     }
     const key = primaryKey(request.session!.header.cwd)
-    const effectiveMode = policy!.mode === 'read-only' ? 'read-only' : 'workspace-write'
+    const { effectiveMode, capped } = policy!
     const transferToRemote = request.purpose === 'transfer' && request.endpoints[1]?.environmentId !== 'local'
     if (effectiveMode === 'read-only' && (request.purpose === 'write' || request.purpose === 'exec' || transferToRemote)) {
       deny('mode-denies', `a read-only session cannot ${request.purpose === 'transfer' ? 'transfer to a remote root' : `${request.purpose} a remote root`}`)
     }
-    if (this.ctx.multiRootScope.capsTool(request.toolName) && (request.purpose === 'write' || request.purpose === 'exec' || transferToRemote)) {
+    if (capped && (request.purpose === 'write' || request.purpose === 'exec' || transferToRemote)) {
       deny('tool-capped', `tool "${request.toolName}" is capped to read-only and cannot ${request.purpose === 'transfer' ? 'transfer to a remote root' : `${request.purpose} a remote root`}`)
     }
     trace('narrowed')

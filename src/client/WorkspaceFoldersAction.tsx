@@ -43,7 +43,7 @@ import {
   IconTrash,
   IconWorkspaceTree,
 } from '../compat/client-icons.ts'
-import { PanelError, type PanelClient } from './panel-client.ts'
+import { errorKeyOf, PanelError, type PanelClient } from './panel-client.ts'
 import type { WorkspaceFoldersDialogController } from './workspace-folders-dialog.ts'
 import type { RemotesClient } from './remotes-client.ts'
 import type { SshClient } from './ssh-client.ts'
@@ -796,7 +796,9 @@ export function WorkspaceFoldersDialog(props: WorkspaceFoldersActionProps & { on
     () => props.remoteEnabled?.() === true,
     () => false,
   )
-  const remoteAddPossible = props.remotes !== undefined && props.ssh !== undefined
+  const dependencies = remoteState.view?.dependencies
+  const remoteDepsReady = dependencies === undefined || dependencies.code === 'ready'
+  const remoteAddPossible = props.remotes !== undefined && props.ssh !== undefined && remoteDepsReady
   // Captured as consts: narrowing does not reach the onCopy closures below.
   const primaryPath = state.view?.primaryRoot
   const workingRoot = workingRootOf(state.view)
@@ -1056,7 +1058,7 @@ export function WorkspaceFoldersDialog(props: WorkspaceFoldersActionProps & { on
                   <Action disabled={remoteState.view === undefined} onClick={() => setSshDialog('connections')}>
                     {t('panel.remoteManage')}
                   </Action>
-                  {props.ssh !== undefined && remoteState.view?.custodyMode === 'personal' && remoteState.view.status.state === 'ready' ? (
+                  {remoteDepsReady && props.ssh !== undefined && remoteState.view?.custodyMode === 'personal' && remoteState.view.status.state === 'ready' ? (
                     <Action onClick={() => { setSshBindingEdit(undefined); setSshBindingsOpen(true) }}>{t('panel.remoteBindings')}</Action>
                   ) : null}
                 </div>
@@ -1067,6 +1069,7 @@ export function WorkspaceFoldersDialog(props: WorkspaceFoldersActionProps & { on
               ) : null}
               {remoteState.view === undefined
                 ? (remoteState.error === undefined ? <p className="mrfw-note">{t('panel.loading')}</p> : null)
+                : !remoteDepsReady ? <p className="mrfw-note">{t(errorKeyOf(dependencies!.code))}</p>
                 : remoteState.view.status.state !== 'ready' ? (
                   <p className="mrfw-note">
                     {t('panel.remoteUnavailable', { reason: remoteStatusText(remoteState.view.status, t) })}
@@ -1142,12 +1145,13 @@ export function WorkspaceFoldersDialog(props: WorkspaceFoldersActionProps & { on
               sessionId={requestBase()?.sessionId}
               custodyMode={remoteState.view?.custodyMode}
               status={remoteState.view?.status}
+              dependencies={dependencies}
               onClose={() => { setSshDialog(undefined) }}
               onChanged={refreshRemoteSection}
               t={t}
             />
           )}
-          {sshBindingsOpen && props.ssh !== undefined && sessionId !== undefined
+          {sshBindingsOpen && remoteDepsReady && props.ssh !== undefined && sessionId !== undefined
             && remoteState.view?.custodyMode === 'personal' && remoteState.view.status.state === 'ready' ? (
               <SshWorkspaceBindingsDialog key={sessionId} ssh={props.ssh} sessionId={sessionId} remotes={props.remotes} roots={state.view}
                 initialEdit={sshBindingEdit}
@@ -1263,7 +1267,7 @@ export function WorkspaceFoldersDialog(props: WorkspaceFoldersActionProps & { on
       />
     )}
     {/* The add-remote guided flow: environment → binding → registration. */}
-    {remoteWizard ? (
+    {remoteWizard && remoteDepsReady ? (
       <RemoteWizard
         ssh={props.ssh}
         remotes={props.remotes}

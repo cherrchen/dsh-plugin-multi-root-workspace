@@ -15,6 +15,7 @@ import { classifyInstallation, classifySshCapability, sshPackageVersion, sshPriv
 import { loadHostSshPackages } from '../compat/ssh-packages.ts'
 import { SftpClient, type SftpVersion } from './sftp.ts'
 import { verifyHelperEntry } from './personal/operations.ts'
+import { clientPskPlan } from '../compat/ssh-stream-ciphers.ts'
 import { environmentDigest, type DeploymentManifest, type RemoteEnvironment } from './manifest.ts'
 
 export class SshEnvironmentError extends Error {
@@ -68,6 +69,7 @@ export interface SshEnvironmentManagerOptions {
   readonly manifest: DeploymentManifest | undefined
   readonly logger: { debug(message: string): void; warn(message: string): void }
   readonly gate?: SshCapability
+  readonly resolveGate?: () => SshCapability | undefined
   readonly allowUnattestedForTesting?: boolean
   /**
    * This process is the credential broker, running under the dedicated
@@ -164,7 +166,13 @@ const UNAVAILABLE_MANIFEST: DeploymentManifest = { schemaVersion: 1, configVersi
 export class SshEnvironmentManager {
   private manifest: DeploymentManifest
   private readonly logger: SshEnvironmentManagerOptions['logger']
-  private readonly gate: SshCapability
+  private readonly startupGate: SshCapability
+  private readonly resolveGate: SshEnvironmentManagerOptions['resolveGate']
+
+  private get gate(): SshCapability {
+    if (this.resolveGate === undefined) return this.startupGate
+    return this.resolveGate() ?? { status: 'absent', reason: 'identity-mismatch', detail: 'Host SSH dependencies changed', packages: [] }
+  }
   private readonly allowUnattested: boolean
   private readonly brokerCustody: boolean
   private readonly managedKnownHostsFile: string | undefined
@@ -175,12 +183,18 @@ export class SshEnvironmentManager {
   private readonly resolved = new Map<string, SshEnvironment>()
   private readonly sftpOpenings = new Map<string, Promise<SftpEnvironment>>()
   private readonly sftpResolved = new Map<string, SftpEnvironment>()
-  private readonly transferSessions = new Map<AbortController, string>()
+  private readonly transferSessions = new Map<AbortController, { readonly environmentId: string; readonly settled: Promise<void> }>()
+  private readonly helperDisposals = new Map<string, { readonly opening: Promise<SshEnvironment> | undefined; readonly disposal: Promise<void> }>()
+  private readonly sftpDisposals = new Map<string, { readonly opening: Promise<SftpEnvironment> | undefined; readonly disposal: Promise<void> }>()
+  private readonly cleanups = new Set<Promise<void>>()
+  private closed = false
+  private disposal: Promise<void> | undefined
 
   constructor(options: SshEnvironmentManagerOptions) {
     this.manifest = options.manifest ?? UNAVAILABLE_MANIFEST
     this.logger = options.logger
-    this.gate = options.gate ?? classifySshCapability({
+    this.resolveGate = options.resolveGate
+    this.startupGate = options.gate ?? classifySshCapability({
       platform: process.platform, local: classifyInstallation(),
       readVersion: sshPackageVersion, privateCopy: sshPrivateCopy,
     })
@@ -194,6 +208,7 @@ export class SshEnvironmentManager {
 
   /** Rebind personal facts while retaining unchanged connections and Root helpers. */
   rebind(manifest: DeploymentManifest | undefined): void {
+    if (this.closed) return
     const previous = this.manifest
     const next = manifest ?? UNAVAILABLE_MANIFEST
     if (previous === next) return
@@ -208,16 +223,27 @@ export class SshEnvironmentManager {
       if (changed.has(id) || !scopes.has(key)) void this.disposeHelper(key, true).catch(() => {})
     }
     for (const id of changed) this.markSftpStale(id)
-    for (const [session, id] of this.transferSessions) if (changed.has(id)) session.abort()
+    for (const [session, record] of this.transferSessions) if (changed.has(record.environmentId)) session.abort()
   }
 
   /** The current verified deployment manifest. */
   get deployment(): DeploymentManifest { return this.manifest }
 
   get capability(): { readonly eligible: boolean; readonly reason?: string } {
-    return this.gate.status === 'eligible'
-      ? { eligible: true }
-      : { eligible: false, reason: this.gate.status === 'absent' ? this.gate.reason : 'unknown' }
+    const gate = this.gate
+    return gate.status === 'eligible' ? { eligible: true } : { eligible: false, reason: gate.reason }
+  }
+
+  private assertOpen(): void {
+    if (this.closed) throw new SshEnvironmentError('remote-unavailable', 'the SSH environment manager is closed')
+  }
+
+  private requireGate(): Extract<SshCapability, { status: 'eligible' }> {
+    const gate = this.gate
+    if (gate.status !== 'eligible') {
+      throw new SshEnvironmentError(`ssh-capability-absent:${gate.reason}`, 'SSH capability is not eligible on this host')
+    }
+    return gate
   }
 
   private helperKey(environmentId: string, workspace?: string): string {
@@ -239,10 +265,12 @@ export class SshEnvironmentManager {
 
   /** Open or reuse the Helper under its deployment or personal Root scope. */
   async open(environmentId: string, workspace?: string, expectedDigest?: string): Promise<SshEnvironment> {
+    this.assertOpen()
     this.requireEnvironmentDigest(environmentId, expectedDigest)
     const key = this.helperKey(environmentId, workspace)
     const existing = this.openings.get(key)
     if (existing !== undefined) {
+      this.requireGate()
       const env = await existing
       if (this.openings.get(key) !== existing) throw new SshEnvironmentError('remote-unavailable', 'the Helper generation was superseded')
       try {
@@ -257,6 +285,10 @@ export class SshEnvironmentManager {
     this.openings.set(key, promise)
     try {
       const env = await promise
+      if (this.closed) {
+        await env.dispose().catch(() => {})
+        throw new SshEnvironmentError('remote-unavailable', 'the SSH environment manager is closed')
+      }
       if (this.openings.get(key) !== promise) throw new SshEnvironmentError('remote-unavailable', 'the Helper opening was superseded')
       this.resolved.set(key, env)
       return env
@@ -272,26 +304,94 @@ export class SshEnvironmentManager {
     void this.disposeHelper(this.helperKey(environmentId, workspace)).catch(() => {})
   }
 
-  private async disposeHelper(key: string, allowRevocation = false): Promise<void> {
+  private disposeHelper(key: string, allowRevocation = false): Promise<void> {
     const opening = this.openings.get(key)
+    const existing = this.helperDisposals.get(key)
+    // A new generation can take the same key while the previous cleanup is
+    // still running; compare the opening, not the key, so both are released.
+    if (existing !== undefined && existing.opening === opening) return existing.disposal
     this.openings.delete(key)
     this.resolved.delete(key)
-    if (opening !== undefined) await opening.then(async env => {
+    const disposal = (async () => {
+      if (opening === undefined) return
+      const env = await opening.catch(() => undefined)
+      if (env === undefined) return
       // The admission monitor can terminate work using the old handle before
       // the transport closes. A new call cannot obtain this generation.
       if (allowRevocation) await new Promise<void>(resolve => setTimeout(resolve, 1_000).unref())
       await env.dispose()
-    }, () => {})
+    })().catch((error: unknown) => {
+      const detail = error instanceof Error ? error.message : String(error)
+      this.logger.warn(`multi-root remote: Helper ${key} cleanup failed: ${detail}`)
+      throw error
+    }).finally(() => { this.cleanups.delete(disposal) })
+    const record = { opening, disposal }
+    this.helperDisposals.set(key, record)
+    this.cleanups.add(disposal)
+    void disposal.catch(() => {})
+    return disposal
   }
 
   async dispose(environmentId: string, workspace?: string): Promise<void> {
     await this.disposeHelper(this.helperKey(environmentId, workspace))
   }
 
-  async disposeAll(): Promise<void> {
-    for (const session of this.transferSessions.keys()) session.abort()
-    await Promise.all([...this.openings.keys()].map(key => this.disposeHelper(key)))
-    for (const id of [...this.sftpOpenings.keys()]) await this.disposeSftp(id)
+  /**
+   * Stop accepting SSH work, settle every in-flight transfer and opening, and
+   * tear down each Helper and SFTP session independently. A failed resource is
+   * logged and never prevents the remaining resources from being released.
+   * Repeated and concurrent calls share one disposal.
+   * @returns completion after every resource has been attempted.
+   */
+  disposeAll(): Promise<void> {
+    if (this.disposal !== undefined) return this.disposal
+    this.closed = true
+    const disposal = this.disposeAllOnce()
+    this.disposal = disposal
+    return disposal
+  }
+
+  private async disposeAllOnce(): Promise<void> {
+    await this.settleTransfers()
+    await this.settleResources('Helper', [...new Set([...this.openings.keys(), ...this.resolved.keys()])],
+      key => this.disposeHelper(key))
+    await this.settleResources('SFTP session', [...new Set([...this.sftpOpenings.keys(), ...this.sftpResolved.keys()])],
+      id => this.disposeSftp(id))
+    // A transfer can admit a new SFTP generation while its abort is in flight;
+    // settle those again after their abort listeners have run.
+    await this.settleTransfers()
+    await this.settleResources('SFTP session', [...new Set([...this.sftpOpenings.keys(), ...this.sftpResolved.keys()])],
+      id => this.disposeSftp(id))
+    // A key can be reused by a new generation while the previous cleanup is
+    // still running; wait for every cleanup that was started, not only the
+    // generation currently registered under the key.
+    await this.settleCleanups()
+  }
+
+  private async settleCleanups(): Promise<void> {
+    while (this.cleanups.size > 0) {
+      await Promise.allSettled([...this.cleanups])
+    }
+  }
+
+  private async settleTransfers(): Promise<void> {
+    const sessions = [...this.transferSessions.entries()]
+    for (const [session] of sessions) session.abort()
+    await Promise.allSettled(sessions.map(([, record]) => record.settled))
+  }
+
+  private async settleResources(
+    kind: string,
+    keys: readonly string[],
+    dispose: (key: string) => Promise<void>,
+  ): Promise<void> {
+    const results = await Promise.allSettled(keys.map(key => dispose(key)))
+    for (const [index, result] of results.entries()) {
+      if (result.status === 'rejected') {
+        const detail = result.reason instanceof Error ? result.reason.message : String(result.reason)
+        this.logger.warn(`multi-root remote: ${kind} ${keys[index]} cleanup failed: ${detail}`)
+      }
+    }
   }
 
   /** The live SFTP generation — a sentinel when none is open. */
@@ -301,17 +401,20 @@ export class SshEnvironmentManager {
 
   /** Open (or join the in-flight open of) one environment's SFTP session. */
   async openSftp(environmentId: string, signal?: AbortSignal, expectedDigest?: string): Promise<SftpEnvironment> {
+    this.assertOpen()
     signal?.throwIfAborted()
     this.requireEnvironmentDigest(environmentId, expectedDigest)
     let opening = this.sftpOpenings.get(environmentId)
+    if (opening !== undefined) this.requireGate()
     if (opening === undefined) {
       const ownsSlot = () => this.sftpOpenings.get(environmentId) === pending
       const pending: Promise<SftpEnvironment> = this.openSftpFresh(environmentId, () => {
         if (ownsSlot()) this.markSftpStale(environmentId)
       }).then(async env => {
-        if (!ownsSlot()) {
-          await env.dispose()
-          throw new SshEnvironmentError('remote-unavailable', 'the SFTP opening was superseded')
+        if (this.closed || !ownsSlot()) {
+          await env.dispose().catch(() => {})
+          throw new SshEnvironmentError('remote-unavailable', this.closed
+            ? 'the SSH environment manager is closed' : 'the SFTP opening was superseded')
         }
         this.sftpResolved.set(environmentId, env)
         return env
@@ -331,55 +434,80 @@ export class SshEnvironmentManager {
   }
 
   markSftpStale(environmentId: string): void {
-    const opening = this.sftpOpenings.get(environmentId)
-    this.sftpOpenings.delete(environmentId)
-    this.sftpResolved.delete(environmentId)
-    void opening?.then(env => env.dispose()).catch(() => {})
+    void this.disposeSftp(environmentId).catch(() => {})
   }
 
-  async disposeSftp(environmentId: string): Promise<void> {
+  disposeSftp(environmentId: string): Promise<void> {
     const opening = this.sftpOpenings.get(environmentId)
+    const existing = this.sftpDisposals.get(environmentId)
+    // The same environment can open a new SFTP generation while the previous
+    // cleanup is in flight; both openings must be released.
+    if (existing !== undefined && existing.opening === opening) return existing.disposal
     this.sftpOpenings.delete(environmentId)
     this.sftpResolved.delete(environmentId)
-    if (opening !== undefined) await (await opening.catch(() => undefined))?.dispose()
+    const disposal = (async () => {
+      if (opening === undefined) return
+      const env = await opening.catch(() => undefined)
+      await env?.dispose()
+    })().catch((error: unknown) => {
+      const detail = error instanceof Error ? error.message : String(error)
+      this.logger.warn(`multi-root remote: SFTP session ${environmentId} cleanup failed: ${detail}`)
+      throw error
+    }).finally(() => { this.cleanups.delete(disposal) })
+    const record = { opening, disposal }
+    this.sftpDisposals.set(environmentId, record)
+    this.cleanups.add(disposal)
+    void disposal.catch(() => {})
+    return disposal
   }
 
   /** A copy owns its SFTP channel; interrupted requests cannot close a sibling's. */
   async openTransferSftp(environmentId: string, signal: AbortSignal, expectedDigest?: string): Promise<SftpEnvironment & { live(): boolean }> {
+    this.assertOpen()
     signal.throwIfAborted()
     this.requireEnvironmentDigest(environmentId, expectedDigest)
     if (this.transferSessions.size >= 32) throw new SshEnvironmentError('transfer-unavailable', 'too many active SFTP endpoints')
     const session = new AbortController()
-    this.transferSessions.set(session, environmentId)
+    const settled = Promise.withResolvers<void>()
+    const record = { environmentId, settled: settled.promise }
+    this.transferSessions.set(session, record)
     const disown = () => { this.transferSessions.delete(session) }
     const openingSignal = AbortSignal.any([session.signal, signal])
+    let disposal: Promise<void> | undefined
     try {
       const env = await this.openSftpFresh(environmentId, disown, openingSignal)
-      const dispose = async () => {
+      const dispose = (): Promise<void> => disposal ??= (async () => {
         session.signal.removeEventListener('abort', close)
         disown()
-        await env.dispose()
-      }
-      const close = () => { void dispose() }
+        try {
+          await env.dispose()
+        } catch (error) {
+          const detail = error instanceof Error ? error.message : String(error)
+          this.logger.warn(`multi-root remote: transfer ${environmentId} cleanup failed: ${detail}`)
+          throw error
+        } finally { settled.resolve() }
+      })()
+      const close = (): void => { void dispose().catch(() => {}) }
       session.signal.addEventListener('abort', close, { once: true })
-      if (openingSignal.aborted) {
+      if (this.closed || openingSignal.aborted) {
         await dispose()
+        if (this.closed) throw new SshEnvironmentError('remote-unavailable', 'the SSH environment manager is closed')
         openingSignal.throwIfAborted()
       }
       return { ...env, live: () => this.transferSessions.has(session), dispose }
     } catch (error) {
       disown()
+      settled.resolve()
       throw error
     }
   }
 
   /** Same ordered refusals as open(), then the SFTP handshake + publish extensions. */
   private async openSftpFresh(environmentId: string, onLoss: () => void, signal?: AbortSignal): Promise<SftpEnvironment> {
+    this.assertOpen()
     const environment = this.manifest.environments.find(entry => entry.environmentId === environmentId)
     if (environment === undefined) throw new SshEnvironmentError('unknown-environment', `no manifest environment "${environmentId}"`)
-    if (this.gate.status !== 'eligible') {
-      throw new SshEnvironmentError(`ssh-capability-absent:${this.gate.status === 'absent' ? this.gate.reason : 'unknown'}`, 'SSH capability is not eligible on this host')
-    }
+    this.requireGate()
     // The SFTP session is the transfer adapter, not the environment's exec
     // transport: a helper environment that declares `transfer` uses the same
     // alias's SFTP subsystem, and a device may be SFTP-only.
@@ -400,8 +528,13 @@ export class SshEnvironmentManager {
         client.dispose()
         throw new SshEnvironmentError('publish-unsupported', `environment "${environmentId}" lacks hardlink/fsync extensions`)
       }
+      if (this.closed) {
+        client.dispose()
+        throw new SshEnvironmentError('remote-unavailable', 'the SSH environment manager is closed')
+      }
       this.logger.debug(`[sftp-env] ${environmentId} ready extensions ${Object.keys(version.extensions).join(',')}`)
-      return { environmentId, generation: randomUUID(), client, version, dispose: async () => client.dispose() }
+      let disposal: Promise<void> | undefined
+      return { environmentId, generation: randomUUID(), client, version, dispose: () => disposal ??= Promise.resolve(client.dispose()) }
     } catch (error) {
       client.dispose()
       throw error
@@ -410,11 +543,10 @@ export class SshEnvironmentManager {
 
   /** The full ordered admission: gate → transport → isolation → identity → load → mount. */
   private async openFresh(environmentId: string, bindingPath?: string): Promise<SshEnvironment> {
+    this.assertOpen()
     const environment = this.manifest.environments.find(entry => entry.environmentId === environmentId)
     if (environment === undefined) throw new SshEnvironmentError('unknown-environment', `no manifest environment "${environmentId}"`)
-    if (this.gate.status !== 'eligible') {
-      throw new SshEnvironmentError(`ssh-capability-absent:${this.gate.status === 'absent' ? this.gate.reason : 'unknown'}`, `SSH capability is not eligible on this host`)
-    }
+    this.requireGate()
     if (environment.transport !== 'helper') throw new SshEnvironmentError('transport-not-helper', `environment "${environmentId}" uses transport "${environment.transport}"`)
     // A helper installed before full-artifact integrity has no entry point to
     // verify its file set: refuse rather than trust the single-file digest.
@@ -431,10 +563,18 @@ export class SshEnvironmentManager {
     }
     const identity = await this.verifyHostIdentity(environment)
     const connection = environment.connection
+    let launchEntry = connection.helperPath!
     if (this.personalCustody) {
-      await verifyHelperEntry(this.exec, connection.host, connection.nodePath!, connection.helperPath!, environment.helper!.treeSha256!)
+      const verified = await verifyHelperEntry(this.exec, connection.host, connection.nodePath!, connection.helperPath!, environment.helper!.treeSha256!)
+      const psk = clientPskPlan()
+      if (psk.kind === 'fallback' && !verified.current) {
+        throw new SshEnvironmentError('helper-outdated', 'the recorded Helper has no BoringSSL stream entry; reinstall the Helper')
+      }
+      // BoringSSL needs the additive stream-TLS entry; a plain-Node Host keeps
+      // the recorded entry so the OpenSSL-to-OpenSSL path is byte-identical.
+      if (psk.kind === 'fallback') launchEntry = verified.currentPath
     }
-    const modules = await loadHostSshPackages(this.gate) as Record<string, Record<string, unknown> & { default?: Record<string, unknown> }>
+    const modules = await loadHostSshPackages(this.requireGate()) as Record<string, Record<string, unknown> & { default?: Record<string, unknown> }>
     const exported = (pkg: string, name: string) => modules[pkg]![name] ?? modules[pkg]!.default?.[name]
     const ctx = new Context()
     const mount = ctx.plugin.bind(ctx) as (plugin: unknown, config?: unknown) => { dispose(): Promise<void> }
@@ -444,7 +584,7 @@ export class SshEnvironmentManager {
       mount(exported('@deepseek-ai/dsh-ssh', 'SshConnection'), {
         host: connection.host,
         launch: { kind: 'node-script', node: connection.nodePath! },
-        helper: connection.helperPath!, helperHash: environment.helper!.sha256,
+        helper: launchEntry, helperHash: environment.helper!.sha256,
         workspace,
       }),
       mount(exported('@deepseek-ai/dsh-fs-ssh', 'SshFileSystem')),
@@ -463,18 +603,30 @@ export class SshEnvironmentManager {
       if (hello.platform !== environment.platform) {
         throw new SshEnvironmentError('platform-mismatch', `environment "${environmentId}" declares "${environment.platform}" but reports "${String(hello.platform)}"`)
       }
+      if (this.closed) throw new SshEnvironmentError('remote-unavailable', 'the SSH environment manager is closed')
       this.logger.debug(`[ssh-env] ${environmentId} ready as ${identity.user}@${identity.hostname} protocol ${String(hello.protocol)}`)
+      let disposal: Promise<void> | undefined
       const env: SshEnvironment = {
         environmentId, generation: randomUUID(),
         hello: { platform: hello.platform, workspace: hello.workspace, executable: hello.executable, protocol: hello.protocol },
         fs: services.fs, sandbox: services.sandbox as SshEnvironment['sandbox'], subprocess: services.subprocess as SshEnvironment['subprocess'],
         assertAlive: () => services.ssh.assertOpen(),
-        dispose: async () => { for (const fiber of [...fibers].reverse()) await fiber.dispose() },
+        dispose: () => disposal ??= this.disposeFibers(environmentId, fibers),
       }
       return env
     } catch (error) {
-      for (const fiber of [...fibers].reverse()) await fiber.dispose().catch(() => {})
+      await this.disposeFibers(environmentId, fibers)
       throw error
+    }
+  }
+
+  /** Release one environment's fibers in reverse mount order, independently. */
+  private async disposeFibers(environmentId: string, fibers: readonly { dispose(): Promise<void> }[]): Promise<void> {
+    for (const fiber of [...fibers].reverse()) {
+      try { await fiber.dispose() } catch (error) {
+        const detail = error instanceof Error ? error.message : String(error)
+        this.logger.warn(`multi-root remote: environment ${environmentId} teardown failed: ${detail}`)
+      }
     }
   }
 

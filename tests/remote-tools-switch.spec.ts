@@ -3,6 +3,7 @@ import { writeFileSync } from 'node:fs'
 import { createRequire } from 'node:module'
 import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { provideReadySshProfile } from './support/ssh-profile.ts'
 import type { Context } from '@deepseek-ai/cordis'
 import { apply as applyRemoteTools, Config as RemoteToolsConfig, inject } from '../src/remote/tools.ts'
 import { classifyInstallation, classifySshCapability, sshPackageVersion, sshPrivateCopy } from '../src/compat/dsh-version.ts'
@@ -95,6 +96,7 @@ async function mountRow(
     withTools: false,
     remote: { personalPath: join(fixture.base, 'personal.json'), credentialRoot: join(fixture.base, 'cred'), ...options.remote },
   })
+  provideReadySshProfile(world.ctx, fixture.base, world.ctx.multiRootCompat.report.release!)
   probe.remotes = world.remotes
   probe.backends = new Map([['build', fakeExecBackend(world.remotes.get('build')!, FAKE_EXEC)]])
   const live: { enabled: boolean; mode?: string; team?: Record<string, unknown> } = {
@@ -127,6 +129,7 @@ describe.skipIf(process.platform === 'win32')('the remote-tools live switch', ()
       withTools: false,
       remote: { enabled: false, personalPath: join(fixture.base, 'personal.json'), credentialRoot: join(fixture.base, 'cred') },
     })
+    provideReadySshProfile(world.ctx, fixture.base, world.ctx.multiRootCompat.report.release!)
     installSettings(world.ctx, { enabled: false }, seeds)
     // The real row config a loader hands to apply(): Schemastery wraps the
     // volatile `enabled`/`mode` fields, so passing it through unchanged used to

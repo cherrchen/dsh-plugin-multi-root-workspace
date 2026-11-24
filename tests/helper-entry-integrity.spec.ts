@@ -19,7 +19,7 @@ import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
 import { readInstalledVersion, sshPackageRoot, sshPackageVersion, SUPPORTED_SSH_RELEASES } from '../src/compat/dsh-version.ts'
-import { renderHelperEntry, treeDigestSource, verifyHelperEntry } from '../src/remote/personal/operations.ts'
+import { helperEntryCurrentPath, renderHelperEntry, renderLegacyHelperEntry, treeDigestSource, verifyHelperEntry } from '../src/remote/personal/operations.ts'
 
 const hostRelease = readInstalledVersion('@deepseek-ai/dsh')
 const supportsSsh = SUPPORTED_SSH_RELEASES.some(release => release === hostRelease)
@@ -115,11 +115,18 @@ describe.skipIf(!sshPlatform || !supportsSsh)('helper-entry.mjs real launch', ()
   })
 })
 
-it('compares the installed launch entry against the Host-owned tree digest', async () => {
+it('compares the recorded entry and the additive stream entry against Host-owned digests', async () => {
   const tree = 'a'.repeat(64)
-  const digest = createHash('sha256').update(renderHelperEntry(tree)).digest('hex')
+  const legacy = createHash('sha256').update(renderLegacyHelperEntry(tree)).digest('hex')
+  const current = createHash('sha256').update(renderHelperEntry(tree)).digest('hex')
   const probe = (stdout: string) => async () => ({ stdout })
-  await expect(verifyHelperEntry(probe(digest), 'test-host', '/node', '/entry.mjs', tree)).resolves.toBeUndefined()
-  await expect(verifyHelperEntry(probe('b'.repeat(64)), 'test-host', '/node', '/entry.mjs', tree))
+  const currentPath = helperEntryCurrentPath('/entry.mjs')
+  await expect(verifyHelperEntry(probe(JSON.stringify({ legacy, current })), 'test-host', '/node', '/entry.mjs', tree))
+    .resolves.toEqual({ entryPath: '/entry.mjs', currentPath, current: true })
+  await expect(verifyHelperEntry(probe(JSON.stringify({ legacy, current: '' })), 'test-host', '/node', '/entry.mjs', tree))
+    .resolves.toEqual({ entryPath: '/entry.mjs', currentPath, current: false })
+  await expect(verifyHelperEntry(probe(JSON.stringify({ legacy: 'b'.repeat(64), current })), 'test-host', '/node', '/entry.mjs', tree))
+    .rejects.toMatchObject({ code: 'helper-hash-mismatch' })
+  await expect(verifyHelperEntry(probe('not json'), 'test-host', '/node', '/entry.mjs', tree))
     .rejects.toMatchObject({ code: 'helper-hash-mismatch' })
 })

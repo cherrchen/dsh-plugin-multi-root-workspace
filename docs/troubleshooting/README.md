@@ -21,6 +21,7 @@ English: [README.en.md](./README.en.md)
 
 - [client bundle 不进 web 启动图：bundle patch 只挂子路径行](./client-bundle-not-in-boot-graph.md) — footer 槽位注册静默失效的根因与修复。
 - [面板报"无法连接到 dsh 主进程"（HTTP 405）](./panel-channel-http-405.md) — 通道注册被 cordis 服务解析静默吞掉的根因与修复。
+- [登记远端目录报 `NO_CIPHER_MATCH`](./ssh-stream-cipher-boringssl.md) — Electron/BoringSSL 不实现上游固定的 GCM-PSK 套件，Host 在本地创建 TLS 上下文时失败；插件在两端追加 ChaCha20-PSK fallback。
 - [面板 SSH 区块只显示“操作失败。”](./ssh-panel-operation-failed.md) — Schemastery volatile 字段泄漏成 `custodyMode` 对象，导致整个远端视图解析失败。
 - [根目录登记被另一个 DSH 进程占用](./registry-owned-by-another-process.md) — 两进程共用 `$DSH_HOME` 时的 fail-closed lease 与接管方式。
 - [DSH 版本不在支持矩阵上](./unsupported-dsh-release.md) — `unsupported` / `mixed` / `incomplete` 三种判定、provider 不启动的原因，以及人工提升新版本的流程。

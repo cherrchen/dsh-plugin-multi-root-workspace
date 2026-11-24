@@ -6,34 +6,25 @@
  * @module @dsh-electron/dsh-plugin-multi-root-workspace/client/wizard/env-parts
  */
 import type { ReactNode } from 'react'
+import { isRemoteNodePath, remoteNodeVersionStatus } from '../../remote/ssh-diagnostics.ts'
 import { Input } from '@deepseek-ai/dsh-client-ui-primitives'
 import type { CredentialPublicView, SshEnvironmentView, SshScanResult } from '../ssh-client.ts'
 import type { ConnectField, EditorDraft } from '../ssh-draft.ts'
 import { IconCheck } from '../../compat/client-icons.ts'
 import { SshButton as Button } from '../panel-buttons.tsx'
+import type { Key } from '../locales.ts'
 import type { Translate } from '../WorkspaceFoldersAction.tsx'
 import { ChecklistRow, ChoiceCard, WizardCheckbox, WizardField, WizardPicker } from './kit.tsx'
 
-/** The remote node major helper install needs — v20 already fails it in practice. */
-export const REMOTE_NODE_MIN_MAJOR = 24
-
-/** What a remote node probe says about helper readiness. */
 export interface NodeCheck {
-  readonly kind: 'ok' | 'missing' | 'old'
+  readonly kind: 'ok' | 'missing' | 'old' | 'invalid' | 'invalid-path'
   readonly version: string | undefined
 }
 
-/**
- * Classify one `environmentTest` answer. An unparsable version still counts as
- * "node found": the helper's own launch is the last word, the check only
- * guards the cases detection can already rule out.
- */
 export function nodeCheckOf(result: { readonly nodePath?: string | undefined; readonly nodeVersion?: string | undefined }): NodeCheck {
   if (result.nodePath === undefined) return { kind: 'missing', version: undefined }
-  const major = Number.parseInt(result.nodeVersion?.replace(/^v/, '').split('.')[0] ?? '', 10)
-  return !Number.isNaN(major) && major < REMOTE_NODE_MIN_MAJOR
-    ? { kind: 'old', version: result.nodeVersion }
-    : { kind: 'ok', version: result.nodeVersion }
+  if (!isRemoteNodePath(result.nodePath)) return { kind: 'invalid-path', version: undefined }
+  return { kind: remoteNodeVersionStatus(result.nodeVersion), version: result.nodeVersion }
 }
 
 /** The selected-marker glyph: the host check icon where it exists. */
@@ -212,14 +203,17 @@ export function EnvironmentSetup(props: {
       <ChecklistRow
         state={pending === 'helper' ? 'ongoing' : helperMissing ? 'warning' : 'done'}
         label={helperMissing ? t('ssh.helperMissing') : t('ssh.helperInstalled')}
-        detail={props.nodeCheck === undefined || props.nodeCheck.kind === 'old' ? undefined
-          : props.nodeCheck.kind === 'missing' ? t('ssh.node.missing')
-            : t('ssh.node.ok', { version: props.nodeCheck.version ?? '?' })}
+        detail={props.nodeCheck === undefined ? undefined : props.nodeCheck.kind === 'ok'
+          ? t('ssh.node.ok', { version: props.nodeCheck.version })
+          : t({
+            old: 'error.node-too-old', missing: 'ssh.node.missing',
+            'invalid-path': 'error.helper-node-path', invalid: 'error.helper-node-version',
+          }[props.nodeCheck.kind] as Key)}
         action={helperMissing ? (
           <span className="mrfw-sshRowActions">
             <Button variant="outline" size="sm" disabled={busy} loading={props.detecting}
               onClick={props.onDetect}>{t('ssh.add.detectNode')}</Button>
-            <Button variant="primary" size="sm" disabled={busy} loading={pending === 'helper'}
+            <Button variant="primary" size="sm" disabled={busy || (props.nodeCheck !== undefined && props.nodeCheck.kind !== 'ok')} loading={pending === 'helper'}
               onClick={props.onInstallHelper}>{t('ssh.helperInstall')}</Button>
           </span>
         ) : undefined} />

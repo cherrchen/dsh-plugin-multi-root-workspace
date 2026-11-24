@@ -238,3 +238,8 @@
 - **peer-only 副本**：升级脚本只重指直接依赖与 release-age 条目，仍可能留下以旧 rc 副本满足精确 peer 边的“看似有效”边；`pnpm dedupe` / `--force` / `--lockfile-only` 都不会改写它们。必须以 `pnpm peers check` 与 lockfile 中旧 rc 副本计数为准（本轮均为 0）。
 - **联网搜索不是插件面**：rc.5 的搜索 provider 选择发生在 `ctx.web` 与 `dsh-tool-web` 内；插件不注册 provider、不包装服务、不实现联网工具，不要为它新增版本判断或适配器分支，也不要假设 `WebSearchRequest` 新增了路由字段（新参数只在上游 tool-web 内部传递）。
 - **编译 pin 前移的依据是源码树 hash，不是版本号**：只有 reviewer `src` 逐字节相同才允许把编译 pin 移到新发布；上游若改 reviewer 源码，必须重做该基线的 fork 而不是只改 pin。
+
+
+### SSH 依赖的 Profile 管理
+
+`0.2.2-rc.1` 至 `rc.5` 的 CLI 支持在当前 Profile 安装普通 npm 依赖。SSH 四包仍是插件的可选 peer，精确版本集合及本地兼容门禁沿用现有契约。运行时从当前安装闭包或经核对的 Profile 路径解析，修复后重启 Host。机制、状态及用户步骤入口见 [SSH 技术参考](./ssh-remote-environments.md#host-profile-依赖)。

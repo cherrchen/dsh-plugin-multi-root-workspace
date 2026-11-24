@@ -9,7 +9,8 @@ import { PendingBar, StatusLine } from './pending.tsx'
 import { sshLocation, sshTarget } from '../remote/ssh-location.ts'
 import { RemoteRootConfirm } from './remote-root-confirm.tsx'
 import { PanelError } from './panel-client.ts'
-import { PanelErrorToast } from './error-toast.tsx'
+import { PanelErrorToast, SshErrorDetail } from './error-toast.tsx'
+import { SshDependencyNotice } from './ssh-dependencies.tsx'
 import type { CredentialPublicView, SshBindingView, SshClient, SshManagementClient, SshEnvironmentView, SshScanResult, SshStateView } from './ssh-client.ts'
 import {
   bindingDraftOf, blankBinding, editorIdentity, editorOf, environmentDraftOf, execHelperReady,
@@ -607,6 +608,7 @@ export interface SshManagementDialogProps {
   /** Plugin settings owns the global connection inventory and requires no session. */
   readonly fromSettings?: boolean
   readonly overviewError?: PanelError | undefined
+  readonly dependencies?: RemotesView['dependencies']
   /** The live session; the host derives the primary root from it. */
   readonly sessionId: string | undefined
   /** The control plane's live custody mode. */
@@ -652,7 +654,8 @@ export function SshManagementDialog(props: SshManagementDialogProps): ReactNode 
   useEffect(() => { setTab(props.initialTab) }, [props.initialTab])
 
   const canRequest = sessionId !== undefined || props.fromSettings === true
-  const canManage = custodyMode === 'personal' && status?.state === 'ready' && ssh !== undefined && canRequest
+  const blocked = props.dependencies !== undefined && props.dependencies.code !== 'ready'
+  const canManage = !blocked && custodyMode === 'personal' && status?.state === 'ready' && ssh !== undefined && canRequest
   // Change identity during render: an old promise must not win the gap before
   // the reset effect runs, including when SSH becomes unavailable.
   const scope = useMemo(() => ({}), [sessionId, custodyMode, canManage, ssh])
@@ -1060,7 +1063,9 @@ export function SshManagementDialog(props: SshManagementDialogProps): ReactNode 
   </section>
 
   const renderManagement = (): ReactNode => {
-    if (props.overviewError !== undefined) return <><PanelErrorToast error={props.overviewError} t={t} /><p className="mrfw-note">{t('ssh.loadFailed')}</p></>
+    if (props.overviewError !== undefined) return <><PanelErrorToast error={props.overviewError} t={t} />
+      <p className="mrfw-note">{t('ssh.loadFailed')}</p><Button onClick={props.onChanged}>{t('ssh.recheckDependencies')}</Button></>
+    if (blocked) return <SshDependencyNotice view={props.dependencies!} onCheck={props.onChanged} t={t} />
     if (status === undefined) return <p className="mrfw-note">{t('ssh.add.loading')}</p>
     if (status.state !== 'ready') return renderUnavailable()
     if (custodyMode !== 'personal' || ssh === undefined) return <p className="mrfw-note">{t('ssh.add.noClient')}</p>
@@ -1070,7 +1075,7 @@ export function SshManagementDialog(props: SshManagementDialogProps): ReactNode 
   }
 
   return <>
-    <PanelErrorToast error={error} t={t} />
+    <PanelErrorToast error={error?.ssh === undefined ? error : undefined} t={t} />
     <SshSettingsShell
       title={t('ssh.dialog.title')}
       closeLabel={t('panel.close')}
@@ -1083,6 +1088,7 @@ export function SshManagementDialog(props: SshManagementDialogProps): ReactNode 
           <h3 id={headingId}>{t(tab === 'connections' ? 'ssh.environments' : 'ssh.credentials')}</h3>
           <p>{t(tab === 'connections' ? 'ssh.connections.personalGuide' : 'ssh.keys.personalGuide')}</p>
         </div>
+        <SshErrorDetail error={error} t={t} />
         {renderManagement()}
       </section>
     </SshSettingsShell>

@@ -18,7 +18,7 @@ import { SshButton as Button } from '../panel-buttons.tsx'
 import { localBindingPeers } from '../remote-root-menu.tsx'
 import { CredentialsPanel, platformLabel, type CredentialCreateKind } from '../ssh-panel.tsx'
 import { PanelError } from '../panel-client.ts'
-import { ErrorToast, PanelErrorToast } from '../error-toast.tsx'
+import { ErrorToast, PanelErrorToast, SshErrorDetail } from '../error-toast.tsx'
 import { PendingBar, StatusLine } from '../pending.tsx'
 import { CheckMark, ChoiceCard, WizardActions, WizardCheckbox, WizardField, WizardShell } from './kit.tsx'
 import { ConnectForm, EnvironmentSetup, HostKeyPick, nodeCheckOf, type NodeCheck } from './env-parts.tsx'
@@ -337,7 +337,6 @@ export function RemoteWizard(props: RemoteWizardProps): ReactNode {
       setTestResult(result.nodePath ?? 'ok')
       const check = nodeCheckOf(result)
       setNodeCheck(check)
-      if (check.kind === 'old') setError(new PanelError('node-too-old', check.version ?? ''))
     } catch (cause) {
       if (!signal.aborted) {
         setTestResult(undefined)
@@ -524,6 +523,7 @@ export function RemoteWizard(props: RemoteWizardProps): ReactNode {
           icon={<IconPlus size={16} />}
           disabled={busy}
           onSelect={() => { setEnvPane('create'); setAttempted(new Set()) }} />
+        <SshErrorDetail error={error} t={t} />
         {selected !== undefined ? (
           <EnvironmentSetup
             environment={selected}
@@ -661,7 +661,7 @@ export function RemoteWizard(props: RemoteWizardProps): ReactNode {
       complete={done}
       footer={footer}
     >
-      <PanelErrorToast error={error} t={t} />
+      <PanelErrorToast error={error?.ssh === undefined ? error : undefined} t={t} />
       {body}
     </WizardShell>
     {credsOpen && view !== undefined ? (

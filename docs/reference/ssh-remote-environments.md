@@ -6,6 +6,34 @@
 
 当前公开构建只提供个人 SSH。默认组合通过 `multi-root-remote-tools.enabled` 开关启用，默认关闭。启用后，Host 从 `remoteEnvironments.personalPath` 读取连接，从 `remoteEnvironments.credentialRoot` 读取插件托管的凭据；也可引用本机 `~/.ssh/config` 中的别名。个人模式下，本机 DSH Host 持有凭据，同一操作系统账号下的进程可能访问这些凭据。
 
+### Host Profile 依赖
+
+- `SUPPORTED_SSH_RELEASES` 是 SSH 支持的精确版本真源。四个官方包分别为 `@deepseek-ai/dsh-ssh`、`@deepseek-ai/dsh-fs-ssh`、`@deepseek-ai/dsh-subprocess-ssh` 和 `@deepseek-ai/dsh-sandbox-ssh`，都须与当前 Host 同版。它们在插件 manifest 中仍是 optional peers，局部安装故障只阻断 SSH。
+- 上游 Profile 使用 `nodeLinker: hoisted`、`autoInstallPeers: false`。CLI 的 `dsh plugin --profile <name> add` 支持普通 npm 依赖，并将它们写入该 Profile 的 `package.json` 与锁文件，安装到该 Profile 的 `node_modules`。Bundle 选择保持原样。官方安装闭包为共用包提供回退。运行中 Plugin Manager 的 Bundle 安装接口拒绝普通包。决策依据见 [ADR-0049](../decisions/ADR-0049-ssh-custody-modes.md)。
+- 发布 tarball 带 `scripts/install-ssh-deps.mjs` 与构建入口 `lib/install-ssh-deps.js`。命令由 `src/compat/ssh-profile.ts` 从可信安装上下文生成：Desktop 使用 `process.resourcesPath/runtime/cli/bin/dsh`，脚本本身由 `ELECTRON_RUN_AS_NODE=1 <应用可执行文件>` 启动（`runtime/bin/node` 依赖 Desktop 启动器注入的 `DSH_DESKTOP_NODE_EXECUTABLE`，普通终端不可用）；Web 从 `profileContext.installAnchor` 指向的 `@deepseek-ai/dsh` manifest 解析 `bin.dsh`，并复用当前进程的 Node。命令携带脚本、精确 CLI、Profile、DSH Home 与 Host 版本；脚本先运行一次 `dsh --version` 核对版本、校验 Profile 位于该 Home 且不是重定向目录，然后以结构化 argv 执行一次 `dsh plugin --profile <name> add --save-exact`，绝不从调用方接收包名。四包已对齐时直接报告已就绪，不再次写入；版本不符、Profile 不在该 Home、Desktop Profile 未初始化或版本不在 `SUPPORTED_SSH_RELEASES` 时返回诊断并停止。路径中的空格、单引号与非 ASCII 字符由 POSIX 引用与 argv 传递共同支持。
+- 插件优先使用上游发布的安装闭包中的 SSH 包，否则从当前 Profile 的直接依赖中解析。Profile 副本的模块入口必须位于对应包目录，DSH/Cordis peers 必须指向当前安装闭包，SSH 包间的 peer 必须指向同一组副本。插件私有副本只用于诊断。启动时记录的包位置和身份与现状不同则要求重启。重新检测只读取状态，开关、工具启动及 RPC 均不会运行本地包管理器。
+- Settings 的 `status` 和工作区的 `remotes` 可返回 `dependencies`，含 Host 版本、Profile 名称、每包状态和可选的精确安装命令。仅在启动器目录对应 CLI 管理的 Profile 且能确定唯一目标 CLI 时生成命令；否则返回诊断。三种结果分开：本次写入成功（安装完成）、磁盘已对齐但当前进程仍需重启（`ssh-deps-restart`）、当前 Host 已能解析四包（`ready`）。用户步骤见[个人 SSH 指南](../guide/user/ssh-remote-environments.md#安装当前-profile-的-ssh-依赖)。
+
+### Desktop 一键安装的启动器接缝
+
+客户端只在 `view.code` 为 `ssh-deps-missing` 或 `ssh-deps-partial`、且启动器显式声明能力时显示 **安装并重启**。能力对象是 `window.dshDesktop.sshDependencies`（Rivetdeck 桥为 `window.deepseekDesktop.sshDependencies`），形状固定为：
+
+```ts
+{
+  protocolVersion: 1,
+  install(request: { profile: string; release: string }): Promise<{
+    status: 'ready' | 'installed' | 'restart-required',
+    profile: string,
+    release: string,
+  }>,
+  subscribe(listener: (phase: 'stopping' | 'installing' | 'restarting' | 'checking' | 'done') => void): () => void,
+}
+```
+
+启动器必须用自己的可信状态校验请求的 Host、Profile 与版本（不接收包名、argv 或任意命令），合并或拒绝同一 Profile 的并发请求；先停止目标 Host 并等待退出，再复用 `scripts/install-ssh-deps.mjs` 的安装核心，最后以原配置重启同一 Profile，并在每个阶段发出上述事件。停止失败必须结束请求；安装失败且 Host 已停止时尝试恢复启动并保留可重试诊断；新 Host 启动后由既有 `dependencies` 检测确认四包解析与加载，未就绪时继续显示依赖提示。
+
+**当前阻塞点**：本仓库的硬约束是不修改上游 `deepseek-harness` 任何包，而 `dsh-v0.2.2-rc.5` 的 `apps/desktop` 只暴露 `dshDesktop` 的既有 IPC（文件、更新、快捷键、浏览器、目录选择等），没有 Profile 安装或 Host 停止/重启的桥接口；实际启动器也不在本仓库。因此 Web 与当前 Desktop 不显示该按钮，客户端保留复制命令与重新检测。接入方只需在启动器主进程按上述对象实现能力并通过 preload 暴露；插件侧无需再改协议。
+
 ### 停用的旧配置
 
 Host 将显式的 `team`、`hardened` 或其他不支持的模式视为停用。旧版配置了部署清单且未显式指定个人模式的 Registry 行、以及仅配置 broker 或 team 参数而未指定模式的工具行，同样保持停用。发布包移除了 SSH broker 入口和安装脚本。Broker 设计留作研发记录，见 [ADR-0049](../decisions/ADR-0049-ssh-custody-modes.md) 和[控制面参考](./multi-environment-control-plane.md)。
@@ -66,14 +94,20 @@ SFTP 使用独立的 SSH 子进程，同样在命令行强制 `StrictHostKeyChec
 
 ## Helper 安装与密码访问密钥引导
 
-- Helper 安装使用与 Host 同版的 `@deepseek-ai/dsh-ssh`。Host 逐个比对包内 `lib/*`，并记录安装后 `node_modules` 文件集摘要 `treeSha256`。打开新连接前，Host 先验证远端入口脚本与由该摘要重建的脚本一致。入口脚本启动时重新验证文件集，再加载 Helper。上游 hello 仍以 `helper.sha256` 校验 `helper.js`。早于 `integrity: 2` 的 personal Helper 需要重新安装。该检查信任 SSH 对端和首次 npm 安装，后续校验由 Helper 入口执行。
+- Helper 安装使用与 Host 同版的 `@deepseek-ai/dsh-ssh`。Host 逐个比对包内 `lib/*`，并记录安装后 `node_modules` 文件集摘要 `treeSha256`。打开新连接前，Host 先验证远端入口脚本与由该摘要重建的脚本一致。入口脚本启动时重新验证文件集，再加载 Helper。上游 hello 仍以 `helper.sha256` 校验 `helper.js`。记录格式保持 `integrity: 1 | 2`；安装同时部署 `helper-entry.mjs`（beta.2 的逐字节模板，供回退与 plain Node Host）和 `helper-entry-v3.mjs`（在加载上游 Helper 前给固定的 `PSK-AES256-GCM-SHA384` 追加 `ECDHE-PSK-CHACHA20-POLY1305`，供 BoringSSL Host）。记录里的 `helperPath` 仍指向 `helper-entry.mjs`，所以重装不改变 `bindingDigest`，已登记 Root 不会变成 `withheld`，也不需要重新登记；Desktop 遇到没有 v3 入口的旧 Helper 报 `helper-outdated`，重装一次即可。详见 [ADR-0051](../decisions/ADR-0051-ssh-stream-psk-boringssl-fallback.md)。该检查信任 SSH 对端和首次 npm 安装，后续校验由 Helper 入口执行。
+- Helper 需要远端 Linux 或 macOS、Node.js ≥ 24.9.0、npm 和可写的 `~/.dsh-helper/<version>`。Host 首先检查依赖、已有 revision 和已保存别名身份。远端预检查确认平台、规范化绝对路径、Node 版本、npm 及目标或最近现存父目录权限，然后执行一次 npm 安装。安装验证通过后以原子替换部署入口，最后按原 revision CAS 登记 Helper。收到不确定结果时不重发写操作。
+- RPC 在既有 `{ code, message, details }` 的 `details` 中附带 `stage`、`retryable`、`remediation`、可选退出码、版本和远端完成/登记状态。错误阶段为 `host-preflight`、`ssh-connect`、`remote-prerequisites`、`remote-install`、`artifact-verification`、`entry-generation`、`config-commit`。npm 诊断使用结构化结果。OpenSSH 退出 255 时仅识别明确的标准诊断，详情仅包含安全摘录。未识别的退出归到独立的未知错误。远端已安装或已校验与 Host 已登记分别记录。
 - 编辑连接：派生的 `accessKeyId` 由 Host 从已保存记录保留，前端无需回传；仅 environmentId、hostname/port/user、credentialId 与已确认主机指纹均未变化时继承。改变身份后必须重新安装访问密钥，不能通过保存请求移植旧密钥。
 - 密码引导先做 revision 预检，然后固定已确认的主机公钥、账号及一次性密码副本。远端按公钥精确、串行地更新 `authorized_keys`。保存冲突时，目标身份和访问密钥引用均未变化才允许复用密钥重试一次。仍失败则用同一目标回滚远端条目，再删除本地密钥。如果远端无法确认回滚或读不出持久状态，返回 `access-key-reconcile-required`，保留该密钥记录及核对编号。
 - 私钥导入：带口令的私钥经 `SSH_ASKPASS`/`SSH_ASKPASS_REQUIRE=force`（凭据根内私有临时目录中的 0600 口令文件 + 0700 脚本，用完即删）把旧口令交给 `ssh-keygen -p` 解密后重新保存，口令不进入命令行参数；材料或口令被拒报 `credential-import-failed` 并清除半成品密钥文件。
 
-## 实时开关
+## 实时开关与卸载清理
 
-启用通过 `configureRemote` 加载个人连接和工作区目录绑定。停用时先卸载工具子树并以取消信号收束在飞操作，再关闭远端域与 IPC。
+启用通过 `configureRemote` 加载个人连接和工作区目录绑定。停用时先停止接纳新的 SSH 操作，取消并收束在途传输、连接和 Helper，再按依赖逆序拆除 fiber。
+
+管理器的关闭是一个幂等事务：`disposeAll()` 在第一次调用时置为关闭状态，后续与并发的重复调用共享同一完成；`open`、`openSftp` 与 `openTransferSftp` 在进入和异步完成后都检查关闭状态，关闭开始后才完成的连接会被立即释放并拒绝返回。传输先中止并等待各自的收束，随后 Helper 与 SFTP 会话逐项独立清理：一个 Helper、SFTP 会话或 fiber 失败只记录带资源标识的警告，其余资源继续释放。fiber 按反向挂载顺序拆除（sandbox → subprocess → fs → ssh → policy → projections），单个 fiber 失败不阻止后续 fiber。
+
+清理同时保护转发流的事件逃逸。上游 `SshConnection` 在 TLS 认证的 `secureConnect` 上移除一次性的 `error` 监听，之后才挂上连接的永久监听；连接丢失若落在这一窗口，`socket.destroy(error)` 会让 Node 以未处理的 `'error'` 事件终止进程。插件在 `tls.connect` 返回时同步给上游转发流套接字附加一个只吞掉未处理错误的监听（精确匹配上游 stream 选项形状），它不替换连接自身的监听、不改变真实掉线的失效与上报，也不安装进程级 `uncaughtException` 处理器。该保护在 native 与 BoringSSL 运行时都安装，且先于任何 abort 回调可运行。
 
 personal 子树首次等到控制面就绪再挂载，常规配置保存更新现有管理器。环境授权身份改变时只废弃该环境的 SFTP 与 Helper 代次。绑定编辑交由准入指纹失效，已无绑定引用的目录 Helper 在撤权复核后回收。其他环境和仍有效的目录可继续使用已有连接。
 
@@ -119,7 +153,7 @@ GUI 入口有两处：
 **开关默认值**（GUI 勾选"允许命令执行"/"允许文件传输"时写入的完整节，见上文文件 schema）：
 
 ```jsonc
-// exec
+// exec（新草稿；已保存的连接保留它自己的上限）
 { "shell": ["/bin/sh", "-c"], "env": { "PATH": "/usr/local/bin:/usr/bin:/bin" },
   "maxTimeoutMs": 600000, "stdoutLimit": 1048576, "stderrLimit": 262144, "terminateGraceMs": 2000 }
 // transfer
@@ -129,6 +163,22 @@ GUI 入口有两处：
 所有变更请求携带当前 `revision`；`personal-config-conflict` 时前端先重取 `sshState` 再显示本地化冲突文案。服务端错误一律经 `error.*` 本地化渲染。
 
 exec 与 transfer 独立授权：执行前用 helper 的只读受限 stat/realpath 探针分别验证根与 cwd；无需 transfer 配置或 SFTP 发布扩展。重定向目录和越界 cwd 在命令准备前拒绝。
+
+## 模型工具：参数、结果与输出预算
+
+`remote_copy` 与 `remote_bash` 广告的 JSON Schema 与 execute 边界的实际校验来自同一份声明（`src/remote/tool-arguments.ts`）：缺字段、错误类型、未知字段与嵌套对象都在工具层以带字段位置的 `invalid-arguments` 结束，早于 Registry 准入与任何 SSH/SFTP I/O。
+
+**`remote_copy` 端点。** `from` 与 `to` 使用同一定义 `{environmentId?, rootId, relativePath}`，两侧规则相同：只有**省略** `environmentId` 才取 `local`，`null` 与空串是参数错误；远端端点必须显式给出环境 ID。本地主根写作 `environmentId: "local"` + `rootId: "primary"`（可省略 environmentId，即 `local:primary`），附加根使用登记的 `aliasId`。`relativePath` 是单个普通文件的规范化相对 POSIX 路径。上传示例 `{"from":{"rootId":"primary","relativePath":"dist/app.tar"},"to":{"environmentId":"build","rootId":"app","relativePath":"in/app.tar"}}`；下载示例 `{"from":{"environmentId":"build","rootId":"app","relativePath":"out/app.tar"},"to":{"rootId":"primary","relativePath":"dist/app.tar"}}`。
+
+**`remote_bash` 参数。** `environmentId` 必填且必须命名远端环境（`"local"` 是参数错误）；`rootId` 是登记的绑定根，`cwdRelative` 相对它（`""` 或省略表示根目录本身）；`timeoutMs` 是整数毫秒；`maxOutputBytes` 是可选单流预览上限。工具名与 Session 只取自调度上下文，模型参数里的同名字段作为未知字段被拒绝。
+
+**结果文案。** 两个工具保留既有 `status`/`code`/`stage`/`staging`/`operationId`/`reconcileId` 语义，并为可诊断的失败增加有界 `message` 与 `hint`：文案只由稳定错误码与安全字段（环境/根 ID、相对路径、已准入的 displayPath、候选列表）生成，不包含捕获到的异常文本、SSH 诊断原文或凭据路径。`invalid-cwd` 的提示说明 `cwdRelative` 为空表示已准入根目录（附 displayPath），否则必须是规范化相对路径；`destination-parent-missing` 指明缺失的是目标父目录；`local-root-unavailable` 说明 `primary` 与 `aliasId` 的写法。
+
+**端点候选。** 端点类错误可以附上每个方向最多 6 个 `environmentId:rootId`。候选读取当前 Session 主根对应的 Registry 快照（`remoteList`）与当前清单，筛选已登记且允许所需动作的远端。复制候选还要符合会话模式、工具上限与对端配对。两个远端之间必须同时有源的 `export` 和目的的 `import`。本地端可以是 `local:primary` 或可用的本地附加根，须被对应远端绑定列为对端，本地目的端须可写。读取不建连，也不消耗准入。快照不可用时仍返回原错误码与通用提示，每次重试走正式准入。
+
+**输出预算。** `remote_bash` 默认给 stdout 和 stderr 各 64 KiB 预览预算，原始窗口和 JSON 字符串内容分别受同一上限约束。默认最多传给模型 128 KiB 的两路 JSON 输出内容，另有结果字段开销。`maxOutputBytes` 可调节单流预算，受到该流的部署上限约束。新个人 SSH 连接保留 stdout 1 MiB、stderr 256 KiB 的部署上限，已保存连接沿用原配置。
+
+结果逐流报告 `truncated`、`totalBytes` 与 `droppedBytes`。`totalBytes` 是后端能证明的原始字节总数。`droppedBytes` 从该总数扣除实际进入预览的原始字节数，包含上游丢头、UTF-8 尾部舍弃及 JSON 预算裁剪。SSH 采集窗口含 U+FFFD 时，适配器保留上游文本，精确总数仍可返回，无法核实的丢弃量为 `null`。采集器未提供坐标时两项计数均为 `null`。大输出的处理示例见[用户指南](../guide/user/ssh-remote-environments.md#使用远端工具)。
 
 ## 在飞命令撤权与清理
 

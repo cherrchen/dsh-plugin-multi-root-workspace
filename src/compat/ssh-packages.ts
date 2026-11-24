@@ -1,18 +1,8 @@
-/**
- * The optional SSH peers are loaded ONLY through the `@deepseek-ai/dsh` host
- * anchor — the copy the composition mounts — and only behind an `eligible`
- * capability gate. Unlike `loadHostKoffi()` there is NO fallback to a
- * package-local copy: when the anchor cannot see a package it is absent, and
- * an anchor whose own tree is outside this package's root resolving INTO that
- * root is a private copy and an identity mismatch.
- *
- * The SSH environment manager (`src/remote/ssh-environment.ts`) is the only
- * importer, behind the `eligible` capability gate. No class is ever
- * constructed here.
- */
+/** Evaluate the exact SSH entries selected by the Host/Profile capability gate. */
 import { createRequire } from 'node:module'
 import { pathToFileURL } from 'node:url'
 import { insidePackageRoot, pluginPackageRoot, SSH_PEER_PACKAGES, type SshCapability } from './dsh-version.ts'
+import { installClientPskFallback, PSK_FALLBACK_CIPHERS, UPSTREAM_PSK_CIPHER } from './ssh-stream-ciphers.ts'
 
 /** The public class each SSH package must expose on rc.1 (ADR-0032 verified). */
 const PACKAGE_EXPORTS: Record<string, string> = {
@@ -39,15 +29,23 @@ export async function loadHostSshPackages(
   if (gate.status !== 'eligible') {
     throw new Error(`SSH capability is not eligible${gate.status === 'absent' ? ` (${gate.reason}: ${gate.detail})` : ''}`)
   }
+  // `@deepseek-ai/dsh-ssh` binds `tls.connect` when it is evaluated. A
+  // BoringSSL Host cannot create the suite it requests, so the fallback must
+  // be installed before the first import; see src/compat/ssh-stream-ciphers.ts.
+  const psk = installClientPskFallback()
+  if (psk.plan.kind === 'unsupported') {
+    throw new Error(`SSH stream TLS is unavailable on this runtime: neither ${UPSTREAM_PSK_CIPHER} nor ${PSK_FALLBACK_CIPHERS.join(', ')} is implemented`)
+  }
   const require = createRequire(import.meta.url)
-  const anchor = require.resolve('@deepseek-ai/dsh/package.json')
-  const hostRequire = createRequire(anchor)
+  const anchor = gate.locations === undefined ? require.resolve('@deepseek-ai/dsh/package.json') : undefined
+  const hostRequire = anchor === undefined ? undefined : createRequire(anchor)
   const root = pluginPackageRoot(require)
-  const anchoredInside = insidePackageRoot(anchor, root)
+  const anchoredInside = anchor !== undefined && insidePackageRoot(anchor, root)
   const modules: HostSshPackages = {}
   for (const name of SSH_PEER_PACKAGES) {
-    const resolved = hostRequire.resolve(name)
-    if (!anchoredInside && insidePackageRoot(resolved, root)) {
+    const resolved = gate.locations?.[name]?.entry ?? hostRequire?.resolve(name)
+    if (resolved === undefined) throw new Error(`SSH package resolution is unavailable: ${name}`)
+    if (gate.locations === undefined && !anchoredInside && insidePackageRoot(resolved, root)) {
       throw new Error(`identity-mismatch: ${name} resolves inside this package's own tree`)
     }
     const ns = await importer(pathToFileURL(resolved).href) as Record<string, unknown> & { default?: Record<string, unknown> }
