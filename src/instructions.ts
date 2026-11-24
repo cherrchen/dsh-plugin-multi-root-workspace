@@ -67,7 +67,7 @@ import { createInstructionMessage } from './compat/llm-message.ts'
 import { toolResultFailed } from './compat/tool-result.ts'
 import { effectiveDirectory, originDirectory } from './compat/session-directory.ts'
 import { aroundTool, type ToolCaller } from './compat/tool-context.ts'
-import { FILE_TOUCH_TOOL_NAMES, normalizeOpsFileActivity, opsActivityEvidenceKey, ptcFileActivity, replayedInstructionTargets, stableOpsJson, touchedPathOfToolCall } from './compat/instruction-activity.ts'
+import { FILE_TOUCH_TOOL_NAMES, normalizeOpsFileActivity, opsActivityEvidenceKey, ptcFileActivity, replayedInstructionTargets, stableOpsJson, touchedPathOfToolCall, workingDirectorySemantics } from './compat/instruction-activity.ts'
 import { opsCompatibilityToken } from './compat/ops-settings.ts'
 import { nativeInstructionCopies } from './compat/instruction-overlap.ts'
 import { isCanonicallyUnder } from './roots.ts'
@@ -576,13 +576,20 @@ export function apply(ctx: Context, config: Config = {}): void {
         // only events before the resume boundary may contribute touched paths:
         // re-deriving a live event's relative path through a superseded legacy
         // `working-directory/change` chain would misattribute it.
+        // A later recovery has no in-process counter for an earlier run's live
+        // events, so the boundary must not be the only evidence: the Host's own
+        // working-directory projection state is rebuilt from this same durable
+        // log, and it proves whether the deprecated chain is still in force.
+        // Replay skips relative activity whose directory that evidence cannot
+        // settle instead of guessing a directory the operation may not have used.
         // oxlint-disable-next-line typescript/no-deprecated -- No public activity projection exists.
         const seedEvents = agent.session.snapshotEvents()
         const boundary = Math.max(0, seedEvents.length - (liveEventCounts.get(agent.session) ?? 0))
+        const workingDirectory = workingDirectorySemantics(seedEvents, agent.session.header.cwd, effectiveDirectory(scope, agent.session))
         for (const path of replayedInstructionTargets(seedEvents, agent.session.header.cwd,
           modeToken === undefined ? undefined : existing?.liveOpsEvidence,
           modeToken === undefined ? undefined : pending,
-          { opsCompatibility: modeToken !== undefined, touchBoundary: boundary })) state.touched.add(path)
+          { opsCompatibility: modeToken !== undefined, touchBoundary: boundary, workingDirectory })) state.touched.add(path)
         const targets = typeof target === 'string' ? [target] : target ?? []
         for (const item of targets) state.touched.add(item)
         if (roots.length === 0) return []

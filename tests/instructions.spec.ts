@@ -240,6 +240,56 @@ describe('with additional roots', () => {
     // live dispatch resolved the relative path under the origin.
     expect(await snapshot()).not.toContain('nested rules')
   })
+
+  it('does not replay a relative operation from an earlier alpha.2 run through the legacy cwd on a later resume', async () => {
+    const nested = join(repoB, 'sub')
+    mkdirSync(join(nested, 'nested'), { recursive: true })
+    writeFileSync(join(nested, 'nested', 'probe.txt'), 'probe')
+    writeFileSync(join(nested, 'AGENTS.md'), '# nested rules')
+    const world = await mountWorld({}, [repoB])
+    // The durable log after a second recovery: an old host's legacy directory
+    // move plus the pair a previous alpha.2 run appended as live activity. That
+    // run resolved the relative path at the origin (the 0.2.3 host ignores the
+    // deprecated event), so replaying the pair through the legacy chain would
+    // attribute it to repoB/sub and discover its nested AGENTS.md.
+    const seed = [
+      { type: 'working-directory/change', data: { cwd: canonicalPath(nested) } },
+      { type: 'tool/call', data: { turn: 1, step: 1, callId: 'previous-live', name: 'read', arguments: JSON.stringify({ file_path: 'nested/probe.txt' }) } },
+      { type: 'tool/result', data: { turn: 1, step: 1, message: { source: { callId: 'previous-live' }, content: [], isError: false } } },
+    ]
+    vi.spyOn(world.session, 'snapshotEvents').mockImplementation(() => seed)
+    const snapshot = async (): Promise<string> => {
+      const entries = await world.ctx.multiRootInstructions.snapshot(
+        { session: world.session } as never, [repoB], undefined, new AbortController().signal,
+      )
+      return entries.map(entry => entry.text).join('\n')
+    }
+    expect(await snapshot()).not.toContain('nested rules')
+  })
+  it('replays a relative operation through the legacy cwd when the Host projection still applies it', async () => {
+    const nested = join(repoB, 'sub')
+    mkdirSync(join(nested, 'nested'), { recursive: true })
+    writeFileSync(join(nested, 'nested', 'probe.txt'), 'probe')
+    writeFileSync(join(nested, 'AGENTS.md'), '# nested rules')
+    const world = await mountWorld({}, [repoB])
+    // A 0.2.2-line Host rebuilds its working-directory projection from the
+    // legacy event, so the projection proves that generation resolved the
+    // relative operation there. Replay must keep attributing it, not drop it.
+    await world.ctx.plugin({ name: 'legacy-directory-fixture', apply(ctx: Context) {
+      ctx.provide('workingDirectory' as never, { get: () => canonicalPath(nested) } as never)
+    } })
+    const seed = [
+      { type: 'working-directory/change', data: { cwd: canonicalPath(nested) } },
+      { type: 'tool/call', data: { turn: 1, step: 1, callId: 'legacy-live', name: 'read', arguments: JSON.stringify({ file_path: 'nested/probe.txt' }) } },
+      { type: 'tool/result', data: { turn: 1, step: 1, message: { source: { callId: 'legacy-live' }, content: [], isError: false } } },
+    ]
+    vi.spyOn(world.session, 'snapshotEvents').mockImplementation(() => seed)
+    const entries = await world.ctx.multiRootInstructions.snapshot(
+      { session: world.session } as never, [repoB], undefined, new AbortController().signal,
+    )
+    expect(entries.map(entry => entry.text).join('\n')).toContain('# nested rules')
+  })
+
   it('names each file by its absolute path, so two roots\' AGENTS.md are distinguishable', async () => {
     writeFileSync(join(repoA, 'AGENTS.md'), '# repo-a rules')
     writeFileSync(join(repoB, 'AGENTS.md'), '# repo-b rules')

@@ -551,8 +551,9 @@ describe('the Files-tab root switcher', () => {
     renderInPane(harness)
     await waitFor(() => { expect(document.querySelector('.mrfw-rootSwitchLabel')?.textContent).toBe('Platform') })
 
-    // Primary selection: the path is the pane's workspace root — the same
-    // value the hidden upstream label carried.
+    // Primary selection: the path is the Files pane's own directory — the
+    // slot owner's absolutePath, the same value the hidden upstream label
+    // carried (here it equals the registry primary root).
     const label = document.querySelector('.mrfw-switcherPath')
     expect(label?.getAttribute('title')).toBe('/repos/primary')
 
@@ -560,6 +561,33 @@ describe('the Files-tab root switcher', () => {
     fireEvent.click(screen.getByRole('button', { name: 'payments' }))
     await waitFor(() => { expect(switcherKind()).toBe('additional') })
     // Additional selection: the path follows the selected root.
+    expect(document.querySelector('.mrfw-switcherPath')?.getAttribute('title')).toBe('/repos/payments')
+  })
+
+  it('shows the Files pane effective directory, not the registry primary root, for the primary selection', async () => {
+    const harness = mount()
+    // A Session that moved into a worktree: the Files slot owner carries the
+    // effective directory, while the panel's list still answers the Registry
+    // identity (the Session origin) its registrations are keyed on.
+    harness.setView({ primaryRoot: '/repos/original', primaryName: 'Platform', roots: [ROOT_A, ROOT_B], limit: 16, count: 2 })
+    renderInPane(harness, { absolutePath: '/repos/worktree' })
+    await waitFor(() => { expect(document.querySelector('.mrfw-rootSwitchLabel')?.textContent).toBe('Platform') })
+
+    // The header names the directory the native tree is actually browsing —
+    // trigger tooltip and path label both — so the registry identity never
+    // leaks into the path after the Session moved.
+    expect(document.querySelector('.mrfw-rootSwitchBtn')?.getAttribute('title')).toBe('/repos/worktree')
+    const label = document.querySelector('.mrfw-switcherPath')
+    expect(label?.textContent).toBe('/repos/worktree')
+    expect(label?.getAttribute('title')).toBe('/repos/worktree')
+    expect(document.querySelector('.mrfw-switcherPath')?.getAttribute('title')).not.toBe('/repos/original')
+
+    // The menu still works: the primary row keeps the host's workspace
+    // title, and selecting an additional root still takes the tree over.
+    await openMenu()
+    expect(screen.getByRole('button', { name: /panel\.primary/ }).textContent).toContain('Platform')
+    fireEvent.click(screen.getByRole('button', { name: 'payments' }))
+    await waitFor(() => { expect(switcherKind()).toBe('additional') })
     expect(document.querySelector('.mrfw-switcherPath')?.getAttribute('title')).toBe('/repos/payments')
   })
 

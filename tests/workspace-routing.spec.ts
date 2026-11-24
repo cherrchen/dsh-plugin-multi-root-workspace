@@ -375,6 +375,52 @@ describe('workspace-files isolation', () => {
       .rejects.toMatchObject({ code: 'workspace-file/outside-workspace' })
   })
 
+  it.skipIf(symlinkUnsupportedReason() !== undefined)('refuses a list fallback whose canonical selected directory sits in a withheld registration', async () => {
+    const moved = join(fixture.base, 'moved')
+    const withheld = join(moved, 'secret')
+    mkdirSync(join(withheld, 'sub'), { recursive: true })
+    writeFileSync(join(withheld, 'sub', 'hidden.txt'), 'hidden')
+    // The selected path is spelled inside the effective wire root and upstream's
+    // own canonical containment admits it — only its canonical target, inside
+    // the registered-but-withheld directory, proves it must be refused.
+    const link = join(moved, 'link')
+    symlinkSync(join(withheld, 'sub'), link, 'dir')
+    ctx.provide('sessions', { get: (id: string) => id === 's' ? { header: { cwd: fixture.workspace } } : undefined } as never)
+    const { service } = await files()
+    ctx.provide('multiRootRegistry', {
+      list: (primary: string) => primary === fixture.workspace ? [withheldRegistration(canonicalPath(withheld))] : [],
+    } as never)
+    await expect(service.list({ sessionId: 's' as never, workspaceRoot: moved }, link, new AbortController().signal))
+      .rejects.toMatchObject({ code: 'workspace-file/outside-workspace' })
+  })
+
+  it.skipIf(!hasPathWatchSignature || symlinkUnsupportedReason() !== undefined)('refuses a path watch whose canonical selected directory sits in a withheld registration', async () => {
+    const moved = join(fixture.base, 'moved')
+    const withheld = join(moved, 'secret')
+    mkdirSync(join(withheld, 'sub'), { recursive: true })
+    writeFileSync(join(withheld, 'sub', 'hidden.txt'), 'hidden')
+    const link = join(moved, 'link')
+    symlinkSync(join(withheld, 'sub'), link, 'dir')
+    ctx.provide('sessions', { get: (id: string) => id === 's' ? { header: { cwd: fixture.workspace } } : undefined } as never)
+    const raw = new WorkspaceFiles(ctx, { maxBytes: 1024, maxFileBytes: 1024, maxLines: 5000, maxEntries: 1 })
+    let watched = 0
+    Object.defineProperty(raw, 'changes', {
+      configurable: true,
+      writable: true,
+      value: async function*(_request: unknown, _path: string, _signal: AbortSignal) {
+        watched += 1
+        yield { kind: 'ready' }
+      },
+    })
+    await ctx.plugin(FilesRouting)
+    ctx.provide('multiRootRegistry', {
+      list: (primary: string) => primary === fixture.workspace ? [withheldRegistration(canonicalPath(withheld))] : [],
+    } as never)
+    const stream = ctx.workspaceFiles.changes({ sessionId: 's' as never, workspaceRoot: moved }, link, new AbortController().signal)[Symbol.asyncIterator]()
+    await expect(stream.next()).rejects.toMatchObject({ code: 'workspace-file/outside-workspace' })
+    expect(watched).toBe(0)
+  })
+
   it.skipIf(!hasPathWatchSignature || symlinkUnsupportedReason() !== undefined)('refuses a path watch whose canonical root sits in a withheld registration', async () => {
     const withheld = join(fixture.base, 'withheld')
     mkdirSync(join(withheld, 'sub'), { recursive: true })

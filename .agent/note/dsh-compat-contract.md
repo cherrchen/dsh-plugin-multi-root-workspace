@@ -10,18 +10,14 @@ English: [dsh-compat-contract.en.md](./dsh-compat-contract.en.md)
 src/compat/dsh-version.ts  →  SUPPORTED_DSH_RELEASES
 ```
 
-是**精确版本数组**，不是 semver 范围。当前：
-
-```ts
-export const SUPPORTED_DSH_RELEASES = ['0.1.5-rc.2', '0.1.6-alpha.1', '0.1.6-alpha.2', '0.1.7-alpha.1', '0.1.7-alpha.2', '0.1.7-rc.1', '0.1.7-rc.2', '0.2.0-rc.1', '0.2.0-rc.2', '0.2.1-alpha.1', '0.2.1-alpha.2', '0.2.1-alpha.3', '0.2.1-alpha.4', '0.2.1-alpha.5', '0.2.1-rc.1', '0.2.1-rc.2', '0.2.1-rc.3', '0.2.1-rc.4', '0.2.1-rc.5', '0.2.2-alpha.2', '0.2.2-alpha.3', '0.2.2-rc.1', '0.2.2-rc.2'] as const
-```
+它是**精确版本数组**，不是 semver 范围，也是 DSH 支持矩阵唯一维护版本列表的地方。`package.json` 的 `peerDependencies` 是这组精确版本的并集，`devDependencies` 里的 DSH 开发 pin 是 allowlist 中的一项，已安装树实际解析到的版本也必须落在它里面。**本笔记不再抄写版本字面量**：需要当前矩阵时直接读 `src/compat/dsh-version.ts` 与 `package.json`，或用 `pnpm compat:check` 校验。
 
 改它的时候，下面四处必须同时一致，否则 `pnpm compat:check` 失败：
 
 ```text
-src/compat/dsh-version.ts   SUPPORTED_DSH_RELEASES   allowlist
-package.json                peerDependencies         "0.1.5-rc.2 || 0.1.6-alpha.1 || 0.1.6-alpha.2 || 0.1.7-alpha.1 || 0.1.7-alpha.2 || 0.1.7-rc.1 || 0.1.7-rc.2 || 0.2.0-rc.1 || 0.2.0-rc.2 || 0.2.1-alpha.1 || 0.2.1-alpha.2 || 0.2.1-alpha.3 || 0.2.1-alpha.4 || 0.2.1-alpha.5 || 0.2.1-rc.1 || 0.2.1-rc.2 || 0.2.1-rc.3 || 0.2.1-rc.4 || 0.2.1-rc.5 || 0.2.2-alpha.2 || 0.2.2-alpha.3 || 0.2.2-rc.1 || 0.2.2-rc.2 || 0.2.2-rc.3 || 0.2.2-rc.4 || 0.2.2-rc.5 || 0.2.3-alpha.1 || 0.2.3-alpha.2"
-package.json                devDependencies          allowlist 中的某一项（当前 0.2.2-rc.5）
+src/compat/dsh-version.ts   SUPPORTED_DSH_RELEASES   唯一 allowlist
+package.json                peerDependencies          逐项对应 allowlist 的精确版本并集
+package.json                devDependencies           allowlist 中的某一项（开发 pin）
 node_modules                实际解析到的版本          allowlist 中的某一项
 ```
 
@@ -185,7 +181,7 @@ pnpm verify:all   # lint → typecheck → build → test → kernel:probe → s
 
 ## 9. DSH 0.2 与新的开发基线
 
-写本节时开发 pin 是 `0.2.0-rc.2`，cordis 是 `4.0.4`（当前基线见 `1）。回到开发基线不再表示回到 `0.1.5-rc.2` / `4.0.2`；前文的旧版探测记录是历史事实。恢复探测前保存的 manifest / workspace / lockfile，并重装安装树，绝不把未提交的支持声明退回 HEAD。
+写本节时开发 pin 是 `0.2.0-rc.2`，cordis 是 `4.0.4`（当前基线见 `package.json` 的 `devDependencies`；受支持版本列表见 `src/compat/dsh-version.ts`）。回到开发基线不再表示回到 `0.1.5-rc.2` / `4.0.2`；前文的旧版探测记录是历史事实。恢复探测前保存的 manifest / workspace / lockfile，并重装安装树，绝不把未提交的支持声明退回 HEAD。
 
 `0.2.0-rc.1` / `rc.2` 保留了现有适配器的接缝。0.2 的 agent-loop 异常恢复会在关闭 step 前补保守的失败 `tool/result`：`message.isError: true`、纯文本 content，并带 `data.error`。它绝不能算成功文件 touch；`tests/instructions.spec.ts` 同时钉住旧 content block、新 message 与恢复事件三种失败形状。Windows 新增 ACL diagnosis skill 由继承的上游 provider 自动软注册，本插件仍不承诺 Windows 内核多根授权。风险与各版验证证据见[路线图记录](../../docs/plans/active/2026-09-12-multi-root-workspace.md#dsh-02-兼容提升2026-09-30)。
 
@@ -201,7 +197,7 @@ LSP / workspace-files 只包装公开方法，卸载必须恢复原属性描述�
 
 ## 11. DSH 0.2.1 目录语义
 
-当前开发基线为 `0.2.2-rc.5` / Cordis `4.1.0`。前述开发 pin 是历史记录。Registry 身份和 grants 始终绑定不可变的 Session 原始项目；effective cwd 使用上游 workingDirectory，不能按共享目录反查会话。LSP 从工具 dispatch 携带 Session，instructions 优先捕获成功 fs observation 的实际路径。精确候选与原生平台执行证据只见[路线账本](../../docs/plans/active/2026-09-12-multi-root-workspace.md)，目录与进程快照设计见 [ADR-0012](../../docs/decisions/ADR-0012-session-origin-and-effective-cwd.md)，上游差异见[接口审查](../../docs/reference/dsh-0.2.1-migration.md)。
+当前开发基线由 `package.json` 的 `devDependencies` 定义（DSH 与 cordis 的开发 pin 都在那里，由 `upgrade-dsh.mjs` 重指），受支持版本列表与已安装树的约束由 `src/compat/dsh-version.ts` 与 `pnpm compat:check` 校验；本笔记不抄写基线版本号。Registry 身份和 grants 始终绑定不可变的 Session 原始项目；effective cwd 使用上游 workingDirectory，不能按共享目录反查会话。LSP 从工具 dispatch 携带 Session，instructions 优先捕获成功 fs observation 的实际路径。精确候选与原生平台执行证据只见[路线账本](../../docs/plans/active/2026-09-12-multi-root-workspace.md)，目录与进程快照设计见 [ADR-0012](../../docs/decisions/ADR-0012-session-origin-and-effective-cwd.md)，上游差异见[接口审查](../../docs/reference/dsh-0.2.1-migration.md)。
 
 升级脚本接受单一 Cordis prerelease 版本，仍输出精确 pin。新的安装期 peer gate 需要在隔离候选 smoke profile 使用精确 allow-version 豁免；warn 模式下豁免在第一次 `add` 前授予（构建审批恢复路径内部的 remove+add 同样有版本 gate），只用于升级车道，正式矩阵和生产仍 enforce。当前 package 为 `0.1.6` 且 `v0.1.6` tag 已存在，本迁移不创建 release。
 
@@ -367,7 +363,7 @@ rc.1 相对 alpha.3 的 patch 只改包版本。沿用既有适配器，保留�
 
 - **状态**：`dsh-v0.2.3-alpha.1` 指向 `d98f5d68519215da48f3002da2cb9c9d2068d81d`（发布提交 `aae91d692e2802f63a4a92fd073fe21259795e59`），`dsh-v0.2.3-alpha.2` 指向 `4b399c39a6d1479cd84ca591b4d7c88e24d38a96`（发布提交 `267805d20d`）；npm 的 `alpha` dist-tag 指向 alpha.2，`next` / `latest` 仍是 `0.2.2-rc.5`。本分支把 `SUPPORTED_DSH_RELEASES`、全部 DSH peer 与开发 pin 提升到 `0.2.3-alpha.2`（**27 个精确版本**），`peerDependencies.cordis` 追加 `4.2.0-alpha.1`。
 - **发布边界**：alpha.1 是 rc.5 的后代，中间合入四天主线；alpha.2 只替换包版本号（含 vendor 4.2 升级），另有 3 个 `src` 行级变化（app-boot profile resolver、boot/hmr manifest、ptc-runtime-node vm-modules）与根 `engines` 变化。全部服务端接缝差异来自 `rc.5 → alpha.1` 源码，两个 tag 共用一份适配；受支持发布是 alpha.2。
-- **安全适配（session origin vs effective cwd）**：`dsh-sandbox-policy` 现在把 `resolve({session}).workspaceRoot` 设为 `workingDirectory.get(session) ?? header.cwd`（有效目录）。插件 ADR-0012 的不变量是「身份 = Session 原始项目」，因此 Registry/scope 身份全部改用显式原始目录（`src/compat/session-directory.ts` 的 `originDirectory` / `policyOriginRoot`），`policy.workspaceRoot` 只保留为上游执行边界与路径基。按有效拼写查 scope 表会得到空 deny 集：Host 移动 Session 目录后，登记为 `read-only` 的附加根可能在被移动到其内部时变成可写、`toolAccess` 上限被绕过；回归测试覆盖该场景。**同源缺口（外部复核补齐）**：authority 不可用时的 `clampedExecution()` 曾用有效目录作唯一可写根，而文件径只授原始主根——现在两者都取 `policyOriginRoot()`；cold Session 的 Files 请求从 `sessionPersistence.stat().header.cwd` 取身份；指令重放只在每个 Session 的首次 snapshot 处理「恢复前缀」，之后的活动由 live 监听按有效目录处理。Windows ACL 的 widen 交叉校验仍用上游 profile 的 policy root，但 graft 的授权根用原始主根。
+- **安全适配（session origin vs effective cwd）**：`dsh-sandbox-policy` 现在把 `resolve({session}).workspaceRoot` 设为 `workingDirectory.get(session) ?? header.cwd`（有效目录）。插件 ADR-0012 的不变量是「身份 = Session 原始项目」，因此 Registry/scope 身份全部改用显式原始目录（`src/compat/session-directory.ts` 的 `originDirectory` / `policyOriginRoot`），`policy.workspaceRoot` 只保留为上游执行边界与路径基。按有效拼写查 scope 表会得到空 deny 集：Host 移动 Session 目录后，登记为 `read-only` 的附加根可能在被移动到其内部时变成可写、`toolAccess` 上限被绕过；回归测试覆盖该场景。**同源缺口（外部复核补齐）**：authority 不可用时的 `clampedExecution()` 曾用有效目录作唯一可写根，而文件径只授原始主根——现在两者都取 `policyOriginRoot()`；cold Session 的 Files 请求从 `sessionPersistence.stat().header.cwd` 取身份；指令重放仍只让恢复前缀贡献 touched 路径；再次恢复时改用 Host 自身 working-directory 投影状态（同一条 durable log 重建）作为跨重启证据，判定废弃的 `working-directory/change` 链是否仍生效，证据无法判定的旧相对活动保守跳过，不再按旧目录链猜测；正常活动仍由 live 监听按有效目录处理。Windows ACL 的 widen 交叉校验仍用上游 profile 的 policy root，但 graft 的授权根用原始主根。
 - **cordis 4.2 根上下文**：current Auto Review 基线横跨 `0.2.2` 行（cordis 4.1，只有 `ctx.root`）与受支持的 `0.2.3-alpha.2`（cordis 4.2，只有 `Context.root` 符号），因此卸载分支必须两种 API 都探：新增 `src/compat/cordis-root.ts`（先符号、后属性、都不存在则失败关闭），`current/fork.ts` 经它取根；差分门禁新增第 9 项，禁止 fork 直接拼任一 API，并要求探测模块保留符号、属性回退与失败关闭。
 - **Auto Review 联合合同**：alpha.2 与 alpha.1 的 reviewer `src` 树逐字节相同（`9178184679…`，`index.ts` sha256 `179e8f50…`），与 rc.5 相比只有 import 顺序与根上下文两行——两者都在 `current/fork.patch` 已替换的行内，输入模型未变，因此**不新增第三个源码代际**：`AUTO_REVIEW_CURRENT_RELEASES` 追加受支持的 alpha.2（联合集合 11 → **12** 个精确发布），编译 pin 前移到 `0.2.3-alpha.2`。冻结副本仍保持 rc.5 字节（8 个发布中 7 个逐字节命中），审计差异即上述两行；不要为了「贴合」把 `upstream.ts` 换成 alpha 字节。alpha.1 车道的实现类型检查按 ADR-0040 设计跳过（编译 pin 是 alpha.2），其证据是运行时测试与联合冒烟。
 - **客户端复刻同步**：`ui-sidebar-files` 把 Files header 的 actions 槽包进新的 `div.externalActions`、covered 规则改为自定义属性、层级缩进改 `calc(16px + 6px)`、并将 cwd 选择改为 `selectSessionDirectory`（投影 `workingDirectory` ?? 头部 cwd）；`ui-open-in-app` 的 `controller.ts` 重构、`OpenTargetButton.module.css` hover/compact 规则变化。插件 fork 侧：`styles.ts` 同步缩进与 `mrfw-open*` 规则，并新增 `:not(:has(> [data-files-path]))` 守卫的 externalActions unwrap；`controller.ts` / `OpenTargetButton.module.css` 重拷 alpha.2 字节；附加根树的根仍来自 RootSwitcher / `rootForPath`，不从新选择器推导，也不静态 import 旧宿主不存在的 `@deepseek-ai/dsh-api-session-controller/client/directories`（会让整个 client bundle 加载失败），有效目录显示沿用 `RootsView.effectiveCwd`。
@@ -382,5 +378,6 @@ rc.1 相对 alpha.3 的 patch 只改包版本。沿用既有适配器，保留�
 - **安静陷阱 6（tag 存在不等于可支持）**：`0.2.3-alpha.1` 的源码与发布元数据不一致，发布包无法启动。最小判别是在空目录 `npm install @deepseek-ai/dsh@<release>` 后运行 `dsh --version`；失败即不可作为精确支持发布。
 - **安静陷阱 7（profileContext 两代字段）**：0.2.3 前的 `dsh-app-boot.readProfilePatches()` 展开 `context.overlays`，0.2.3 之后展开 `context.overlayPaths`；任何 in-process boot 夹具（`scripts/lib/profile-boot.mjs`、`scripts/smoke-auto-review.mjs`、`scripts/probe-multi-root-skills.mjs`）都必须同时提供两个空数组，否则旧车道 `listPlugins()` / journey 直接抛 `context.overlays is not iterable`。共享 helper `scripts/lib/profile-context.mjs` + `tests/profile-context-fixtures.spec.ts` 守住这一点。
 - **安静陷阱 8（PTC 程序格式）**：0.2.3 的 PTC runtime 默认不再是 function-body，顶层 `return` 会报 `Return statement is not allowed here`。程序需要取值时按 `runtime.programFormat` 选择：function-body 用 `return`，其余形态用最终表达式的完成值（`inspect()` 则写入 output）；fixture 与 smoke 不要硬编码某一种。
+- **安静陷阱 9（恢复重放的目录证据）**：一条 durable log 可以混有两代目录事件（`working-directory/change` 与 `workspace-root/change`）。进程内的 live event 计数只覆盖本进程实际看到的活动：再次恢复时它可能缺少上一次运行的 live 事件，因此重放不能把整个 seed 前缀都当成旧目录链。Host 自身由同一条 log 重建的 working-directory 投影状态才是跨重启证据——把它与两条候选链比对，以结构判定 `honor-legacy` / `ignore-legacy`，绝不做版本号比较。若两条链都无法证明相对操作实际解析到哪个目录，就保守跳过该 touch，而不是按可能错误的目录注入 instructions。绝对路径不受影响；OPS 历史校验仍在整条 log 上执行（`touchBoundary` 只限制 touched 路径的记录）。
 - **fork 基线**：open-in-app 与 files-tree 的复刻源在 alpha.2 都有变化，基线随本分支重拷并记入各自 `FORK.md`。
 - **验证**：本机门禁、vitest、四个 smoke 与 Auto Review 联合冒烟的结果记在[路线账本](../../docs/plans/active/2026-09-12-multi-root-workspace.md#dsh-023-alpha2-兼容提升2026-11-22)；三 OS 矩阵与 Windows ACL 原生结果由 PR 的 CI 给出。

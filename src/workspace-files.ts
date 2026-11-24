@@ -10,7 +10,7 @@ import type { MultiRootRegistry } from './registry.ts'
 import { adaptPathWatch, resolveRelatedWorkspacePath } from './compat/workspace-files.ts'
 import { originDirectory } from './compat/session-directory.ts'
 import { canonicalRoot, isCanonicallyUnder } from './roots.ts'
-import { routeWorkspacePath } from './workspace-routing.ts'
+import { resolveWorkspacePath, routeWorkspacePath } from './workspace-routing.ts'
 import { withRegistryRead } from './registry-operation.ts'
 import { wrapMethod } from './method-wrapper.ts'
 
@@ -33,16 +33,22 @@ export function apply(ctx: Context): void {
         if (scope.multiRootScope.scopeOf(origin).length === 0 && registeredRoots(scope, origin).length === 0) {
           return original.call(this, request, path, signal)
         }
-        const route = await routeWorkspacePath(scope, origin, path, signal, request.workspaceRoot)
+        const resolved = await resolveWorkspacePath(scope, origin, path, signal, request.workspaceRoot)
+        const route = resolved.route
         // The withheld check belongs to the directory the requested path
         // selects, not to the session root.
-        if (route !== undefined && underWithheldRoot(scope, route.primaryRoot, route.absolutePath, request.workspaceRoot)) throw await outside(path)
+        if (route !== undefined && underWithheldRoot(scope, route.primaryRoot, resolved.absolutePath, request.workspaceRoot)) throw await outside(path)
         if (route === undefined || route.workspaceRoot === route.primaryRoot) {
           // An unrouteable path falls back to upstream, whose containment check
           // uses the wire (effective) root — the plugin's withheld negative
           // boundary must still refuse a directory that sits in a registered
           // but currently withheld root, exactly like the `changes` fallback.
-          if (underWithheldRoot(scope, origin, path, request.workspaceRoot)) throw await outside(path)
+          // Both the requested spelling and the resolved target are checked:
+          // upstream's own canonical containment admits an alias inside the wire
+          // root that lands in a withheld registration, and the recorded
+          // spelling alone cannot see it.
+          if (underWithheldRoot(scope, origin, path, request.workspaceRoot)
+            || underWithheldRoot(scope, origin, resolved.absolutePath, request.workspaceRoot)) throw await outside(path)
           return original.call(this, request, path, signal)
         }
         const result = await original.call(this, { ...request, workspaceRoot: route.workspaceRoot }, route.absolutePath, signal)
@@ -119,9 +125,13 @@ export function apply(ctx: Context): void {
         const check = async () => {
           await withRegistryRead(scope, origin, 'files', async () => {
             // The watch may target another granted root; check the directory
-            // the path actually selects, not the session root.
-            const current = await routeWorkspacePath(scope, origin, path, signal, request.workspaceRoot)
-            if (current !== undefined && underWithheldRoot(scope, current.primaryRoot, current.absolutePath, request.workspaceRoot)) throw await outside(path)
+            // the path actually selects, not the session root. The resolved
+            // target is checked even when no grant accepts the path: a revoked
+            // grant (or an alias whose canonical location moved) must not stay
+            // watched through its recorded spelling.
+            const current = await resolveWorkspacePath(scope, origin, path, signal, request.workspaceRoot)
+            if (current.route !== undefined && underWithheldRoot(scope, current.route.primaryRoot, current.absolutePath, request.workspaceRoot)) throw await outside(path)
+            if (current.route === undefined && underWithheldRoot(scope, origin, current.absolutePath, request.workspaceRoot)) throw await outside(path)
             const routed = await routeRead(scope, request, path, signal)
             if (routed === 'deny') throw await outside(path)
           })
@@ -135,16 +145,21 @@ export function apply(ctx: Context): void {
           }
           return
         }
-        const route = await withRegistryRead(scope, origin, 'files', async () => {
-          const resolved = await routeWorkspacePath(scope, origin, path, signal, request.workspaceRoot)
-          if (resolved !== undefined && underWithheldRoot(scope, resolved.primaryRoot, resolved.absolutePath, request.workspaceRoot)) throw await outside(path)
-          return resolved
+        const resolved = await withRegistryRead(scope, origin, 'files', async () => {
+          const current = await resolveWorkspacePath(scope, origin, path, signal, request.workspaceRoot)
+          if (current.route !== undefined && underWithheldRoot(scope, current.route.primaryRoot, current.absolutePath, request.workspaceRoot)) throw await outside(path)
+          return current
         })
+        const route = resolved.route
         if (route === undefined || route.workspaceRoot === route.primaryRoot) {
           // Directory targets are confined by the host's own check either
           // way; file watches are uncontained upstream, so a stale row
-          // under a withheld root has to be refused here.
-          if (underWithheldRoot(scope, origin, path, request.workspaceRoot)) throw await outside(path)
+          // under a withheld root has to be refused here. The canonical
+          // target is checked beside the requested spelling: upstream's
+          // canonical containment admits a directory alias inside the wire
+          // root that lands in a withheld registration.
+          if (underWithheldRoot(scope, origin, path, request.workspaceRoot)
+            || underWithheldRoot(scope, origin, resolved.absolutePath, request.workspaceRoot)) throw await outside(path)
           for await (const frame of originalChanges.call(this, request, path, signal)) {
             if (scope.get('multiRootRegistry')?.shared) await check()
             yield frame

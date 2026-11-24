@@ -89,19 +89,81 @@ export interface OpsActivityEvidence {
 
 const OPS_PUBLISH: Record<string, true> = { ops_discover_tools: true, ops_load_sdk: true }
 
+/**
+ * Which directory semantics the CURRENT Host applies to a durable log.
+ *
+ * `0.2.3` renamed the working-directory event (`workspace-root/change`) and
+ * ignores the deprecated `working-directory/change`; older releases wrote and
+ * applied the legacy spelling. A durable log can contain both generations, so
+ * replay alone cannot say which directory a relative operation was resolved
+ * against. The Host's own projection state is the one piece of evidence that
+ * survives a restart: it is rebuilt from the same log under the Host's current
+ * semantics, so comparing it with the two candidate chains proves which
+ * semantics is in force. This is structural evidence, never a version compare.
+ */
+export type WorkingDirectorySemantics = 'honor-legacy' | 'ignore-legacy' | 'unknown'
+
+/**
+ * Classify the Host's working-directory semantics from its projection state.
+ * @param events - the durable log prefix (or the whole log).
+ * @param origin - the Session origin the log starts from.
+ * @param effective - the Host projection's committed directory; `undefined` when
+ *   no `workingDirectory` service answers for the Session.
+ * @returns `honor-legacy` when the projection follows the deprecated events,
+ *   `ignore-legacy` when it only follows `workspace-root/change`, and
+ *   `unknown` when the two chains do not diverge or do not identify the host.
+ */
+export function workingDirectorySemantics(
+  events: readonly unknown[], origin: string | undefined, effective: string | undefined,
+): WorkingDirectorySemantics {
+  let hostCwd = origin
+  let legacyCwd = origin
+  let movedByWorkspaceRoot = false
+  for (const raw of events) {
+    const event = raw as DurableActivity
+    const cwd = event?.data?.cwd
+    if (typeof cwd !== 'string') continue
+    if (event.type === 'workspace-root/change') {
+      movedByWorkspaceRoot = true
+      hostCwd = cwd
+      legacyCwd = cwd
+    } else if (event.type === 'working-directory/change' && !movedByWorkspaceRoot) {
+      legacyCwd = cwd
+    }
+  }
+  if (legacyCwd === hostCwd || effective === undefined) return 'unknown'
+  if (effective === legacyCwd) return 'honor-legacy'
+  if (effective === hostCwd) return 'ignore-legacy'
+  return 'unknown'
+}
+
 /** Rebuild read-only discovery candidates from successful durable activity after resume. */
 export function replayedInstructionTargets(events: readonly unknown[], origin: string | undefined,
   liveOpsEvidence?: ReadonlyMap<string, OpsActivityEvidence>,
   pendingExec?: { readonly callId: string; readonly name: string; readonly arguments: unknown; readonly parent?: unknown },
-  options?: { readonly opsCompatibility?: boolean; readonly touchBoundary?: number }): readonly string[] {
+  options?: { readonly opsCompatibility?: boolean; readonly touchBoundary?: number; readonly workingDirectory?: WorkingDirectorySemantics }): readonly string[] {
   const opsOn = options?.opsCompatibility === true
-  let cwd = origin
-  // A log written before the rename may carry the deprecated
-  // `working-directory/change`; one that also carries the current
-  // `workspace-root/change` is authoritative, so the legacy spelling is only
-  // honored until the first current event.
+  // Two interpretations of the same log, maintained side by side:
+  // - `hostCwd` follows only `workspace-root/change` (the current Host's
+  //   projection semantics);
+  // - `legacyCwd` also follows the deprecated `working-directory/change` until
+  //   the first current event (the releases that wrote that spelling applied
+  //   it, and a log written before the rename may carry only it).
+  // A relative operation is attributed from one chain only when the Host's own
+  // semantics is proven (`honor-legacy`); otherwise both must agree, because
+  // durable evidence cannot tell which generation resolved it.
+  const semantics = options?.workingDirectory ?? 'honor-legacy'
+  let hostCwd = origin
+  let legacyCwd = origin
   let movedByWorkspaceRoot = false
-  const pending = new Map<string, { kind: 'native' | 'ptc'; id: string; name: string; arguments: string; directories: Set<string> }>()
+  const pending = new Map<string, {
+    kind: 'native' | 'ptc'
+    id: string
+    name: string
+    arguments: string
+    directories: Set<string>
+    legacyDirectories: Set<string>
+  }>()
   const eventsPrior = new Map<string, { name: string }>()
   const ended = new Set<string>()
   const paths = new Set<string>()
@@ -134,9 +196,14 @@ export function replayedInstructionTargets(events: readonly unknown[], origin: s
     const record = options?.touchBoundary === undefined || eventIndex < options.touchBoundary
     if ((event.type === 'workspace-root/change' || (event.type === 'working-directory/change' && !movedByWorkspaceRoot))
       && typeof event.data.cwd === 'string') {
-      if (event.type === 'workspace-root/change') movedByWorkspaceRoot = true
-      cwd = event.data.cwd
-      for (const call of pending.values()) call.directories.add(cwd)
+      const current = event.type === 'workspace-root/change'
+      if (current) movedByWorkspaceRoot = true
+      if (current) hostCwd = event.data.cwd
+      legacyCwd = event.data.cwd
+      for (const call of pending.values()) {
+        if (current) call.directories.add(legacyCwd)
+        call.legacyDirectories.add(legacyCwd)
+      }
       continue
     }
     const ptc = ptcFileActivity(event)
@@ -155,7 +222,8 @@ export function replayedInstructionTargets(events: readonly unknown[], origin: s
       }
       pending.set(key, {
         kind, id, name: call.name, arguments: call.arguments,
-        directories: new Set(cwd === undefined ? [] : [cwd]),
+        directories: new Set(hostCwd === undefined ? [] : [hostCwd]),
+        legacyDirectories: new Set(legacyCwd === undefined ? [] : [legacyCwd]),
       })
       if (pending.size > 512) throw new Error('review-context: durable activity index exceeded')
       continue
@@ -201,10 +269,23 @@ export function replayedInstructionTargets(events: readonly unknown[], origin: s
     if (!record) continue
     if (isAbsolute(path)) paths.add(path)
     else {
-      if (call.directories.size === 0) throw new Error('review-context: durable file activity has no cwd')
       // No canonical observation is persisted for a relative operation spanning
-      // cwd changes. Inspect all known candidate chains without recording a touch.
-      for (const directory of call.directories) paths.add(resolve(directory, path))
+      // cwd changes: inspect every candidate directory each interpretation knew.
+      const hostPaths = new Set([...call.directories].map(directory => resolve(directory, path)))
+      const legacyPaths = new Set([...call.legacyDirectories].map(directory => resolve(directory, path)))
+      if (semantics === 'honor-legacy') {
+        if (legacyPaths.size === 0) throw new Error('review-context: durable file activity has no cwd')
+        for (const target of legacyPaths) paths.add(target)
+      } else {
+        if (hostPaths.size === 0 && legacyPaths.size === 0) throw new Error('review-context: durable file activity has no cwd')
+        // The Host ignores the deprecated chain, so a log segment that predates
+        // the proof of its semantics cannot be attributed: the same pair may
+        // have been resolved by an older release through the legacy cwd. Skip
+        // the touch instead of injecting instructions for a directory the
+        // operation may never have reached.
+        const agree = hostPaths.size === legacyPaths.size && [...hostPaths].every(target => legacyPaths.has(target))
+        if (agree) for (const target of hostPaths) paths.add(target)
+      }
     }
     if (paths.size > 512) throw new Error('review-context: durable work index exceeded')
   }

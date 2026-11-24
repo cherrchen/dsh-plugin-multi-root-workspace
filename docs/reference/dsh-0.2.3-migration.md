@@ -97,6 +97,19 @@ CI 的 alpha.1 lane 另有 typert `ctx[Context.root].reflect` 未定义等 125 �
 
 另外修复了两类 CI 夹具问题：旧车道 `profileContext` 缺 `overlays`（P1），以及 alpha.2 车道的 PTC 冒烟仍用函数体 `return`（额外发现）。详见路线账本的同名小节。
 
+## 第二轮外部复核（2026-11-24，`3e03733`）
+
+对 `3e03733`（基线 `bc39529`）的复核确认 3 项 P2 与 1 项 P3，四项全部成立并已修复：
+
+| 缺口 | 复核结论 | 修复 | 回归 |
+|---|---|---|---|
+| P2-1 `list` / 目录 `changes` 的回退分支漏查规范目标 | 成立（静态审查 + 复现）。`routeWorkspacePath()` 找不到授权路由时丢弃已解析目标，回退只按请求拼写做词法 withheld 检查；有效目录成为上游路径基后，上游自己的规范包含检查会放行一个落在「已登记但当前未授权」根内的目录别名。 | `src/workspace-routing.ts` 新增 `resolveWorkspacePath()`，无路由时也保留规范目标；`src/workspace-files.ts` 的 `list`、目录 `changes` 回退以及共享权威的逐帧复核同时检查请求拼写与实际目标，命中 withheld 边界即 `workspace-file/outside-workspace`。 | `tests/workspace-routing.spec.ts` 的 list / path-watch 两条规范目标回归（先红后绿）。 |
+| P2-2 旧会话第二次恢复后，Auto Review 把相对文件活动归到旧目录 | 成立（复现）。`liveEventCounts` 只在进程内有效；再次恢复时计数清零，上一次运行写入的 live 相对操作被全量重放，并被废弃的 `working-directory/change` 链带到旧目录，从而注入错误的嵌套 `AGENTS.md`。 | `src/compat/instruction-activity.ts` 同时维护 Host 链（只认 `workspace-root/change`）与 legacy 链，并新增 `workingDirectorySemantics()`：用 Host 自己的 working-directory 投影状态（同一条 durable log 重建）作为跨重启证据，结构判定 `honor-legacy` / `ignore-legacy` / `unknown`。可证明时按对应链归因；无法证明时只接受两条链一致的相对目标，分歧即保守跳过（绝对路径与 OPS 历史校验不受影响）。`src/instructions.ts` 在 snapshot 时传入该证据。 | `tests/instructions.spec.ts`：再次恢复回归 + 0.2.2 线投影仍生效时继续按 legacy 链归因；`tests/instruction-activity.spec.ts` 六条语义/归因单测。 |
+| P2-3 Files 页头路径与文件树不一致 | 成立。alpha.2 给 Files 槽位的 `absolutePath` 是有效目录、原生树也浏览它，但 `RootSwitcher` 优先用面板 `list` 的 `view.primaryRoot`（Registry 身份 = Session 原始项目）渲染页头路径与 tooltip。 | `src/client/RootSwitcher.tsx` 的主根选择改用 Files 槽位传入的 `primaryPath`（有效目录）显示浏览路径、tooltip 与 open-in-app 目标；`view.primaryRoot` 仅保留给 Registry/管理对话框。 | `tests/client-switcher.spec.tsx` 的 worktree 页头路径回归。 |
+| P3 双语兼容笔记残留 `alpha.1` 支持声明 | 成立。§1 重复维护的 allowlist 停在 `0.2.2-rc.2`，peer 串列入 `0.2.3-alpha.1`，开发 pin 仍写 `0.2.2-rc.5`，与 §25 冲突。 | 两份笔记的 §1 改为链接 `src/compat/dsh-version.ts` / `package.json` / `pnpm compat:check` 的唯一真源，不再复制版本串；§25 补充恢复重放的目录证据规则。 | `pnpm docs:check`。 |
+
+边界：P2-1 与 P2-2 的修复都是「证据不足时拒绝或跳过」，不新增读取 ACL，也不把版本字符串比较引入运行时。P2-2 对无法证明目录的旧相对活动是保守丢弃——可能少注入一条**旧**的嵌套指令，但不会把指令注入到操作从未到达的目录。
+
 ## 证据边界
 
 本文只记录上游源码与发布元数据对照。本机与 CI 的执行证据（含 `0.2.3-alpha.2` 车道的 Auto Review 联合冒烟、三 OS 矩阵与实机目检）只记[路线账本](../plans/active/2026-09-12-multi-root-workspace.md)。
