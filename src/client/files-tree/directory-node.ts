@@ -1,4 +1,5 @@
 /** Watch and read ownership for the Files panel's expanded directory tree. */
+import { childPath, type JoinTreeChild } from './resource-path.ts'
 import type { DirLevel } from './store.ts'
 
 /** One open directory and its active child nodes; cached view preferences live in the store. */
@@ -16,20 +17,23 @@ export class DirectoryNode {
   constructor(
     readonly path: string,
     private readonly load: (path: string, signal: AbortSignal) => Promise<DirLevel | undefined>,
-    private readonly watch: (path: string, signal: AbortSignal) => AsyncIterable<'ready' | 'change'>,
+    private readonly watch: ((path: string, signal: AbortSignal) => AsyncIterable<'ready' | 'change'>) | undefined,
     private readonly failed: (path: string, error: unknown) => void,
     lifetime: AbortSignal,
     private restore: readonly string[] = [],
+    private readonly joinChild: JoinTreeChild = childPath,
   ) {
     this.signal = AbortSignal.any([lifetime, this.controller.signal])
   }
 
   /**
-   * Start observation once; readiness triggers the initial listing.
+   * Start the node once: follow its watch where the provider has one —
+   * readiness triggers the initial listing — or perform the explicit initial
+   * read a watch-less provider needs, with no stream at all.
    * @returns this node.
    */
   open(): this {
-    this.task ??= this.follow()
+    this.task ??= this.watch === undefined ? this.refresh() : this.follow()
     return this
   }
 
@@ -66,7 +70,7 @@ export class DirectoryNode {
     if (this.signal.aborted) return undefined
     let child = this.children.get(path)
     if (child === undefined) {
-      child = new DirectoryNode(path, this.load, this.watch, this.failed, this.signal, restore)
+      child = new DirectoryNode(path, this.load, this.watch, this.failed, this.signal, restore, this.joinChild)
       child.automatic = this.automatic
       this.children.set(path, child)
     }
@@ -95,8 +99,15 @@ export class DirectoryNode {
     for (const child of this.children.values()) child.setAutomatic(enabled)
   }
 
-  /** Queue a reread, coalescing with active work. @returns completion of the active read and its coalesced rereads. */
+  /**
+   * Queue a reread, coalescing with active work. A dead node ignores the
+   * gesture entirely; a live one always runs — the auto-refresh policy only
+   * decides whether a WATCH event schedules one, never whether a reader's
+   * own refresh survives an in-flight read.
+   * @returns completion of the active read and its coalesced rereads.
+   */
   refresh(): Promise<void> {
+    if (this.signal.aborted) return Promise.resolve()
     this.dirty = true
     this.reading ??= this.read()
     return this.reading
@@ -116,8 +127,10 @@ export class DirectoryNode {
   }
 
   private async follow(): Promise<void> {
+    const watch = this.watch
+    if (watch === undefined) return
     try {
-      for await (const _event of this.watch(this.path, this.signal)) {
+      for await (const _event of watch(this.path, this.signal)) {
         this.dirty = true
         if (!this.initialized || this.automatic) void this.refresh()
       }
@@ -132,7 +145,7 @@ export class DirectoryNode {
   }
 
   private async read(): Promise<void> {
-    const readAgain = (): boolean => this.dirty && this.automatic && !this.signal.aborted
+    const readAgain = (): boolean => this.dirty && !this.signal.aborted
     try {
       do {
         this.dirty = false
@@ -140,7 +153,7 @@ export class DirectoryNode {
         if (this.signal.aborted || level === undefined) return
         this.initialized = true
         const directories = new Set(level.entries.filter(entry => entry.type === 'directory')
-          .map(entry => `${this.path.replace(/[/\\]+$/, '')}/${entry.name}`))
+          .map(entry => this.joinChild(this.path, entry.name)))
         for (const path of this.children.keys()) {
           if (!directories.has(path)) await this.collapse(path)
         }

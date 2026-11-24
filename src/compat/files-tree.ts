@@ -68,6 +68,12 @@ export interface NativeTreeOptions {
    * when the caller pre-filtered the levels.
    */
   readonly hiddenOnly?: ReadonlySet<string> | undefined
+  /**
+   * The child-key join for entry paths; defaults to the local
+   * mixed-separator spelling. A provider with a different geometry (a
+   * POSIX-only remote namespace) supplies its own.
+   */
+  readonly joinChild?: ((parent: string, name: string) => string) | undefined
 }
 
 /** The factory consumes absolute, slash-separated keys and already-localized errors. */
@@ -80,6 +86,7 @@ export function nativeTreeInput<F>(
 ): object {
   const root = state.root.replace(/[/\\]+$/, '')
   const keyOf = (path: string): string => path === state.root ? root : path
+  const join = options.joinChild ?? ((parent: string, name: string): string => `${parent.replace(/[/\\]+$/, '')}/${name}`)
   const entries: NativeTreeEntry[] = []
   const directories: Record<string, { loading?: true; failure?: string; truncated?: true; omitted?: 'hidden' | 'unmatched' }> = {}
   for (const path of state.expanded) directories[keyOf(path)] = { loading: true }
@@ -95,7 +102,7 @@ export function nativeTreeInput<F>(
       else if (options.hiddenOnly?.has(path) === true) status.omitted = 'hidden'
       directories[key] = status
       for (const entry of level.level.entries) entries.push({
-        path: `${path.replace(/[/\\]+$/, '')}/${entry.name}`, name: entry.name, meta: { kind: entry.type },
+        path: join(path, entry.name), name: entry.name, meta: { kind: entry.type },
       })
     }
   }

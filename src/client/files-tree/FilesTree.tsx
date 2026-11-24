@@ -16,15 +16,13 @@
  * plugin's switcher already owns. This fork takes all four as props and
  * draws only the body. See FORK.md.
  */
-import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import type { ReactNode } from 'react'
 import type { PropsLocale, PropsStore } from '@deepseek-ai/dsh-client-ui-slots'
 import type { TabId } from '@deepseek-ai/dsh-client-ui-dockkit'
-import type { SessionId } from '@deepseek-ai/dsh-session/types'
-import { fileAddressFor } from '@deepseek-ai/dsh-util-workspace-path'
 import type { NativeTreeRenderer } from '../../compat/files-tree.ts'
-import type { FilesMenuSeat } from './context-menu.ts'
 import type { FilesInjected } from './face.ts'
+import { rowActions, type WorkspaceFilesProvider } from './provider.ts'
 import { locateFile, relativeUnderRoot } from './locate.ts'
 import type {} from './locales.ts'
 import type { createFilesStore } from './store.ts'
@@ -43,35 +41,31 @@ export type FilesTreeProps =
   & Pick<FilesInjected, 'hold' | 'release' | 'toggle'>
   & PropsLocale<'sidebarFiles'>
   & {
-    /** The store bucket this tree reads and writes — the pane's own dockkit tab id. */
+    /**
+     * The store bucket this tree reads and writes —
+     * `treeBucketId(owner, provider.identity)`, the owner (dockkit tab or
+     * pane) plus the provider key.
+     */
     readonly tabId: TabId
-    /** Session the listing and the resource addresses belong to. */
-    readonly sessionId: SessionId
-    /** Absolute path of the root this tree lists (the selected additional root). */
-    readonly root: string
+    /**
+     * The provider this tree browses with: the bucket's root is its
+     * `treeRoot`, listings go through its `listDirectory`, and row gestures
+     * dispatch through its preview/menu ports.
+     */
+    readonly provider: WorkspaceFilesProvider
     /**
      * The owner's record lifetime: aborting it forgets the bucket and closes
      * the tree. A body unmount alone only ends the hold — the bucket, its
      * listed levels, and its expansion stay for the next mount to resume.
      */
     readonly signal: AbortSignal
-    /** Open one `dsh-resource://file` address (the adapter's sidebarRight route). */
-    readonly onOpen: (address: string) => void
+    /**
+     * The document navigator's replace-tab route: a file row opened in a
+     * preview replaces the preview's own tab. Absent on the Files page.
+     */
+    readonly replaceTab?: TabId | undefined
     /** Optional host-controlled tree Factory, available on the newer Files page. */
     readonly nativeTree?: NativeTreeRenderer | undefined
-    /**
-     * Row context menus (`0.2.2-alpha.3+`): the pane's seat, pre-bound to the
-     * Session, handed every row's absolute path and kind. Absent where the host
-     * has no context-menu service — rows then keep the native browser menu,
-     * exactly the native tree's absence there.
-     */
-    readonly menu?: FilesMenuSeat | undefined
-    /**
-     * Whether the host's registered viewers can open one file address
-     * (`0.2.2-alpha.3+`); the Factory dims a file row it refuses. Absent leaves
-     * every file openable, the pre-Factory native behavior.
-     */
-    readonly canOpen?: ((address: string) => boolean) | undefined
     /**
      * Selector hook over the viewer registry's change counter. Reading it
      * re-renders the tree whenever a tab type registers or withdraws, so the
@@ -133,12 +127,17 @@ export type FilesTreeProps =
  * verbatim, with the root arriving as a prop instead of `useSessions(cwd)`.
  */
 export function FilesTree({
-  tabId, sessionId, root, signal, useStore, actions, hold, release, toggle, onOpen, t, nativeTree, reveal, saved, onScrollOffset,
-  menu, canOpen, useCanOpen, showHidden = true,
+  tabId, provider, signal, replaceTab, useStore, actions, hold, release, toggle, t, nativeTree, reveal, saved, onScrollOffset,
+  useCanOpen, showHidden = true,
 }: FilesTreeProps): ReactNode {
   // The canOpen verdicts below are read per row at render time; this subscription
   // is what re-renders the rows when the viewer registry changes.
   useCanOpen?.(version => version)
+  const root = provider.treeRoot
+  // The row gestures, provider-bound and signal-guarded: a stale path maps to
+  // no resource, and a provider without a port answers with the documented
+  // absence (no open, `canOpen: false`, no menu).
+  const rows = useMemo(() => rowActions(provider, signal, replaceTab), [provider, signal, replaceTab])
   const state = useStore(store => store.byTab[tabId])
   const bodyRef = useRef<HTMLDivElement>(null)
   const scrollTopRef = useRef(0)
@@ -206,7 +205,7 @@ export function FilesTree({
       setCurrent(undefined)
       return
     }
-    const location = locateFile(state, relative)
+    const location = locateFile(state, relative, provider.joinChild)
     if (walk.current.settled || walk.current.canceled || revealSeed.current === revealPath) {
       setCurrent(location?.current)
       return
@@ -223,7 +222,7 @@ export function FilesTree({
     revealOnSettled?.(revealPath)
     if (location?.current !== undefined) wantScroll.current = true
     setCurrent(location?.current)
-  }, [revealKey, state, tabId, signal, toggle, revealPath, revealOnSettled, revealSaved])
+  }, [revealKey, state, tabId, signal, toggle, provider, revealPath, revealOnSettled, revealSaved])
   const pendingScroll = useRef(0)
   // The live render's state and saved snapshot, read by the hold effect. They
   // are refs rather than dependencies: a store write must not release and
@@ -333,7 +332,7 @@ export function FilesTree({
     // reader had stay drawn while the reopened node's listings settle (the
     // store's `loading` is a no-op for a ready level).
     const resumed = current !== undefined && current.root === root
-    hold(tabId, root, signal, resumed ? current.expanded : undefined)
+    hold(tabId, provider, signal, resumed ? current.expanded : undefined)
     if (!resumed) {
       // The owner-closed memory lands behind the seed through the verbatim
       // `toggle` — its `root.setExpanded(next)` is upstream's own
@@ -353,13 +352,13 @@ export function FilesTree({
     // The body unmounting is a hold ending, not a record ending: close the
     // node and watches, leave the bucket for the next mount.
     return () => { release(tabId) }
-  }, [root, tabId, signal, hold, release, toggle])
+  }, [provider, tabId, signal, hold, release, toggle])
 
   if (state === undefined) return null
   // Hidden entries are filtered here, not in the store: the listing keeps every
   // entry so the eye toggle can bring them back without a relist, exactly like
   // the native navigator's `workspaceEntries(levels, showHidden)`.
-  const drawn = drawnTree(state, showHidden)
+  const drawn = drawnTree(state, showHidden, provider.joinChild)
   return (
     <div
       ref={bodyRef}
@@ -371,10 +370,10 @@ export function FilesTree({
       <TreeView
         state={drawn.state}
         t={t}
-        sessionId={sessionId}
         nativeTree={nativeTree}
-        menu={menu}
-        canOpen={canOpen}
+        menu={rows.menu}
+        canOpen={rows.canOpen}
+        joinChild={provider.joinChild}
         hiddenOnly={drawn.hiddenOnly}
         current={current === undefined ? undefined : { path: current, ref: currentRef }}
         onToggle={(parent, path) => {
@@ -399,10 +398,9 @@ export function FilesTree({
           }
           toggle(tabId, parent, path, state.expanded, signal)
         }}
-        // Every row carries an absolute path; the address leaves cwd undefined so
-        // the host resolves the file as written — a cwd here would relativize it
-        // against the session's primary root and open the wrong file.
-        onOpen={(path) => { onOpen(fileAddressFor(sessionId, undefined, path)) }}
+        // The row's key resolves through the provider at dispatch: a stale
+        // key maps to no resource and opens nothing.
+        onOpen={rows.open}
       />
     </div>
   )

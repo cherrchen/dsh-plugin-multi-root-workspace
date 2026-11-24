@@ -18,7 +18,9 @@ import type { TabId } from '@deepseek-ai/dsh-client-ui-dockkit'
 import type { Context as ClientContext } from '@deepseek-ai/cordis'
 import { FilesTree } from '../src/client/files-tree/FilesTree.tsx'
 import { createFilesStore, type FilesState } from '../src/client/files-tree/store.ts'
-import { createList, createWatch, filesFace } from '../src/client/files-tree/face.ts'
+import { filesFace } from '../src/client/files-tree/face.ts'
+import { treeBucketId, type WorkspaceFilesProvider } from '../src/client/files-tree/provider.ts'
+import { createList, createLocalWorkspaceProvider, createWatch } from '../src/client/files-tree/providers/local.ts'
 import { lazyFilesRemote } from '../src/client/files-tree/adapter.tsx'
 import type { FilesMenuSeat } from '../src/client/files-tree/context-menu.ts'
 import type { NativeTreeRenderer } from '../src/compat/files-tree.ts'
@@ -26,6 +28,10 @@ import type { NativeTreeRenderer } from '../src/compat/files-tree.ts'
 const SESSION = 'session-1' as SessionId
 const TAB = 'tab-1' as TabId
 const ROOT = '/repos/payments'
+/** The provider identity every mount browses with: the local fixture's root id and incarnation. */
+const IDENTITY = { sessionId: SESSION, root: { kind: 'additional' as const, rootId: 'root-a' }, incarnation: '2026-09-12T00:00:00.000Z' }
+/** The store bucket this tree's holds and levels live in — owner plus provider key. */
+const BUCKET = treeBucketId(TAB, IDENTITY)
 
 /** One captured workspaceFiles call. */
 interface Call {
@@ -105,10 +111,12 @@ interface Harness {
   readonly watches: Map<string, Watch>
   /** `FilesTree`'s `onOpen` spy — receives `dsh-resource://file` addresses. */
   readonly onOpen: ReturnType<typeof vi.fn<(address: string) => void>>
+  /** The local provider the mounted tree browses with. */
+  readonly provider: WorkspaceFilesProvider
   /** The verbatim face — `refresh` exercises the reload seam directly. */
   readonly face: {
     refresh: (tabId: TabId) => void
-    hold: (tabId: TabId, root: string, signal: AbortSignal, restore?: readonly string[]) => void
+    hold: (tabId: TabId, provider: WorkspaceFilesProvider, signal: AbortSignal, restore?: readonly string[]) => void
     release: (tabId: TabId) => void
   }
   /** The takeover lifetime — aborting must forget the bucket and stop watches. */
@@ -166,33 +174,36 @@ function mount(
   }
   const handle = createFilesStore()
   const instance = handle.create('spec')
-  const face = filesFace(createList(remote as never), createWatch(remote as never))(SESSION, instance.actions)
+  const face = filesFace(instance.actions)
+  const provider = createLocalWorkspaceProvider(IDENTITY, ROOT, {
+    list: createList(remote as never),
+    watch: createWatch(remote as never),
+    open: (address) => { onOpen(address) },
+    ...(options.canOpen === undefined ? {} : { canOpen: options.canOpen }),
+    ...(options.menu === undefined ? {} : { menu: options.menu }),
+  })
   const useStore = <S,>(selector: (state: FilesState) => S): S => useSyncExternalStore(
     notify => instance.subscribe(notify),
     () => selector(instance.getSnapshot()),
   )
   const tree = (
     <FilesTree
-      tabId={TAB}
-      sessionId={SESSION}
-      root={ROOT}
+      tabId={BUCKET}
+      provider={provider}
       signal={controller.signal}
       useStore={useStore}
       actions={instance.actions}
       hold={face.hold}
       release={face.release}
       toggle={face.toggle}
-      onOpen={onOpen}
       t={(key: string) => key as never}
-      {...(options.menu === undefined ? {} : { menu: options.menu })}
-      {...(options.canOpen === undefined ? {} : { canOpen: options.canOpen })}
       {...(options.useCanOpen === undefined ? {} : { useCanOpen: options.useCanOpen })}
       {...(options.nativeTree === undefined ? {} : { nativeTree: options.nativeTree })}
     />
   )
   const mounted = options.portalInto === undefined ? tree : createPortal(tree, options.portalInto)
   render(mounted as ReactElement, options.container === undefined ? undefined : { container: options.container })
-  return { calls, watches, onOpen, face, controller, snapshot: () => instance.getSnapshot() }
+  return { calls, watches, onOpen, provider, face, controller, snapshot: () => instance.getSnapshot() }
 }
 
 /** The page fixtures the focus tests appended; removed after each case. */
@@ -237,7 +248,7 @@ describe('the forked Files tree', () => {
     // Collapsing hides the children; the loaded level survives in the store.
     fireEvent.click(await screen.findByRole('button', { name: 'src' }))
     await waitFor(() => { expect(screen.queryByRole('button', { name: 'inner.ts' })).toBeNull() })
-    expect(harness.snapshot().byTab[TAB]?.expanded).not.toContain(`${ROOT}/src`)
+    expect(harness.snapshot().byTab[BUCKET]?.expanded).not.toContain(`${ROOT}/src`)
   })
 
   it('opens a file through a session file address whose path stays absolute', async () => {
@@ -254,7 +265,7 @@ describe('the forked Files tree', () => {
     const listed = () => harness.calls.filter(call => call.kind === 'list').length
     const before = listed()
 
-    act(() => { harness.face.refresh(TAB) })
+    act(() => { harness.face.refresh(BUCKET) })
     // A ready level never drops back to the loading note during a relist.
     expect(screen.queryByText('loading')).toBeNull()
     await waitFor(() => { expect(listed()).toBeGreaterThan(before) })
@@ -293,15 +304,15 @@ describe('the forked Files tree', () => {
     await screen.findByRole('button', { name: 'src' })
     const listed = () => harness.calls.filter(call => call.kind === 'list').length
 
-    act(() => { harness.face.release(TAB) })
-    expect(harness.snapshot().byTab[TAB]).toBeDefined()
+    act(() => { harness.face.release(BUCKET) })
+    expect(harness.snapshot().byTab[BUCKET]).toBeDefined()
     const listedAtRelease = listed()
     act(() => { harness.watches.get(ROOT)!.push({ kind: 'change' }) })
     await new Promise(resolve => setTimeout(resolve, 0))
     expect(listed()).toBe(listedAtRelease)
 
     act(() => {
-      harness.face.hold(TAB, ROOT, harness.controller.signal, harness.snapshot().byTab[TAB]?.expanded)
+      harness.face.hold(BUCKET, harness.provider, harness.controller.signal, harness.snapshot().byTab[BUCKET]?.expanded)
     })
     // The kept level is still ready — no loading row while the resumed watch
     // asks the host for a fresh listing.
@@ -313,10 +324,10 @@ describe('the forked Files tree', () => {
   it('forgets the bucket and closes the watch when the signal aborts', async () => {
     const harness = mount()
     await screen.findByRole('button', { name: 'src' })
-    expect(harness.snapshot().byTab[TAB]).toBeDefined()
+    expect(harness.snapshot().byTab[BUCKET]).toBeDefined()
 
     act(() => { harness.controller.abort() })
-    await waitFor(() => { expect(harness.snapshot().byTab[TAB]).toBeUndefined() })
+    await waitFor(() => { expect(harness.snapshot().byTab[BUCKET]).toBeUndefined() })
     expect(document.querySelector('.mrfw-ftBody')).toBeNull()
     // The parked watch is disposed: a pushed frame can no longer list.
     const listed = harness.calls.filter(call => call.kind === 'list').length
@@ -418,13 +429,18 @@ describe('the forked tree host-parity inputs (row menus, viewer registry)', () =
     expect(input.canOpen?.({ path: '/repos/payments/a.md' })).toBe(false)
   })
 
-  it('omits the Factory inputs when the host has neither seat', async () => {
+  it('omits the menu input and marks every row openable when the host has neither seat', async () => {
     const factory = vi.fn((_name: string, _input: object, options: { fallback: ReactElement }) => options.fallback)
     mount(undefined, undefined, { nativeTree: factory as unknown as NativeTreeRenderer })
     await waitFor(() => { expect(factory).toHaveBeenCalled() })
-    const input = factory.mock.calls.at(-1)![1] as Record<string, unknown>
+    const input = factory.mock.calls.at(-1)![1] as {
+      rowTriggerProps?: unknown
+      canOpen?: (entry: { path: string }) => boolean
+    }
     expect('rowTriggerProps' in input).toBe(false)
-    expect('canOpen' in input).toBe(false)
+    // No viewer registry leaves every file openable — the pre-registry native
+    // behavior, now spelled through the provider's preview port.
+    expect(input.canOpen?.({ path: '/repos/payments/a.md' })).toBe(true)
   })
 
   it('subscribes to the viewer registry through the supplied hook', async () => {

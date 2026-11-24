@@ -1038,9 +1038,14 @@ describe('the Files-tab switcher host-parity wiring', () => {
     const factory = factoryStub()
     const { pane } = renderInPane(harness, { absolutePath: '/repos/primary', renderFactorySlot: factory }, false, true)
     await selectPayments(pane)
-    const input = factory.mock.calls.at(-1)![1] as Record<string, unknown>
+    const input = factory.mock.calls.at(-1)![1] as {
+      rowTriggerProps?: unknown
+      canOpen?: (entry: { path: string }) => boolean
+    }
     expect('rowTriggerProps' in input).toBe(false)
-    expect('canOpen' in input).toBe(false)
+    // A host without the viewer registry leaves every file openable — the
+    // pre-registry native verdict, spelled through the provider's port.
+    expect(input.canOpen?.({ path: '/repos/payments/notes.md' })).toBe(true)
   })
 
   it('hands the Factory the viewer registry verdict for absolute addresses', async () => {

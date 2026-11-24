@@ -9,9 +9,14 @@ import type { SessionId } from '@deepseek-ai/dsh-session/types'
 import type { TabId } from '@deepseek-ai/dsh-client-ui-dockkit'
 import { createFilesTreeSeats } from '../src/client/files-tree/adapter.tsx'
 import { createSearchPreferenceBook } from '../src/client/files-tree/search-preferences.ts'
+import { providerKey } from '../src/client/files-tree/provider.ts'
 import { searchStateKey } from '../src/client/files-tree/search-state.ts'
 
-const ROOT = '/repos/payments'
+/** One provider key per browsed root — the search record's root slot is a provider key now, not a path. */
+const pkey = (rootId: string): string =>
+  providerKey({ sessionId: 'session-1' as SessionId, root: { kind: 'additional', rootId }, incarnation: '2026-09-12T00:00:00.000Z' })
+const ROOT = pkey('root-a')
+const OTHER = pkey('root-b')
 const TAB_A = 'tab-a' as TabId
 const TAB_B = 'tab-b' as TabId
 
@@ -53,7 +58,7 @@ describe('the search records ownership', () => {
   it("drops one closed tab's records and keeps the other tab's", () => {
     const { injected } = product(seats(), 'session-a')
     const keyA = searchStateKey(TAB_A, ROOT)
-    const otherRoot = searchStateKey(TAB_A, '/repos/other')
+    const otherRoot = searchStateKey(TAB_A, OTHER)
     const keyB = searchStateKey(TAB_B, ROOT)
     for (const key of [keyA, otherRoot, keyB]) {
       injected.search.setQuery(key, 'config')

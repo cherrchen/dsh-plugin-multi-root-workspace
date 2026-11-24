@@ -47,6 +47,8 @@ import { createPortal } from 'react-dom'
 import { Menu, type MenuEntry } from '@deepseek-ai/dsh-client-ui-primitives'
 import type { TabId } from '@deepseek-ai/dsh-client-ui-dockkit'
 import { IconChevronDown, IconFolderClose, IconFolderOpen, IconRefresh, IconSettings, maybeComponent, maybeIcon } from '../compat/client-icons.ts'
+import { providerKey, treeBucketId, type WorkspaceFilesProvider } from './files-tree/provider.ts'
+import type { FilesRootSelection } from './files-tree/providers/resolver.ts'
 import { searchStateKey, type SearchPaneStates } from './files-tree/search-state.ts'
 import type { SnapshotSelectorHook } from '@deepseek-ai/dsh-client-store'
 import { createSearchFailureDescriber } from './files-tree/describe-failure.ts'
@@ -95,12 +97,14 @@ export interface RootSwitcherProps extends Omit<WorkspaceFoldersActionProps, 'co
 interface Takeover {
   /** Lifetime handed to the tree's face: aborting forgets the store bucket and closes the watches. */
   readonly signal: AbortSignal
-  /** The store bucket's key — the dockkit tab id where the hook exists, else a generated one. */
-  readonly tabId: TabId
-  /** The root the tree lists. */
-  readonly root: string
-  /** The same root's registry id — what the search endpoint takes. */
-  readonly rootId: string
+  /** The owner — the dockkit tab id where the hook exists, else a generated one. */
+  readonly owner: TabId
+  /** The store bucket's key — `treeBucketId(owner, provider.identity)`. */
+  readonly bucketId: TabId
+  /** The provider the tree browses with, snapshotted with the signal. */
+  readonly provider: WorkspaceFilesProvider
+  /** `providerKey(provider.identity)` — what the portal gate compares. */
+  readonly providerKey: string
 }
 
 /**
@@ -190,7 +194,7 @@ export function RootSwitcher(props: RootSwitcherProps): ReactNode {
   // mount at all — and no additional root can be selected there anyway.
   const useTreeSelection = filesTree?.useTreeSelection ?? noTreeSelection
   const stored = useTreeSelection(selection => (tabId === undefined ? undefined : selection[tabId]))
-  const selected: RootView | 'primary' = stored ?? 'primary'
+  const selected: FilesRootSelection | 'primary' = stored ?? 'primary'
   const selectRoot = filesTree?.selectRoot
   const setSelected = useCallback((next: RootView | 'primary'): void => {
     if (selectRoot === undefined || tabId === undefined) return
@@ -242,25 +246,38 @@ export function RootSwitcher(props: RootSwitcherProps): ReactNode {
   // remount's first pending moment and on any transient failure.
   useEffect(() => {
     if (selected === 'primary' || view === undefined) return
-    const current = view.roots.find(root => root.id === selected.id)
+    const current = view.roots.find(root => root.id === selected.ref.rootId)
     if (current === undefined || current.state !== 'available') { setSelected('primary'); return }
     // The match can carry a newer alias, access, or path than the row
     // `onSelect` captured; adopt the refreshed object so the trigger label,
     // the path label, and the tree entry stop rendering the stale snapshot.
-    if (current !== selected) setSelected(current)
+    if (current !== selected.view) setSelected(current)
   }, [view, selected, setSelected])
 
   const roots = useMemo(() => view?.roots ?? [], [view])
   const primaryLabel = view?.primaryName ?? basename(view?.primaryRoot ?? primaryPath)
-  const triggerLabel = selected === 'primary' ? primaryLabel : displayNameOf(selected)
+  const triggerLabel = selected === 'primary' ? primaryLabel : displayNameOf(selected.view)
   const triggerPath = selected === 'primary' ? (view?.primaryRoot ?? primaryPath) : selected.path
+  // The selection's provider, cached by its identity key: the surface is
+  // rebuilt every render, so a plain memo would hand the takeover effect a
+  // fresh provider each pass — the cache keeps the same instance while the
+  // key (session + root + incarnation) is unchanged, which is what keeps
+  // the effect's deps and the takeover record stable.
+  const providerCache = useRef(new Map<string, WorkspaceFilesProvider>())
+  const selectedProvider = useMemo(() => {
+    if (selected === 'primary' || filesTree === undefined) return undefined
+    const key = providerKey({ sessionId: filesTree.sessionId, root: selected.ref, incarnation: selected.incarnation })
+    const known = providerCache.current.get(key)
+    if (known !== undefined) return known
+    const provider = filesTree.resolveProvider(selected)
+    providerCache.current.set(key, provider)
+    return provider
+  }, [selected, filesTree])
   // Exactly the portal condition: the forked tree — and the header reload
   // that refreshes it — exist together or not at all. A missing fork keeps
   // every native piece visible and the menu's additional rows unlisted, so
   // data-root-kind never hides controls the takeover did not replace.
   const treeVisible = selected !== 'primary' && panel !== undefined && pane !== null && filesTree !== undefined
-  const selectedPath = selected === 'primary' ? undefined : selected.path
-  const selectedId = selected === 'primary' ? undefined : selected.id
 
   // The search bar's open state for this pane root: the header toggle and the
   // pane read the same record, so the toggle's aria-expanded cannot drift.
@@ -269,7 +286,7 @@ export function RootSwitcher(props: RootSwitcherProps): ReactNode {
   // conditional call would change the hook order exactly then.
   const searchSeat = filesTree?.search
   const useSearchState = searchSeat?.useSearchState ?? NO_SEARCH_STATES
-  const searchKey = takeover === null || searchSeat === undefined ? undefined : searchStateKey(takeover.tabId, takeover.root)
+  const searchKey = takeover === null || searchSeat === undefined ? undefined : searchStateKey(takeover.owner, takeover.providerKey)
   const searchBarOpen = useSearchState(states => searchKey !== undefined && states[searchKey]?.barOpen === true)
   /** Localize a failed search's panel code; the tree's own codes keep its vocabulary. */
   const describeSearchFailure = useMemo(() => createSearchFailureDescriber(t), [t])
@@ -327,12 +344,14 @@ export function RootSwitcher(props: RootSwitcherProps): ReactNode {
   // inject-side observer, which ends it whenever the tabHost section leaves
   // the document — the record's real end, even long after this body is gone.
   useEffect(() => {
-    if (!treeVisible || selectedPath === undefined || selectedId === undefined || tabId === undefined || takeoverCtl === undefined) { setTakeover(null); return }
+    if (!treeVisible || selectedProvider === undefined || tabId === undefined || takeoverCtl === undefined) { setTakeover(null); return }
+    const key = providerKey(selectedProvider.identity)
     setTakeover({
-      signal: takeoverCtl.signal(tabId, selectedPath, sectionRef.current ?? undefined),
-      tabId,
-      root: selectedPath,
-      rootId: selectedId,
+      signal: takeoverCtl.signal(tabId, key, sectionRef.current ?? undefined),
+      owner: tabId,
+      bucketId: treeBucketId(tabId, selectedProvider.identity),
+      provider: selectedProvider,
+      providerKey: key,
     })
     return () => {
       // The mounted flag settles the branch: a deps change ends the entry
@@ -342,7 +361,7 @@ export function RootSwitcher(props: RootSwitcherProps): ReactNode {
       // anything, so the old abort-on-unmount bound stands there.
       if (mounted.current || sectionRef.current === null) takeoverCtl.end(tabId)
     }
-  }, [treeVisible, selectedPath, selectedId, tabId, takeoverCtl])
+  }, [treeVisible, selectedProvider, tabId, takeoverCtl])
 
   const items = useMemo((): MenuEntry[] => [
     { id: 'primary', label: `${primaryLabel} · ${t('panel.primary')}`, icon: <IconFolderOpen /> },
@@ -364,6 +383,8 @@ export function RootSwitcher(props: RootSwitcherProps): ReactNode {
     const root = roots.find(candidate => `root:${candidate.id}` === id)
     if (root !== undefined) setSelected(root)
   }
+  // The open-in-app path comes from the provider's port over the root
+  // resource — the trusted local spelling, never the trigger's display path.
 
   // A name that changed since the last measurement renders whole until the fit
   // lands; the previous root's truncated text is never shown on the next one.
@@ -388,7 +409,7 @@ export function RootSwitcher(props: RootSwitcherProps): ReactNode {
           // The manager entry pins below the scrolling roots list — it is
           // chrome, not a root, and a long registry must not scroll it away.
           footer={[{ id: 'manage', label: t('switcher.manage'), icon: <IconSettings /> }]}
-          selectedId={selected === 'primary' ? 'primary' : `root:${selected.id}`}
+          selectedId={selected === 'primary' ? 'primary' : `root:${selected.ref.rootId}`}
           onSelect={onSelect}
           portal
           align="start"
@@ -447,7 +468,7 @@ export function RootSwitcher(props: RootSwitcherProps): ReactNode {
               // replace the tree there is no directory node to relist, so the
               // active search request is re-run instead — otherwise a settled
               // answer keeps its identity and stale matches survive the reload.
-              filesTree.face.refresh(takeover.tabId)
+              filesTree.face.refresh(takeover.bucketId)
               if (searchKey !== undefined && searchSeat !== undefined) searchSeat.store.refresh(searchKey)
             }}
           >
@@ -486,22 +507,28 @@ export function RootSwitcher(props: RootSwitcherProps): ReactNode {
           // renders nothing until the catalog resolves; its own box is what the
           // resize observer watches for the arrival.
           <span ref={openAnchorRef} className="mrfw-switcherOpen">
-            <OpenInAppAction {...props.openInApp} absolutePath={triggerPath} />
+            <OpenInAppAction {...props.openInApp} absolutePath={
+              selectedProvider === undefined
+                ? triggerPath
+                : (() => {
+                    const rootResource = selectedProvider.resource(selectedProvider.treeRoot)
+                    return rootResource === undefined ? triggerPath : selectedProvider.openInApp?.(rootResource) ?? triggerPath
+                  })()
+            } />
           </span>
         ) : null}
       </span>
-      {treeVisible && takeover !== null && filesTree !== undefined
+      {treeVisible && takeover !== null && selectedProvider !== undefined
+          && providerKey(selectedProvider.identity) === takeover.providerKey && filesTree !== undefined
         ? createPortal(
             <FilesPane
               filesTree={filesTree}
               stateKey={searchKey ?? ''}
-              rootId={takeover.rootId}
-              tabId={takeover.tabId}
-              root={takeover.root}
+              provider={takeover.provider}
+              tabId={takeover.bucketId}
               signal={takeover.signal}
               useStore={filesTree.useStore}
               actions={filesTree.actions}
-              onOpenFile={filesTree.openFile}
               nativeTree={pane.hasAttribute('data-files-page') ? props.nativeTree : undefined}
               describeFailure={describeSearchFailure}
             />,

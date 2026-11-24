@@ -35,6 +35,7 @@ import type { StoreInstance } from '@deepseek-ai/dsh-client-store'
 import { PANEL_CHANNEL, type PanelRequest, type RootView, type RootsView } from '../src/contract.ts'
 import type { FilesState } from '../src/client/files-tree/store.ts'
 import { locateFile, relativeUnderRoot, rootForPath, underRoot, windowsRoot } from '../src/client/files-tree/locate.ts'
+import { providerKey } from '../src/client/files-tree/provider.ts'
 import { searchStateKey } from '../src/client/files-tree/search-state.ts'
 import * as client from '../src/client/index.ts'
 
@@ -520,9 +521,18 @@ function typeInPane(aside: HTMLElement, query: string): void {
   act(() => { fireEvent.change(input, { target: { value: query } }) })
 }
 
+/** The provider key one root's selection resolves to under the harness session. */
+function pkey(root: RootView): string {
+  return providerKey({
+    sessionId: 'session-1' as never,
+    root: { kind: 'additional', rootId: root.id },
+    incarnation: root.addedAt,
+  })
+}
+
 /** The plugin pane's search record key for one root. */
-function paneKey(root: string): string {
-  return searchStateKey('pane-1' as never, root)
+function paneKey(root: RootView): string {
+  return searchStateKey('pane-1' as never, pkey(root))
 }
 
 /** The forked body the takeover portals into the aside. */
@@ -995,7 +1005,7 @@ describe('the preview navigator retarget', () => {
     await waitFor(() => { expect(aside.querySelector('[data-files-path="/repos/docs/guide"]')).not.toBeNull() })
     // payments' expanded set never leaks into the docs record.
     await waitFor(() => {
-      expect(harness.saves.some(save => (save.snapshot as { root?: string }).root === '/repos/docs'
+      expect(harness.saves.some(save => (save.snapshot as { providerKey?: string }).providerKey === pkey(ROOT_C)
         && ((save.snapshot as { expanded?: readonly string[] }).expanded?.includes('/repos/payments/other') !== true))).toBe(true)
     })
 
@@ -1023,7 +1033,7 @@ describe('the preview navigator retarget', () => {
     act(() => { firstBody.dispatchEvent(new Event('scroll')) })
 
     await waitFor(() => {
-      expect(harness.saves.some(save => (save.snapshot as { root?: string; scrollTop?: number }).root === '/repos/payments'
+      expect(harness.saves.some(save => (save.snapshot as { providerKey?: string; scrollTop?: number }).providerKey === pkey(ROOT_A)
         && (save.snapshot as { scrollTop?: number }).scrollTop === 40)).toBe(true)
     })
 
@@ -1044,7 +1054,7 @@ describe('the preview navigator retarget', () => {
       })
       // The outgoing switch must not stamp the new root's address onto the
       // old root's record either: payments has only ever revealed inner.ts.
-      expect(harness.saves.some(save => (save.snapshot as { root?: string; revealed?: string }).root === '/repos/payments'
+      expect(harness.saves.some(save => (save.snapshot as { providerKey?: string; revealed?: string }).providerKey === pkey(ROOT_A)
         && (save.snapshot as { revealed?: string }).revealed === '/repos/docs/guide/intro.md')).toBe(false)
 
       const callsBeforeReturn = harness.treeCalls.length
@@ -1282,8 +1292,8 @@ describe('the preview navigator search surface', () => {
     const search = harness.injected().search as {
       state(key: string): { readonly scrollTop: number; readonly expanded: readonly string[] }
     }
-    await waitFor(() => { expect(search.state(paneKey('/repos/payments')).scrollTop).toBe(64) })
-    expect(search.state(paneKey('/repos/payments')).expanded).not.toContain('/repos/payments/src')
+    await waitFor(() => { expect(search.state(paneKey(ROOT_A)).scrollTop).toBe(64) })
+    expect(search.state(paneKey(ROOT_A)).expanded).not.toContain('/repos/payments/src')
     const callsBefore = harness.searchCalls().length
 
     act(() => { aside.remove() })
@@ -1292,7 +1302,7 @@ describe('the preview navigator search surface', () => {
     await waitFor(() => { expect(paneOf(second.aside).querySelector('[data-mrfw-files-results]')).not.toBeNull() })
     expect(paneSearch(second.aside).value).toBe('src')
     expect(paneOf(second.aside).querySelector('[data-files-path="/repos/payments/src"] button')?.getAttribute('aria-expanded')).toBe('false')
-    expect(search.state(paneKey('/repos/payments')).scrollTop).toBe(64)
+    expect(search.state(paneKey(ROOT_A)).scrollTop).toBe(64)
     expect(harness.searchCalls()).toHaveLength(callsBefore)
 
     // replaceTab closes the preview tab and mints a new one in the same pane.
@@ -1317,7 +1327,7 @@ describe('the preview navigator search surface', () => {
     const search = harness.injected().search as {
       state(key: string): { readonly query: string; readonly pending: boolean; readonly barOpen: boolean }
     }
-    const keyA = paneKey('/repos/payments')
+    const keyA = paneKey(ROOT_A)
     expect(search.state(keyA).query).toBe('inner')
     // The preview form never writes the Files-page bar visibility record.
     expect(search.state(keyA).barOpen).toBe(false)
@@ -1349,13 +1359,13 @@ describe('the preview navigator search surface', () => {
     typeInPane(aside, 'notes')
     await waitFor(() => { expect(harness.searchCalls()).toHaveLength(1) })
     const search = harness.injected().search as { state(key: string): { readonly query: string } }
-    expect(search.state(paneKey('/repos/payments')).query).toBe('notes')
+    expect(search.state(paneKey(ROOT_A)).query).toBe('notes')
     act(() => { aside.remove() })
     act(() => {
       preview.unmount()
       preview.cell.remove()
     })
-    await waitFor(() => { expect(search.state(paneKey('/repos/payments')).query).toBe('') })
+    await waitFor(() => { expect(search.state(paneKey(ROOT_A)).query).toBe('') })
   })
 
   it('moves the keyboard through Factory-drawn rows and back to the field', async () => {

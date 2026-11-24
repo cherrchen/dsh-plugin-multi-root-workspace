@@ -27,12 +27,12 @@ import clsx from 'clsx'
 import type { TabId } from '@deepseek-ai/dsh-client-ui-dockkit'
 import type { SnapshotSelectorHook } from '@deepseek-ai/dsh-client-store'
 import type { TranslateNS } from '@deepseek-ai/dsh-client-ui-slots'
-import { fileAddressFor } from '@deepseek-ai/dsh-util-workspace-path'
 import { maybeComponent, maybeIcon } from '../../compat/client-icons.ts'
 import type { NativeTreeRenderer } from '../../compat/files-tree.ts'
 import type { FilesTreeSurface, FilesTreeSearchSeat } from './adapter.tsx'
 import type { FilesTreeProps } from './FilesTree.tsx'
 import { FilesTree } from './FilesTree.tsx'
+import { providerKey, rowActions, type FilesRowActions, type WorkspaceFilesProvider } from './provider.ts'
 import {
   addRule, defaultRules, defaultSearchPreferences, enabledPaths, isDefaultRules, removeRule, setRuleEnabled,
   type ExclusionRule, type RuleInvalidReason, type WorkspaceSearchPreferences,
@@ -468,31 +468,32 @@ function SearchBar({ query, showHidden, inputRef, triggerRef, onQuery, onShowHid
 }
 
 /** The result tree: the same tree drawing, with matches highlighted and its own expansion. */
-function ResultTree({ result, expanded, filesTree, nativeTree, current, onToggle, onOpen }: {
+function ResultTree({ result, expanded, filesTree, rows, joinChild, nativeTree, current, onToggle }: {
   readonly result: Extract<SearchResultView, { kind: 'found' }>
   readonly expanded: readonly string[]
   readonly filesTree: FilesTreeSurface
+  /** The provider-bound row gestures — the same ones the listed tree draws with. */
+  readonly rows: FilesRowActions
+  readonly joinChild: WorkspaceFilesProvider['joinChild']
   readonly nativeTree: NativeTreeRenderer | undefined
   /** The previewed file's row when it is one of the matches: marked, never scrolled. */
   readonly current: string | undefined
   readonly onToggle: (path: string) => void
-  /** Open one result row by its absolute path. */
-  readonly onOpen: (path: string) => void
 }): ReactNode {
   const tree: FilesTabState = { ...result.tree, expanded: [...expanded] }
   return (
     <TreeView
       state={tree}
       t={filesTree.t}
-      sessionId={filesTree.sessionId}
       nativeTree={nativeTree}
-      menu={filesTree.menu}
-      canOpen={filesTree.canOpen}
+      menu={rows.menu}
+      canOpen={rows.canOpen}
+      joinChild={joinChild}
       highlight={result.query}
       unmatched
       current={current === undefined ? undefined : { path: current }}
       onToggle={(_parent, path) => { onToggle(path) }}
-      onOpen={onOpen}
+      onOpen={rows.open}
     />
   )
 }
@@ -501,16 +502,17 @@ function ResultTree({ result, expanded, filesTree, nativeTree, current, onToggle
 export interface FilesPaneProps {
   /** The assembled surface: store, faces, menus, viewer registry, and the search seat. */
   readonly filesTree: FilesTreeSurface
-  /** The `(tab, root)` search record key. */
+  /** The `(owner, providerKey)` search record key. */
   readonly stateKey: string
-  /** The selected root's registry id — what the search endpoint takes. */
-  readonly rootId: string
+  /** The provider the pane browses with — listings, row gestures, and the search port. */
+  readonly provider: WorkspaceFilesProvider
+  /** The tree bucket's key — `treeBucketId(owner, provider.identity)`. */
   readonly tabId: TabId
-  readonly root: string
   readonly signal: AbortSignal
+  /** The preview navigator's replace-tab route; absent on the Files page. */
+  readonly replaceTab?: TabId | undefined
   readonly useStore: FilesTreeProps['useStore']
   readonly actions: FilesTreeProps['actions']
-  readonly onOpenFile: (address: string) => void
   readonly nativeTree?: NativeTreeRenderer | undefined
   readonly reveal?: FilesTreeProps['reveal']
   readonly saved?: FilesTreeProps['saved']
@@ -535,15 +537,23 @@ export interface FilesPaneProps {
  */
 export function FilesPane(props: FilesPaneProps): ReactNode {
   const {
-    filesTree, stateKey, rootId, root, tabId, signal, useStore, actions, onOpenFile, nativeTree, reveal, saved,
+    filesTree, stateKey, provider, tabId, signal, replaceTab, useStore, actions, nativeTree, reveal, saved,
     onScrollOffset, describeFailure, mode = 'page', previewPath,
   } = props
+  const root = provider.treeRoot
+  // The row gestures, bound to this record's lifetime — the listed tree and
+  // the result tree share them so a stale key maps to no resource on either.
+  const rows = useMemo(() => rowActions(provider, signal, replaceTab), [provider, signal, replaceTab])
+  const pKey = providerKey(provider.identity)
   // Preview mode keeps its differences to the listed rows: the bar is always
   // drawn, the pane never takes the keyboard on mount, and a result row that is
   // the previewed file is marked current. Everything else — the records, the
   // requests, the settings — is the Files-page implementation.
   const preview = mode === 'preview'
-  const search: FilesTreeSearchSeat | undefined = filesTree.search
+  // The search surface needs both halves: the provider's `search` port (the
+  // capability) and the seat's records/preferences (the state). A provider
+  // without the port draws the bare tree exactly like a host without search.
+  const search: FilesTreeSearchSeat | undefined = provider.search === undefined ? undefined : filesTree.search
   // Hook order must not depend on the seat: the composition decides once,
   // but the takeover's first render may still be resolving.
   const useSearchState = search?.useSearchState ?? NO_SEARCH_STATES
@@ -558,7 +568,6 @@ export function FilesPane(props: FilesPaneProps): ReactNode {
     () => preferencesSource?.getSnapshot() ?? NO_PREFERENCES,
   )
   const store = search?.store
-  const run = search?.run
   const query = state?.query ?? ''
   const trimmed = query.trim()
   // The preview's bar is constant, so it neither reads nor writes `barOpen`:
@@ -595,31 +604,34 @@ export function FilesPane(props: FilesPaneProps): ReactNode {
   // identity matches is the SAME request, which is what lets a body remount
   // (opening a file hides the body) reuse it instead of resetting the reader's
   // expansion and offset with an identical replacement answer.
+  // The request's root slot carries the provider key: identical queries under
+  // another root — or the same root re-granted — are another request.
   const requestKey = useMemo(() => searchRequestKey({
-    rootId,
+    rootId: pKey,
     query: trimmed,
     excludedPaths,
     includeHidden: preferences.showHidden,
     respectGitignore: preferences.respectGitignore,
     attempt,
-  }), [rootId, trimmed, excludedPaths, preferences.showHidden, preferences.respectGitignore, attempt])
+  }), [pKey, trimmed, excludedPaths, preferences.showHidden, preferences.respectGitignore, attempt])
   const settledKey = state?.settledKey ?? ''
   useEffect(() => {
-    if (store === undefined || run === undefined || trimmed === '') return
+    if (store === undefined || provider.search === undefined || trimmed === '') return
     // Reuse the retained answer for an unchanged request: no request, no
     // `searched` write, so expansion and scrollTop stay where the reader left
     // them. A failed answer counts too — retrying is the button's explicit
     // attempt bump, not an automatic loop every time the effect settles.
     if (settledKey === requestKey) return
     const controller = new AbortController()
+    const lifetime = AbortSignal.any([controller.signal, signal])
     store.searching(stateKey)
-    void run(rootId, {
+    void provider.search!({
       query: trimmed,
       excludedPaths,
       includeHidden: preferences.showHidden,
       respectGitignore: preferences.respectGitignore,
-    }, controller.signal).then((answer) => {
-      if (controller.signal.aborted) return
+    }, lifetime).then((answer) => {
+      if (lifetime.aborted) return
       store.searched(stateKey, {
         kind: 'found',
         query: trimmed,
@@ -632,11 +644,11 @@ export function FilesPane(props: FilesPaneProps): ReactNode {
         ignored: preferences.respectGitignore,
       }, requestKey)
     }).catch((error: unknown) => {
-      if (controller.signal.aborted) return
+      if (lifetime.aborted) return
       store.searched(stateKey, { kind: 'failed', query: trimmed, failure: failureOf(error) }, requestKey)
     })
     return () => { controller.abort() }
-  }, [store, run, stateKey, requestKey, settledKey, rootId, trimmed, excludedPaths,
+  }, [store, provider, signal, stateKey, requestKey, settledKey, trimmed, excludedPaths,
     preferences.showHidden, preferences.respectGitignore])
   // The result body's offset: restored when the body mounts or a new result
   // lands, mirrored continuously so a remount returns where the reader was.
@@ -671,16 +683,16 @@ export function FilesPane(props: FilesPaneProps): ReactNode {
     if (!preview || previewPath === undefined || result?.kind !== 'found') return undefined
     const relative = relativeUnderRoot(previewPath, root)
     if (relative === undefined) return undefined
-    return locateFile(result.tree, relative).current
-  }, [preview, previewPath, result, root])
+    return locateFile(result.tree, relative, provider.joinChild).current
+  }, [preview, previewPath, result, root, provider])
   if (search === undefined) {
     return (
       <FilesTree
-        tabId={tabId} sessionId={filesTree.sessionId} root={root} signal={signal}
+        tabId={tabId} provider={provider} signal={signal} replaceTab={replaceTab}
         useStore={useStore} actions={actions}
         hold={filesTree.face.hold} release={filesTree.face.release} toggle={filesTree.face.toggle}
-        onOpen={onOpenFile} t={filesTree.t} nativeTree={nativeTree}
-        menu={filesTree.menu} canOpen={filesTree.canOpen} useCanOpen={filesTree.useCanOpen}
+        t={filesTree.t} nativeTree={nativeTree}
+        useCanOpen={filesTree.useCanOpen}
         reveal={reveal} saved={saved} onScrollOffset={onScrollOffset}
       />
     )
@@ -715,11 +727,11 @@ export function FilesPane(props: FilesPaneProps): ReactNode {
       </p>
       {trimmed === '' ? (
         <FilesTree
-          tabId={tabId} sessionId={filesTree.sessionId} root={root} signal={signal}
+          tabId={tabId} provider={provider} signal={signal} replaceTab={replaceTab}
           useStore={useStore} actions={actions}
           hold={filesTree.face.hold} release={filesTree.face.release} toggle={filesTree.face.toggle}
-          onOpen={onOpenFile} t={filesTree.t} nativeTree={nativeTree}
-          menu={filesTree.menu} canOpen={filesTree.canOpen} useCanOpen={filesTree.useCanOpen}
+          t={filesTree.t} nativeTree={nativeTree}
+          useCanOpen={filesTree.useCanOpen}
           showHidden={preferences.showHidden}
           reveal={reveal} saved={saved} onScrollOffset={onScrollOffset}
         />
@@ -742,13 +754,11 @@ export function FilesPane(props: FilesPaneProps): ReactNode {
                 result={result}
                 expanded={state?.expanded ?? result.tree.expanded}
                 filesTree={filesTree}
+                rows={rows}
+                joinChild={provider.joinChild}
                 nativeTree={nativeTree}
                 current={resultCurrent}
                 onToggle={(path) => { store?.toggled(stateKey, path) }}
-                // A result row's key is the absolute path, exactly like a listed
-                // row's: leaving cwd undefined keeps the address absolute, which
-                // is what routes the open to the additional root.
-                onOpen={path => { onOpenFile(fileAddressFor(filesTree.sessionId, undefined, path)) }}
               />
               <SearchNotes result={result} t={filesTree.t} />
             </>

@@ -38,6 +38,7 @@ completed/
 
 active：
 
+- [2026-11-24-provider-remote-file-tree.md](./active/2026-11-24-provider-remote-file-tree.md) — Provider 化文件树与远端 Workspace Root 浏览：`RootRef` 判别联合 + 授权代次键控替代路径身份，Provider 端口分派 primary/additional/remote 三类根，Host 侧独立 `remoteFiles.list` 走 UI 只读准入与双准入，SFTP path 后端条件准入、Helper/Broker 无证据即 fail closed；P0 基线完成，P0–P7 管线与逐阶段强制门禁，决策拟议见 [ADR-0052](../decisions/ADR-0052-provider-file-browsing.md)。
 - [2026-11-23-remote-tool-hardening.md](./active/2026-11-23-remote-tool-hardening.md) — 个人 SSH 工具硬化：`remote_copy` 两端统一参数（省略 `environmentId` 才取 `local`，`null`/空串报错）、execute 边界与广告 schema 同源的 `invalid-arguments`、稳定码生成的有界 `message`/`hint` 与有界端点候选、`remote_bash` 每流 64 KiB 预览默认与 `maxOutputBytes`/`totalBytes`/`droppedBytes`，以及单普通文件、0600、不保留 mtime、拒绝覆盖的传输属性与后续扩展记录。
 - [2026-11-22-remote-copy-stream-budget.md](./active/2026-11-22-remote-copy-stream-budget.md) — PR #73 Codex 评审 P2：`remote_copy` 的两条上传路径只在源绑定时检查 `maxBytes`，源在 `stat` 后增长时会把超限字节先写入远端 staging，再由 `source-changed` 收尾；修复为 `RemoteStage.write` 的累计写入前检查（`transfer-too-large`），两条上传循环共用，含红/绿回归与退出验收。
 

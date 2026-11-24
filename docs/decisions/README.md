@@ -103,3 +103,4 @@ ADR-0002-short-title.md
 - [ADR-0049](./ADR-0049-ssh-custody-modes.md) — SSH 远端环境的三档凭据托管：personal（Host 进程内直跑官方栈、用户凭据）、team（broker 托管、放宽部署证明）、hardened（ADR-0048 全量证据）(Accepted).
 - [ADR-0051](./ADR-0051-ssh-stream-psk-boringssl-fallback.md) — SSH 转发流的 BoringSSL PSK 套件回退：Host 只改写上游转发流的精确参数形状，插件额外生成 `helper-entry-v3.mjs` 给服务端追加 ChaCha20-PSK fallback，记录 `integrity`/`helperPath`/`bindingDigest` 不变；仍保持 PSK-only（Accepted）。
 - [ADR-0050](./ADR-0050-add-affordance-and-wizard-kit.md) — 工作区面板底栏收口为单一 `+` 按钮（按 remote-tools 开关呈双形态）、本地添加的信任确认 Dialog，以及为旧 SSH 弹窗迁移预留的向导设计套件 `src/client/wizard/` (Accepted).
+- [ADR-0052](./ADR-0052-provider-file-browsing.md) — 按 Provider 分派的文件树浏览：`RootRef` 判别联合 + `{root, relativePath}` 节点身份替代路径拼写（显示路径只是元数据），状态键含授权代次，本地拼写经 adapter 保持、远端合成键绝不当本地路径；Host 侧独立 `remoteFiles.list` 走显式 UI 只读准入与网络 I/O 前后双准入，SFTP path 后端条件准入且不用于 Helper 对象授权，Helper 无 fd-bound 列举、Broker 无目录流均 fail closed (Proposed).
