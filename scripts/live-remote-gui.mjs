@@ -106,8 +106,9 @@ note(`scratch run dir: ${RUN}`)
 /** Seed the personal env store: the real `ali` env verbatim + an `ali-sftp`
  * sibling with the same endpoint/hostKey but helper:null and an ssh-config
  * credential reusing the ambient `dsh-ali` alias (the user's real ssh_config
- * Include already resolves it). `helper !== null` is what makes an env
- * permanently non-browsable, so the browsable lane must be its own env. */
+ * Include already resolves it). The helper-less lane covers the original pure
+ * SFTP transport; the opted-in `ali` lane covers the distinct Helper-object +
+ * independent SFTP-path admission shape. */
 function seedPersonalStore() {
   const stored = JSON.parse(readFileSync(REAL_ENV_FILE, 'utf8'))
   const ali = stored.environments.find(entry => entry.environmentId === HELPER_ENV)
@@ -580,6 +581,41 @@ try {
     }
     await dumpDom('05-registered.html')
     await shot('05-registered.png')
+
+    // --- quick capability menu: the deployment assertion is visible there ---
+    // Unit coverage proves the save payload; this real-browser step proves the
+    // row painters actually carry the stable-path control and its warning in
+    // the same compact capability editor a user discovers from the row menu.
+    const quickCapability = {}
+    try {
+      const row = remoteRows.filter({ hasText: '/root/coding' }).first()
+      await row.locator('button').last().click({ timeout: 10_000 })
+      const editCapabilities = page.getByRole('menuitem', { name: /^(Edit capabilities|修改能力)/ }).first()
+      await editCapabilities.waitFor({ state: 'visible', timeout: 10_000 })
+      await editCapabilities.click({ timeout: 8_000 })
+      const listingItem = page.getByRole('menuitem', {
+        name: /List in Files \(stable SFTP path\)|在文件中列出（稳定的 SFTP 路径）/,
+      }).first()
+      await listingItem.waitFor({ state: 'visible', timeout: 10_000 })
+      quickCapability.visible = true
+      quickCapability.enabled = !(await listingItem.isDisabled().catch(() => true))
+      quickCapability.hintVisible = await page.getByText(
+        /Enable only if untrusted processes|仅当不可信进程/,
+      ).first().isVisible().catch(() => false)
+      await shot('05b-quick-capability-menu.png')
+      await dumpDom('05b-quick-capability-menu.html')
+      evidence.quickCapabilityMenu = quickCapability
+      recordCheck(quickCapability.visible && quickCapability.enabled && quickCapability.hintVisible,
+        'the quick capability editor shows the enabled stable-path row with its warning', quickCapability)
+    } catch (error) {
+      quickCapability.error = String(error)
+      evidence.quickCapabilityMenu = quickCapability
+      recordCheck(false, 'the quick capability editor did not expose stable-path browsing', String(error))
+    } finally {
+      const menuOpen = await page.locator('[role="menu"]').first().isVisible().catch(() => false)
+      if (menuOpen) await page.keyboard.press('Escape').catch(() => {})
+      await settle(800)
+    }
 
     // --- RootSwitcher: enabled sftp row + enabled opted-in helper row -------
     // Close the dialog via its own header button (aria-label = panel.close);

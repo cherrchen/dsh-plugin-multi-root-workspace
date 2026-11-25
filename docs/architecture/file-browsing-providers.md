@@ -142,7 +142,7 @@ select ──► provider 创建（一槽缓存 {key,provider}）
 - **固定错误码词表**：17 个稳定码；传输层任何异常折叠为固定码，绝不向 UI 透传原始 SSH 文本；listing 载荷双重限界（条目数 + 序列化字节）。
 - **字面路径保真**：POSIX 名字逐字节透传（空格、Unicode、字面反斜杠均是合法段）；`readdirBounded` 对非法 UTF-8、重名、越界名直接 `invalid-listing`，预算触顶返回前缀而非挑短名。
 - **身份探测**：`probe` 每次先对 root 做 `lstat`（拒绝符号链接置换，不跟随），`realpath` 前后各一次规范祖先校验；段级 `lstat` 先于 `realpath`。
-- **部署断言非运行时证明**：绑定的 `directoryListing:'stable-path'` 要求浏览期间不可信进程无法替换根、祖先或根下目录，也无法改变挂载或符号链接解析。Host 清单校验权威，GUI 在添加/编辑绑定引导中暴露默认关闭的勾选。Helper transport 不使用 Helper 原生 `listDir`；登记在 object probe 之外追加独立的 SFTP v3 路径 probe，浏览授权只覆盖 list-only 浏览，不改变 exec/copy 的 object 授权域。
+- **部署断言非运行时证明**：绑定的 `directoryListing:'stable-path'` 要求浏览期间不可信进程无法替换根、祖先或根下目录，也无法改变挂载或符号链接解析。Host 清单校验权威，GUI 在添加/编辑绑定引导与快捷能力菜单中暴露默认关闭的勾选。Helper transport 不使用 Helper 原生 `listDir`；登记在 object probe 之外追加独立的 SFTP v3 路径 probe，浏览授权只覆盖 list-only 浏览，不改变 exec/copy 的 object 授权域。
 - **授权不落盘**：浏览令牌仅存于会话内 RPC 与内存选择；菜单与 header 只展示 `rootId · 环境名 · 路径`，不展示凭据或 `target` URI。
 
 ## 9. 面板适配与搜索偏好

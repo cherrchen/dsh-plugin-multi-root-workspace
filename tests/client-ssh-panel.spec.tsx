@@ -1224,6 +1224,67 @@ describe('the SSH management dialog', () => {
     expect(screen.queryByRole('dialog', { name: 'ssh.bindings' })).toBeNull()
   })
 
+  it('enables stable-path browsing from the quick capability editor without weakening its warning', async () => {
+    const binding = {
+      environmentId: 'env-prod', rootId: 'web', path: '/srv/app',
+      actions: ['read', 'write'] as const,
+    }
+    const endpoint = {
+      environmentId: binding.environmentId, rootId: binding.rootId, path: binding.path,
+      displayName: 'Production', platform: 'linux', target: 'ssh://deploy@prod.internal:22',
+      state: 'registered' as const, actions: [...binding.actions], transfers: [],
+      capabilities: { read: true, write: true, exec: false, receive: false, send: false },
+    }
+    const ssh = fakeSsh(sshState({
+      environments: [{ ...ENV_HELPER, environmentId: 'env-prod' }],
+      bindings: [binding],
+    }))
+    renderDialog({ ssh, endpoints: [endpoint] })
+    const row = (await screen.findByText('ssh://deploy@prod.internal:22/srv/app')).closest('.mrfw-row') as HTMLElement
+    fireEvent.click(within(row).getByRole('button', { name: 'panel.more' }))
+    fireEvent.click(screen.getByRole('button', { name: 'ssh.binding.editCapabilities' }))
+    const listing = await screen.findByRole('button', { name: /ssh\.binding\.directoryListing/ })
+    const menu = listing.closest('[role="menu"], [data-menu]') as HTMLElement
+    expect((listing as HTMLButtonElement).disabled).toBe(false)
+    expect(within(menu).getByText('ssh.binding.directoryListingHint')).toBeTruthy()
+    expect((within(menu).getByRole('button', { name: 'ssh.binding.save' }) as HTMLButtonElement).disabled).toBe(true)
+    fireEvent.click(listing)
+    expect((within(menu).getByRole('button', { name: 'ssh.binding.save' }) as HTMLButtonElement).disabled).toBe(false)
+    fireEvent.click(within(menu).getByRole('button', { name: 'ssh.binding.save' }))
+    expect(await callsOf(ssh, 'bindingSave')).toEqual([['session-1', 7, {
+      environmentId: 'env-prod', rootId: 'web', path: '/srv/app',
+      actions: ['read', 'write'], directoryListing: 'stable-path',
+    }]])
+  })
+
+  it('clears stable-path browsing when read is removed in the quick capability editor', async () => {
+    const binding = {
+      environmentId: 'env-prod', rootId: 'web', path: '/srv/app',
+      actions: ['read', 'write'] as const,
+      directoryListing: 'stable-path' as const,
+    }
+    const endpoint = {
+      environmentId: binding.environmentId, rootId: binding.rootId, path: binding.path,
+      displayName: 'Production', platform: 'linux', target: 'ssh://deploy@prod.internal:22',
+      state: 'registered' as const, actions: [...binding.actions], transfers: [],
+      capabilities: { read: true, write: true, exec: false, receive: false, send: false },
+    }
+    const ssh = fakeSsh(sshState({ bindings: [binding] }))
+    renderDialog({ ssh, endpoints: [endpoint] })
+    const row = (await screen.findByText('ssh://deploy@prod.internal:22/srv/app')).closest('.mrfw-row') as HTMLElement
+    fireEvent.click(within(row).getByRole('button', { name: 'panel.more' }))
+    fireEvent.click(screen.getByRole('button', { name: 'ssh.binding.editCapabilities' }))
+    fireEvent.click(await screen.findByRole('button', { name: 'remote.capability.read' }))
+    const listing = await screen.findByRole('button', { name: /ssh\.binding\.directoryListing/ })
+    expect((listing as HTMLButtonElement).disabled).toBe(true)
+    const menu = listing.closest('[role="menu"], [data-menu]') as HTMLElement
+    fireEvent.click(within(menu).getByRole('button', { name: 'ssh.binding.save' }))
+    expect(await callsOf(ssh, 'bindingSave')).toEqual([['session-1', 7, {
+      environmentId: 'env-prod', rootId: 'web', path: '/srv/app',
+      actions: ['write'],
+    }]])
+  })
+
   it('offers Edit above the capability item and lands on that binding’s form', async () => {
     const binding = {
       environmentId: 'env-prod', rootId: 'web', path: '/srv/app',

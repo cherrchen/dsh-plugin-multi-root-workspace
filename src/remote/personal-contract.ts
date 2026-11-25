@@ -117,7 +117,7 @@ const requestSchemas = {
       path: z.string().min(1).max(4096),
       // The operator's stable-SFTP-path browsing opt-in (ADR-0052): present
       // only where the editor's checkbox set it; host manifest validation
-      // stays authoritative on the transport pairing.
+      // stays authoritative on the read dependency and runtime admission.
       directoryListing: z.literal('stable-path').optional(),
       actions: z.array(z.enum(['read', 'write', 'exec'])).min(1),
       transfers: z.array(z.object({

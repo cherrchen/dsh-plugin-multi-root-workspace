@@ -1461,6 +1461,33 @@ aside[data-mrfw-navigator] > [data-files-search-settings] {
   color: var(--dsw-alias-label-tertiary);
 }
 
+/* Compact capability menus are single-row checkboxes for ordinary actions,
+   but a deployment assertion must carry its precondition with the selectable
+   row. The host menu row is min-height based, so this two-line label can grow
+   without clipping; the primary line keeps the row's ellipsis behavior. */
+.mrfw-menuCapability {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  min-width: 0;
+  padding-block: 2px;
+  white-space: normal;
+}
+
+.mrfw-menuCapabilityLabel {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.mrfw-menuCapabilityHint {
+  font-size: 11px;
+  line-height: 15px;
+  color: var(--dsw-alias-label-tertiary);
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
+
 /* The worktree Dialog: wider than the primitive's default card so a name,
    path, branch and access selector share one continuous row. */
 .mrfw-worktreeDialog {

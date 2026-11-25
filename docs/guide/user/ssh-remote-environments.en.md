@@ -88,7 +88,7 @@ A registered binding can also appear in the **Files tab's root-switcher menu**, 
 
 ### Enabling it
 
-Tick **List in Files (stable SFTP path)** in any binding flow: the binding step of **+ → Add remote working directory**, **Add binding** in the project bindings dialog, or an existing binding's **Edit** form. The checkbox is available only when **read** is also ticked. The hint next to it states its precondition:
+Tick **List in Files (stable SFTP path)** in any binding-editing surface: the binding step of **+ → Add remote working directory**, **Add binding** in the project bindings dialog, an existing binding's **Edit** form, or **Edit capabilities** in the remote row's `…` menu. The checkbox is available only when **read** is also ticked. The hint next to it states its precondition:
 
 > Enable only if untrusted processes cannot replace the root, its ancestors, or directories below it while browsing.
 

@@ -1,6 +1,6 @@
 # Provider 化文件树与远端 Workspace Root 浏览（2026-11-24）
 
-> 状态：**active — P0–P7 已完成；P8（Helper transport 浏览准入与统一引导 UX）本地/实机证据已补齐，待推送后复验 CI 矩阵。** P7 检查点 `f49139a`；P8 检查点为本批 HEAD 提交。设计取舍见 [ADR-0052](../../decisions/ADR-0052-provider-file-browsing.md)（Proposed）。
+> 状态：**active — P0–P7 已完成；P8（Helper transport 浏览准入与统一能力编辑 UX）本地/实机证据已补齐，待推送后复验 CI 矩阵。** P7 检查点 `f49139a`；P8 检查点为本批 HEAD 提交。设计取舍见 [ADR-0052](../../decisions/ADR-0052-provider-file-browsing.md)（Proposed）。
 >
 > 关联：[ADR-0052](../../decisions/ADR-0052-provider-file-browsing.md)、[ADR-0015](../../decisions/ADR-0015-files-tab-plugin-owned-browsing.md)、[ADR-0016](../../decisions/ADR-0016-files-tab-native-tree-fork.md)、[ADR-0030](../../decisions/ADR-0030-environment-and-root-identity.md)、[ADR-0031](../../decisions/ADR-0031-filesystem-routing.md)、[ADR-0041](../../decisions/ADR-0041-additional-root-workspace-search.md)、[ADR-0049](../../decisions/ADR-0049-ssh-custody-modes.md)、[外部评审（2026-11-21）](../../reviews/2026-11-21-ssh-branch-review.md)、[SSH 远端环境参考](../../reference/ssh-remote-environments.md)。
 
@@ -56,7 +56,7 @@
 | P5 | 生命周期：撤权/复授、重试、tab 记忆 | **已完成** | `ede0ee1` |
 | P6 | 预览端口评估（fake port + 架构/安全评审） | **已完成** | `ede0ee1` |
 | P7 | 全量门禁、真实 SSH、截图与矩阵 | **已完成** | `f49139a` |
-| P8 | Helper transport 浏览准入与统一引导 UX | **本地/实机 PASS；CI 矩阵待推送后复验** | 本批 HEAD 提交 |
+| P8 | Helper transport 浏览准入与统一能力编辑 UX | **本地/实机 PASS；CI 矩阵待推送后复验** | 本批 HEAD 提交 |
 
 ### P0 · 机械基线与文档（已完成）
 
@@ -120,11 +120,11 @@
 - 强制门禁：上述全部通过；真实远端与 GUI 证据归档。
 - 检查点：`ede0ee1`；先补齐 §8 列出的门禁，再迁入 completed。
 
-### P8 · Helper transport 浏览准入与统一引导 UX（2026-11-24 增量）
+### P8 · Helper transport 浏览准入与统一能力编辑 UX（2026-11-24/25 增量）
 
-- 内容：按用户验收反馈把只读浏览部署断言带到所有绑定引导路径（`+ → 添加远端工作目录`、绑定对话框的添加向导、已有绑定编辑），并允许 Helper transport 在显式 opt-in 后浏览。Helper object grant 仍是 `remote_bash`/`remote_copy` 的唯一执行/传输身份；浏览另行要求 owned SFTP v3 路径 probe 与运行期双重 probe，不复用、也不 reinterpret dev:ino。`directoryListing` 现在必须同时允许 `read`；快捷能力菜单不暴露该部署断言，但保存时不得静默丢弃。
-- 强制门禁：Host/manifest/verifier/授权签发聚焦回归，三语 UI 路径回归，全量测试、lint、双端 typecheck、文档检查、compat/pack/smoke，以及真实 `ali` VPS 的 SSH live e2e 与真实宿主 GUI。
-- 结果：见 §8「P8 增量证据」。原 P0–P7 范围不变；Helper 原生 `listDir` 依旧 fail closed，Broker 依旧无目录流。
+- 内容：按用户验收反馈把只读浏览部署断言带到所有绑定引导路径（`+ → 添加远端工作目录`、绑定对话框的添加向导、已有绑定编辑），并允许 Helper transport 在显式 opt-in 后浏览。Helper object grant 仍是 `remote_bash`/`remote_copy` 的唯一执行/传输身份；浏览另行要求 owned SFTP v3 路径 probe 与运行期双重 probe，不复用、也不 reinterpret dev:ino。`directoryListing` 现在必须同时允许 `read`；行尾 `…` 的快捷能力菜单也暴露同一部署断言，并把安全前提放在可选项行内，任何编辑路径都不得静默丢弃它。
+- 强制门禁：Host/manifest/verifier/授权签发聚焦回归，全部 UI 编辑路径与本地化回归，全量测试、lint、双端 typecheck、文档检查、compat/pack/smoke，以及真实 `ali` VPS 的 SSH live e2e 与真实宿主 GUI。
+- 结果：见 §8「P8 增量证据」。原 P0–P7 范围不变；Helper 原生 `listDir` 依旧 fail closed，Broker 依旧无目录流。后续新增/修改绑定能力的跨层检查清单归档为 `.agent/note/remote-binding-capability-checklist.md`（中英双语）。
 
 ## 5. 风险
 
@@ -188,7 +188,7 @@
 
 复审返工已并：`RootSwitcher` 远端证明先于 provider 缓存命中（`remoteRootSelection(endpoint)?.incarnation === selected.incarnation`）；`invalidateNow` 与发现失败/对账失效一律按「live takeover 键 + 当前选择推导键」双闸键匹配，不波及无关 local takeover；授权租约改 `AbortSignal.any` 且仅当 takeover 键与当前选择匹配才装；`refreshRemotes` 每次发现换新 `AbortController` 并于替换/会话切换/卸载时中止；依赖取 `filesTree?.takeover`/`observeAuthority`/`sessionId` 稳定座而非整个 surface；远端 provider 开门限定 `pane !== null` + 非空 session；`RemoteFilesService.wait` 的 lease 内准入限流为「同 token 在飞准入复用 + pending 集合于 slot 释放前 `allSettled` 排空」，编码失败先 `stateAbort.abort(error)` 再排空（caller 取消仍胜出）。
 
-当前限制（诚实记录）：远端树 list-only——无 watch/search/preview/menu/open-in-app/内容读取；open-in-app 无 `triggerPath` 回退（provider 无端口即无按钮）；隐藏即结束远端 takeover——`RootSwitcher` 对远端记录既不调用 save 也不供给 saved，**不做**展开/滚动持久化：仅在手动刷新存活期间 expanded/scrollTop 保留，隐藏后新 hold 一律从空白展开开始（本地根的既有保留行为不变）；后端矩阵为 SFTP-path opt-in 可入 / Helper 否决（无 fd-bound 列举）/ Broker 无目录流——Helper/Broker 条件**未通过**，非「全部后端通过」。未实现项：无（阶段内要求的用例均已落地）；GUI 真机与真实 SSH 留待 P7。
+当前限制（诚实记录）：远端树 list-only——无 watch/search/preview/menu/open-in-app/内容读取；open-in-app 无 `triggerPath` 回退（provider 无端口即无按钮）；隐藏即结束远端 takeover——`RootSwitcher` 对远端记录既不调用 save 也不供给 saved，**不做**展开/滚动持久化：仅在手动刷新存活期间 expanded/scrollTop 保留，隐藏后新 hold 一律从空白展开开始（本地根的既有保留行为不变）；该阶段时点的后端矩阵为 SFTP-path opt-in 可入 / Helper 否决（无 fd-bound 列举）/ Broker 无目录流——Helper/Broker 条件**未通过**，非「全部后端通过」；P8 之后 Helper transport 可在显式 opt-in 下经独立 SFTP path probe 准入，但 Helper 原生 `listDir` 仍否决、Broker 仍无目录流。未实现项：无（阶段内要求的用例均已落地）；GUI 真机与真实 SSH 留待 P7。
 
 ## 7. 退出验收
 
@@ -206,13 +206,13 @@
 | **真实宿主 GUI 端到端（P7 补证）** | 打包 tarball 装入隔离 scratch `DSH_HOME` 的 `web` profile（四个 SSH peer 包经 `dsh plugin add` 装入 profile 依赖树，与线上 install-ssh-deps 同一机制）→ 进程内启动真实 `dsh web`（0.2.2-rc.5）→ 真实 Google Chrome 驱动：侧边栏开真实会话 → 右侧栏 Workspace files → Files pane → Workspace Folders 对话框远端区列出两个种子端点 → 行菜单登记 sftp（`Registered`、`browseAuthorization: present:64`）与 helper（`Registered`、`browseAuthorization: absent`）→ RootSwitcher 菜单 sftp 行可用、helper 行置灰「not browsable」→ 远端树绘制全部 7 个夹具项（`literal\dir`/`space dir`/`uni-名字.md`/`alias.link` 原样）→ `deep/inner` 两级展开再发两次 `remoteFiles.list`。远端夹具 `/root/dsh-live-browse` 每次运行前创建、结束即删；`~/.dsh` 仅只读复制（凭据 root + 清单），测试侧全在 scratch 目录 | `DSH_LIVE_GUI=1 node scripts/live-remote-gui.mjs`，**9/9 通过**；证据 `.dsh-smoke/live-gui/evidence/`（截图 01–08、DOM dump、`evidence.json`、wire 日志） |
 | **真实 DSH↔SSH 全栈（P7 补证）** | 旧专用测试 VPS `64.118.149.252` 已在 SSH 层失联（TCP 通、banner 前断）；改用 `~/.dsh` 保存的真实 `ali` 环境（`8.137.81.239`，root，helper `/root/.dsh-helper/0.2.2-rc.5/helper-entry.mjs`）：`~/.dsh-ssh-test/` 新增 `live-ali.json`（复用清单里的 nodePath/helperPath/helperSha256/hostKey，`account`/`xfer*` 均 `root`、host 均 `dsh-ali`）并在其 `ssh_config` 追加 `dsh-ali` Host 块（IdentityFile/UserKnownHostsFile 引用受管路径，只读）+ `Host *` 补 `BatchMode yes`/`UpdateHostKeys no`（`parseSshConfig` 现行硬要求）。`remote_bash` 全组（注册/身份漂移/受限命令边界·截断·超时/中途撤权零 spawn/环境隔离与重开再生）、`remote_copy` 全组（sha256 校验、0B+1MiB 回环、既有目标/符号链接/多链接/源变更/撤权取消/并发单提交/下载/只读拒/relay/relay 变更/超预算拒/只读会话拒/未见证拒）全部实机通过 | `PATH=~/.dsh-ssh-test/bin:$PATH DSH_MULTI_ROOT_SSH_LIVE=~/.dsh-ssh-test/live-ali.json pnpm vitest run tests/remote-ssh.live.e2e.ts`，**19/19 通过**（38s）；夹具目录 `/root/dsh-live/{app,lib}`、`/root/dsh-live-outside/sentinel.txt`、`/import` 留在 VPS 供复跑 |
 
-### P8 增量证据（Helper transport 浏览准入与统一 UX）
+### P8 增量证据（Helper transport 浏览准入与统一能力编辑 UX）
 
 | 证据 | 内容 | 位置/退出码 |
 | --- | --- | --- |
 | **真实 DSH↔SSH 全栈复跑** | 在真实 `ali` VPS 上复跑 `remote-ssh.live.e2e.ts`：除原 remote_bash/remote_copy 组外，新增「opted-in Helper root 通过独立 SFTP path admission 浏览」实机用例；同一 grant 对 exec/copy 仍保持 object target，浏览列表来自 owned SFTP v3 通道 | `PATH=~/.dsh-ssh-test/bin:$PATH DSH_MULTI_ROOT_SSH_LIVE=~/.dsh-ssh-test/live-ali.json pnpm vitest run tests/remote-ssh.live.e2e.ts`，**20/20 通过**（37s） |
-| **真实宿主 GUI 复跑** | 打包 tarball 装入 scratch `web` profile，真实 `dsh web` 0.2.3-alpha.2 + 真实 Chrome；`ali-sftp` 与 opt-in `ali` Helper 绑定都经行菜单登记成功，两者均 `browseAuthorization: present:64`，RootSwitcher 两行均可选，远端树真实绘制并展开。顺路修复 harness 对 0.2.3 `webserver/entry-url` 事件的兼容 | `DSH_LIVE_GUI=1 node scripts/live-remote-gui.mjs`，**9/9 通过**；证据 `.dsh-smoke/live-gui/evidence/` |
-| **UI/契约聚焦回归** | Helper 连接的添加绑定向导暴露稳定路径选项、取消 read 自动清除并禁用该选项、重新勾选后保存进 draft；`+ → 添加远端工作目录` 保存 `directoryListing`；helper-less 环境可直接进入绑定步骤且仍保留 Helper 修复入口；编辑表单在 Helper 环境同样暴露选项；manifest 拒绝无 `read` 的 `directoryListing` 并接受 Helper+read opt-in | `tests/client-ssh-panel.spec.tsx` + `tests/client-ssh-wizard.spec.tsx` **70/70**；`tests/remote-manifest.spec.ts` **48/48** |
+| **真实宿主 GUI 复跑** | 打包 tarball 装入 scratch `web` profile，真实 `dsh web` 0.2.3-alpha.2 + 真实 Chrome；`ali-sftp` 与 opt-in `ali` Helper 绑定都经行菜单登记成功，两者均 `browseAuthorization: present:64`；真实浏览器还打开 Helper 行的“修改能力”菜单，确认稳定路径选项启用且安全前提随行渲染；RootSwitcher 两行均可选，远端树真实绘制并展开。顺路修复 harness 对 0.2.3 `webserver/entry-url` 事件的兼容 | `DSH_LIVE_GUI=1 node scripts/live-remote-gui.mjs`，**10/10 通过**；证据 `.dsh-smoke/live-gui/evidence/`（含 `05b-quick-capability-menu.png`） |
+| **UI/契约聚焦回归** | Helper 连接的添加绑定向导暴露稳定路径选项、取消 read 自动清除并禁用该选项、重新勾选后保存进 draft；`+ → 添加远端工作目录` 保存 `directoryListing`；helper-less 环境可直接进入绑定步骤且仍保留 Helper 修复入口；编辑表单在 Helper 环境同样暴露选项；行尾 `…` 的快捷能力菜单可显式开启/关闭该断言、提示随可选项行内渲染、取消 read 会清除并禁用它；manifest 拒绝无 `read` 的 `directoryListing` 并接受 Helper+read opt-in | `tests/client-ssh-panel.spec.tsx` + `tests/client-ssh-wizard.spec.tsx` **72/72**；`tests/locale-parity.spec.ts` **11/11**；`tests/remote-manifest.spec.ts` **48/48** |
 
 ### 门禁（复审返工后重跑）
 
@@ -234,8 +234,8 @@
 | `PATH=~/.dsh-ssh-test/bin:$PATH DSH_MULTI_ROOT_SSH_LIVE=~/.dsh-ssh-test/live-ali.json pnpm vitest run tests/remote-ssh.live.e2e.ts`（P7 补证） | 19/19 实机用例（remote_bash + remote_copy） | 0 |
 | `pnpm vitest run tests/remote-copy.spec.ts tests/remote-copy-local-link-classification.spec.ts tests/remote-local-transfer-admission.spec.ts tests/local-transfer-authority.spec.ts`（TransferIO 修复后） | 4 文件 61 用例全过 | 0 |
 
-| **P8：`pnpm test` 全量** | **172 文件通过 / 9 skipped；2818 用例通过 / 136 skipped** | 0 |
-| **P8：`pnpm lint` / `pnpm typecheck` / `pnpm docs:check`** | lint 0 errors（同 2 条既有 require-yield warning）；host+client tsc 全过；docs 0 errors / 0 warnings | 0 |
+| **P8：`pnpm test` 全量** | **172 文件通过 / 9 skipped；2821 用例通过 / 136 skipped** | 0 |
+| **P8：`pnpm lint` / `pnpm typecheck` / `pnpm build` / `pnpm docs:check`** | lint 0 errors（同 2 条既有 require-yield warning）；host+client tsc、bundle 与 auto-review 构建全过；docs 0 errors / 0 warnings | 0 |
 | **P8：`pnpm compat:check` / `pnpm pack:check`** | 27 个精确发布的 allowlist/peers/pin/安装树一致；packed artifact 335 members 完整 | 0 |
 | **P8：`pnpm smoke`** | smoke:compose 58/58、smoke:behavior 137/137、smoke:journey 98/98 | 0 |
 | **P8：`git diff --check`** | 无空白错误 | 0 |
@@ -263,4 +263,4 @@
 
 ### 最终结论
 
-**P7 PASS；P8 本地/实机 PASS、CI 待复验。** P7 的全部强制门禁已在 `f49139a` 补齐：全量脚本、真实 DSH↔SSH 端到端、真实宿主 GUI 与 34/34 全版本×OS CI 矩阵均通过。P8（Helper transport 浏览准入与统一引导 UX）已在工作树完成并通过全量测试、lint/typecheck/docs、compat/pack/smoke、真实 `ali` SSH live e2e 20/20 与真实宿主 GUI 9/9；因该增量尚未提交/推送，矩阵复验仍待补，计划暂保留 active。
+**P7 PASS；P8 本地/实机 PASS、CI 待复验。** P7 的全部强制门禁已在 `f49139a` 补齐：全量脚本、真实 DSH↔SSH 端到端、真实宿主 GUI 与 34/34 全版本×OS CI 矩阵均通过。P8（Helper transport 浏览准入与统一能力编辑 UX）已在工作树完成并通过全量测试、lint/typecheck/docs、compat/pack/smoke、真实 `ali` SSH live e2e 20/20 与真实宿主 GUI 10/10；因该增量尚未提交/推送，矩阵复验仍待补，计划暂保留 active。
