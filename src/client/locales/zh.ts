@@ -401,6 +401,7 @@ export const zh = {
   'error.host-key-token-expired': '主机密钥扫描已过期，请重新扫描。',
   'error.host-key-token-required': '缺少主机密钥扫描令牌。',
   'error.host-key-mismatch': '确认的主机指纹不匹配。',
+  'error.initiator-mismatch': '此 SSH 连接属于另一发起端。请检查后端选择，再重新验证连接。',
   'error.exec-requires-helper': 'exec 需要已安装的远端 helper：请先不勾选 exec 保存并安装 helper。',
   'error.ssh-host-unsupported': "当前 Host 的 DSH 版本或兼容状态不支持 SSH。",
   'error.ssh-host-platform': "当前 Host 平台不支持 SSH 远端环境。",

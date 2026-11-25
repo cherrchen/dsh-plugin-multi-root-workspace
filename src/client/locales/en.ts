@@ -402,6 +402,7 @@ export const en = {
   'error.host-key-token-expired': 'The host key scan expired; rescan the host.',
   'error.host-key-token-required': 'A host key scan token is required.',
   'error.host-key-mismatch': 'The confirmed host fingerprint does not match.',
+  'error.initiator-mismatch': 'This SSH connection belongs to a different initiator. Check the selected backend, then verify the connection again.',
   'error.exec-requires-helper': 'Exec requires an installed remote helper: save without exec and install the helper first.',
   'error.ssh-host-unsupported': "This Host’s DSH release or compatibility status does not support SSH.",
   'error.ssh-host-platform': "This Host platform does not support SSH remote environments.",

@@ -402,6 +402,7 @@ export const ja = {
   'error.host-key-token-expired': 'ホスト鍵のスキャンが期限切れになりました。再スキャンしてください。',
   'error.host-key-token-required': 'ホスト鍵スキャンのトークンが必要です。',
   'error.host-key-mismatch': '確認したホストのフィンガープリントが一致しません。',
+  'error.initiator-mismatch': 'この SSH 接続は別の接続元に属しています。選択したバックエンドを確認し、接続を再検証してください。',
   'error.exec-requires-helper': 'exec にはインストール済みのリモート Helper が必要です：exec を外して保存し、先に Helper をインストールしてください。',
   'error.ssh-host-unsupported': "現在の Host の DSH バージョンまたは互換性状態は SSH に対応していません。",
   'error.ssh-host-platform': "この Host の OS は SSH リモート環境に対応していません。",

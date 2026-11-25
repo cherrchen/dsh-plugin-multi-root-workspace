@@ -402,6 +402,7 @@ export const pt = {
   'error.host-key-token-expired': 'A varredura de chaves de host expirou; escaneie o host de novo.',
   'error.host-key-token-required': 'É necessário um token de varredura de chaves de host.',
   'error.host-key-mismatch': 'A impressão digital de host confirmada não corresponde.',
+  'error.initiator-mismatch': 'Esta conexão SSH pertence a outro iniciador. Confira o backend selecionado e verifique a conexão novamente.',
   'error.exec-requires-helper': 'A execução exige um helper remoto instalado: salve sem a opção de execução e instale o helper primeiro.',
   'error.ssh-host-unsupported': "A versão ou o estado de compatibilidade do DSH neste host não oferece suporte a SSH.",
   'error.ssh-host-platform': "A plataforma deste host não oferece suporte a ambientes remotos SSH.",

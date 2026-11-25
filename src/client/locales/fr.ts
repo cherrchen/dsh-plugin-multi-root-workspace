@@ -402,6 +402,7 @@ export const fr = {
   'error.host-key-token-expired': 'L’analyse des clés d’hôte a expiré ; relancez l’analyse de l’hôte.',
   'error.host-key-token-required': 'Un jeton d’analyse des clés d’hôte est obligatoire.',
   'error.host-key-mismatch': 'L’empreinte d’hôte confirmée ne correspond pas.',
+  'error.initiator-mismatch': 'Cette connexion SSH appartient à un autre initiateur. Vérifiez le moteur sélectionné, puis vérifiez de nouveau la connexion.',
   'error.exec-requires-helper': 'L’exécution nécessite un helper distant installé : enregistrez sans l’exécution et installez d’abord le helper.',
   'error.ssh-host-unsupported': "La version ou l’état de compatibilité de DSH sur cet hôte ne permet pas SSH.",
   'error.ssh-host-platform': "Cette plateforme hôte ne prend pas en charge les environnements distants SSH.",

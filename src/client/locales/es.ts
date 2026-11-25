@@ -402,6 +402,7 @@ export const es = {
   'error.host-key-token-expired': 'El escaneo de la clave de host ha caducado; vuelva a escanear el host.',
   'error.host-key-token-required': 'Falta el token de escaneo de la clave de host.',
   'error.host-key-mismatch': 'La huella de host confirmada no coincide.',
+  'error.initiator-mismatch': 'Esta conexión SSH pertenece a otro iniciador. Comprueba el backend seleccionado y vuelve a verificar la conexión.',
   'error.exec-requires-helper': 'exec necesita el helper remoto instalado: guarde sin marcar exec e instale primero el helper.',
   'error.ssh-host-unsupported': "La versión o el estado de compatibilidad de DSH en este Host no admite SSH.",
   'error.ssh-host-platform': "La plataforma de este Host no admite entornos remotos SSH.",

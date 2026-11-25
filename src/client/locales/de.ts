@@ -402,6 +402,7 @@ export const de = {
   'error.host-key-token-expired': 'Der Scan der Hostschlüssel ist abgelaufen; scannen Sie den Host erneut.',
   'error.host-key-token-required': 'Es fehlt ein Token für den Scan der Hostschlüssel.',
   'error.host-key-mismatch': 'Der bestätigte Host-Fingerabdruck stimmt nicht überein.',
+  'error.initiator-mismatch': 'Diese SSH-Verbindung gehört zu einem anderen Initiator. Prüfen Sie das ausgewählte Backend und verifizieren Sie die Verbindung erneut.',
   'error.exec-requires-helper': 'exec benötigt einen installierten Remote-Helper: Speichern Sie zuerst ohne exec und installieren Sie den Helper.',
   'error.ssh-host-unsupported': "Die DSH-Version oder der Kompatibilitätsstatus auf diesem Host unterstützt SSH nicht.",
   'error.ssh-host-platform': "Diese Hostplattform unterstützt keine SSH-Remoteumgebungen.",
