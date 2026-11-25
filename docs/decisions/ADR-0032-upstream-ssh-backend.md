@@ -42,3 +42,7 @@ rc.1 的 strict `policySchema` 只传 mode、workspaceRoot、可选 additionalWr
 - Windows 发起端按[平台决议](./ADR-0030-environment-and-root-identity.md)无限期延后。系统自带 ssh.exe、第三方客户端或 WSL 可用，均不满足上游 DSH 原生支持条件。
 - 若独立 Context 在公共 API 上不能可靠隔离，退回单独 POSIX 后端进程实验（受认证 IPC、短请求、绑定环境）；若连此路径也需要复制私有 ABI，停止集成。上游 RFC 优先申请可实例化 backend、受根约束的文件句柄/二进制发布及可报告策略表达能力，附失败用例，不修改上游源码。
 - **验收与回滚**：比较同一条远端命令在官方独立组合和内部 backend 的 cwd、输出、退出与拒写行为；再验证错密钥、错摘要、双 Context 串用、断线清理、禁用 SSH 后本地照常启动。失败时卸载可选行，关闭对应 capability，不改公共兼容矩阵。
+
+## Windows 发起端开发（2026-11-25）
+
+后续提案见 [ADR-0052](./ADR-0052-windows-ssh-initiator.md)。当前 Windows 发起端尚未开放，现有准入与沙箱合同不变。

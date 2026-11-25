@@ -102,3 +102,7 @@
 Profile 副本需要能从该 Profile 解析，且其 DSH 和 Cordis peers 仍指向安装闭包。所有包版本与当前 Host 的精确版本一致才开放。上游机制与当前契约见 [SSH 技术参考](../reference/ssh-remote-environments.md#host-profile-依赖)。
 
 Helper 安装诊断区分远端写入、完整性校验和 Host CAS 登记。在发送变更后失去确认时，仅报告可证实的阶段和剩余状态，由操作者检查后决定是否重试。
+
+## Windows 发起端开发（2026-11-25）
+
+后续提案见 [ADR-0052](./ADR-0052-windows-ssh-initiator.md)。当前 Windows 发起端尚未开放，现有准入与沙箱合同不变。

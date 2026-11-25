@@ -6,6 +6,8 @@
 
 当前公开构建只提供个人 SSH。默认组合通过 `multi-root-remote-tools.enabled` 开关启用，默认关闭。启用后，Host 从 `remoteEnvironments.personalPath` 读取连接，从 `remoteEnvironments.credentialRoot` 读取插件托管的凭据；也可引用本机 `~/.ssh/config` 中的别名。个人模式下，本机 DSH Host 持有凭据，同一操作系统账号下的进程可能访问这些凭据。
 
+Windows Host 的 SSH 发起端仍未开放；Windows 目标仍不支持。探针和后端设计不是可配置的产品能力，见 [ADR-0052](../decisions/ADR-0052-windows-ssh-initiator.md)。
+
 ### Host Profile 依赖
 
 - `SUPPORTED_SSH_RELEASES` 是 SSH 支持的精确版本真源。四个官方包分别为 `@deepseek-ai/dsh-ssh`、`@deepseek-ai/dsh-fs-ssh`、`@deepseek-ai/dsh-subprocess-ssh` 和 `@deepseek-ai/dsh-sandbox-ssh`，都须与当前 Host 同版。它们在插件 manifest 中仍是 optional peers，局部安装故障只阻断 SSH。

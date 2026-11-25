@@ -21,7 +21,7 @@
 | W2 | BLOCKED（身份与 IPC 基础完成；原生配置、文件 I/O、切换未验收） | W1 合同稳定；Windows 共用信任边界明确 | 配置及本地文件授权/发布、后端身份、切换及多 Host 一致性用例通过；未验证 capability 关闭 |
 | W3-B | BLOCKED（开发切片：命令与 Helper 控制面校验完成；实机、TLS PSK、SFTP、管理未验收） | W1/W2 可用；W0-B 已验证或明确限定为不可发布的开发验证 | 严格主机验证、官方 Helper RPC、TLS PSK、SFTP、管理和清理通过 Windows Node/Electron 实机与独立版本门禁 |
 | W3-C | BLOCKED（发现/启动校验完成；依赖部署、Bridge、ACK、清理未验收） | W1/W2 可用；在所选真实发行版上验证 stdio/依赖/退出 | 显式多发行版选择与初始化、manifest ACK、管理与工具、异常清理及代次隔离通过 |
-| W4 | NOT_STARTED | W1/W2 可用；分别确认 B/C 的可验收项 | 现有 SSH Settings/i18n，完整用户旅程，真实矩阵、安装制品、回归、评审及发布决策 |
+| W4 | BLOCKED（本机回归与制品验证已运行；缺完整后端及实机验收） | W1/W2 可用；分别确认 B/C 的可验收项 | 现有 SSH Settings/i18n，完整用户旅程，真实矩阵、安装制品、回归、评审及发布决策 |
 
 各阶段记录基准 HEAD、变更面、验证环境、命令与退出码、独立评审/修复、下一阶段条件。未通过项目不标 PASS；阶段形成独立提交或记录未提交阻塞。发布能力不能由测试环境变量或默认回退打开。
 
@@ -76,7 +76,7 @@ W1 未跑跨平台矩阵与任何原生实测；Windows capability 保持关闭�
 
 基准 HEAD `4a4bd02`（W1 评审收口提交后，工作区干净）。本轮只做身份与 IPC 基础块，不含 settings/config 文件系统与本地 I/O；Windows capability 门禁未动。变更面：
 
-- 新增 `src/remote/initiator/identity.ts`：`windowsInitiatorIdentitySchema`（`windows-openssh` 或 `wsl`{distribution,user}，zod discriminatedUnion + strict）与 `sameInitiatorIdentity`。控制字符检查用 `Array.from` + `charCodeAt` 写法（oxlint `no-control-regex` 规避，与 lead 备选一致，无语义差异）。
+- 新增 `src/remote/initiator/identity.ts`：`windowsInitiatorIdentitySchema`（`windows-openssh` 或 `wsl`{distribution,user}，zod discriminatedUnion + strict）与 `sameInitiatorIdentity`。控制字符检查用 `Array.from` + `charCodeAt` 写法（oxlint `no-control-regex` 规避，无语义差异）。
 - `src/remote/manifest.ts`：`personalIdentity` schema 在 `credentialDigest` 后加 `initiator: windowsInitiatorIdentitySchema.optional()`；无 digest 代码改动——字段由既有 canonical JSON 覆盖，无默认值。
 - `src/remote/personal/config.ts`：`toDeploymentManifest` 加第三可选参 `initiator?: WindowsInitiatorIdentity`，在投影的 `personalIdentity` 下 `...(initiator === undefined ? {} : { initiator })`；序列化/加载/路径不变，现有调用仍按两参调用。
 - `src/remote/ssh-environment.ts`：新增 `initiator` 选项与 `requireInitiator(environment)`，`openFresh` 与 `openSftpFresh` 均在 `requireGate()` 之后、transport/身份核验之前调用——Helper 与 SFTP 在同 alias 不同身份下先拒（`initiator-mismatch`），不触及 `ssh -G`。rebind 与生产调用方未改。
@@ -132,6 +132,10 @@ node scripts/probe-windows-ssh-initiator.mjs windows-openssh-helper <fixture-ssh
 评审修复（W3-C 范围，已合入工作区）：发行版名校验改为共享 `isWslDistributionName`（`identity.ts` 导出，wsl.ts 两个校验点与持久化 schema 同一条规则，schema 侧同样拒绝前导 `-`）；UTF-16LE 探测追加"奇数索引高字节为 0"判据，使无换行的单条 UTF-16LE 清单（如仅 `Ubuntu`）也能识别，不接受非法编码；新增对应 fixture 用例。剩余 `NOT_RUN` 原生缺口不变。
 
 未验收/未实现（W3-C 维持关闭）：真实双发行版 WSL 执行 `NOT_RUN`（本机无 Windows）；WSL 版本判定、Linux 依赖安装/部署、manifest ACK、Bridge、管理与工具、异常清理与代次隔离均未实施；`capability` 门禁未动，Windows 远端控制面保持关闭。
+
+## W4 阶段报告
+
+本机验证与制品证据、评审闭环及发布决定汇总于[阶段交付报告](./2026-11-25-windows-ssh-initiator-report.md)。支持平台、DSH 版本合同与 CHANGELOG 均未改；Windows capability 门禁保持关闭。
 
 ## 恢复与验收
 

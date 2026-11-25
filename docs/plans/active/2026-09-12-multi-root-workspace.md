@@ -2412,3 +2412,7 @@ CI 现场（run `45035571607`，`9788acb`）：`releases`/`windows` 通过；20 
 [该提交的 CI](https://github.com/cherrchen/dsh-plugin-multi-root-workspace/actions/runs/45361257750) 中，DSH `0.1.*` 至 `0.2.1` 的失败日志报告 `handle.stateOf is not a function`。夹具已兼容返回清理函数和返回投影 handle 的注册表。目录语义优先级、失败重试和缓存边界见[接口审查](../../reference/dsh-0.2.3-migration.md#含旧目录事件的快照)。
 
 本机定向验证覆盖 `0.1.5-rc.2`（79 通过）、`0.2.2-rc.5`（104 通过、1 跳过）和 `0.2.3-alpha.2`（264 通过、5 跳过）。开发安装树仍为 `0.2.3-alpha.2`。支持合同包含原有 27 个精确发布。
+
+## Windows SSH 发起端开发（2026-11-25）
+
+未发布、Windows 门禁未开放。阶段、实机阻塞与可重复探针见[专项计划](./2026-11-25-windows-ssh-initiator.md)。

@@ -8,6 +8,8 @@ Personal SSH is experimental and off by default. Once enabled, the Agent can use
 > **Platform and release prerequisites**:
 > - Supported on **Linux** and **macOS** initiators only, targeting **Linux** or **macOS** remote hosts (Windows initiators and Windows targets are deferred / unsupported).
 > - Requires a DSH runtime inside the SSH support matrix (currently `0.2.2-rc.1` through `0.2.3-alpha.2`) with the four matching official SSH optional packages installed (`@deepseek-ai/dsh-ssh`, `dsh-fs-ssh`, `dsh-subprocess-ssh`, `dsh-sandbox-ssh`).
+>
+> If a Windows Host reports that SSH is deferred on this platform, this is a support limit, not a credential or Helper installation error. Installing OpenSSH or WSL does not enable SSH in the plugin.
 
 ## Remote access boundaries
 

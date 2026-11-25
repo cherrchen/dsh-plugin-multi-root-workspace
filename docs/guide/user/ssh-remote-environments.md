@@ -8,6 +8,8 @@ English: [ssh-remote-environments.en.md](./ssh-remote-environments.en.md)
 > **平台与版本前提**：
 > - 仅支持 **Linux** 和 **macOS** 发起端，远端目标主机也仅支持 **Linux** 和 **macOS**（Windows 发起端和 Windows 目标目前均延后或不支持）。
 > - 需要 DSH 运行时在 SSH 支持矩阵内（当前为 `0.2.2-rc.1` ～ `0.2.3-alpha.2`），且宿主安装有对应的四个官方 SSH 可选包（`@deepseek-ai/dsh-ssh`、`dsh-fs-ssh`、`dsh-subprocess-ssh`、`dsh-sandbox-ssh`）。
+>
+> Windows Host 若显示“平台延后”，这是当前支持门禁，不是凭据或 Helper 安装错误。安装 OpenSSH 或 WSL 不会解锁插件的 SSH 功能。
 
 ## 远端访问边界
 

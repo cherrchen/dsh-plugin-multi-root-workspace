@@ -25,3 +25,7 @@ Issue 原场景包含 Windows 工具链、Ubuntu 编译器和设备运行时；�
 - 可让每个 profile 全程在同一远端运行；适用于对照试验，代价是切换 Session。可向上游提议显式、可持久化的 per-operation ExecutionContext，覆盖 session restore、子 Agent、PTY/PTC、LSP、后台任务的路由、取消和审计；公共接缝成熟前保留显式工具。
 - 排除根据 cwd、命令中的 cd/路径或上一次调用来推断主机，尤其两个并发 Agent 可以在不同环境有完全相同的 cwd。排除用 ssh2/CLI 的裸 exec 声称根内执行。
 - **安全证明与回滚**：在构建机让 shell 用绝对路径、重定向、子进程写只读/根外哨兵，检查文件实际内容；模拟 prepare 后撤权、启动后断线、输出背压和后代延迟退出。工具关闭时先撤销新启动，再处置既有 handle，向用户保留已确认/未知的最终结果。证明不足时保留已验收的复制能力，构建由操作员独立完成。
+
+## Windows 发起端开发（2026-11-25）
+
+后续提案见 [ADR-0052](./ADR-0052-windows-ssh-initiator.md)。当前 Windows 发起端尚未开放，现有准入与沙箱合同不变。

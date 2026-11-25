@@ -60,3 +60,7 @@
 ## 实施状态（2026-11-10 注记）
 
 本 ADR 的 Accepted 决策为长期架构合同；当前已实现面与未实现面的逐项状态以[控制面参考](../reference/multi-environment-control-plane.md)与[路线图总账](../plans/active/2026-09-12-multi-root-workspace.md#外部评审整改与开放阻断2026-11-10)为准——包括协议 3 票据、目的收窄、运行时守卫与保持关闭的模型入口前置项；本文件不改写其历史 Accepted 理由。
+
+## Windows 发起端开发（2026-11-25）
+
+后续提案见 [ADR-0052](./ADR-0052-windows-ssh-initiator.md)。当前 Windows 发起端尚未开放，现有准入与沙箱合同不变。
