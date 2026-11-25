@@ -1,12 +1,14 @@
 import { z } from 'zod'
 
-const name = z.string().min(1).max(256).refine(value => value.trim() === value
-  && !Array.from(value).some(char => char.charCodeAt(0) < 32 || char.charCodeAt(0) === 127))
+const validName = (value: string): boolean => value.length > 0 && value.length <= 256 && value.trim() === value
+  && !Array.from(value).some(char => char.charCodeAt(0) < 32 || char.charCodeAt(0) === 127)
+
+export const isWslDistributionName = (value: string): boolean => validName(value) && !value.startsWith('-')
 
 /** Effective initiator identity; POSIX is represented by absence in persisted authorization facts. */
 export const windowsInitiatorIdentitySchema = z.discriminatedUnion('kind', [
   z.object({ kind: z.literal('windows-openssh') }).strict(),
-  z.object({ kind: z.literal('wsl'), distribution: name, user: name }).strict(),
+  z.object({ kind: z.literal('wsl'), distribution: z.string().refine(isWslDistributionName), user: z.string().refine(validName) }).strict(),
 ])
 export type WindowsInitiatorIdentity = z.infer<typeof windowsInitiatorIdentitySchema>
 

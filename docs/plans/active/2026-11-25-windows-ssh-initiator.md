@@ -20,7 +20,7 @@
 | W1 | PASS (限定：共享接缝、本机回归) | 官方 provider 的实际接入合同明确；记录 POSIX 基线 | 通过共享运行时接缝运行原有 POSIX 用例；缺包与 Windows 门禁不改；无 Root 迁移 |
 | W2 | BLOCKED（身份与 IPC 基础完成；原生配置、文件 I/O、切换未验收） | W1 合同稳定；Windows 共用信任边界明确 | 配置及本地文件授权/发布、后端身份、切换及多 Host 一致性用例通过；未验证 capability 关闭 |
 | W3-B | BLOCKED（开发切片：命令与 Helper 控制面校验完成；实机、TLS PSK、SFTP、管理未验收） | W1/W2 可用；W0-B 已验证或明确限定为不可发布的开发验证 | 严格主机验证、官方 Helper RPC、TLS PSK、SFTP、管理和清理通过 Windows Node/Electron 实机与独立版本门禁 |
-| W3-C | NOT_STARTED | W1/W2 可用；在所选真实发行版上验证 stdio/依赖/退出 | 显式多发行版选择与初始化、manifest ACK、管理与工具、异常清理及代次隔离通过 |
+| W3-C | BLOCKED（发现/启动校验完成；依赖部署、Bridge、ACK、清理未验收） | W1/W2 可用；在所选真实发行版上验证 stdio/依赖/退出 | 显式多发行版选择与初始化、manifest ACK、管理与工具、异常清理及代次隔离通过 |
 | W4 | NOT_STARTED | W1/W2 可用；分别确认 B/C 的可验收项 | 现有 SSH Settings/i18n，完整用户旅程，真实矩阵、安装制品、回归、评审及发布决策 |
 
 各阶段记录基准 HEAD、变更面、验证环境、命令与退出码、独立评审/修复、下一阶段条件。未通过项目不标 PASS；阶段形成独立提交或记录未提交阻塞。发布能力不能由测试环境变量或默认回退打开。
@@ -31,7 +31,7 @@
 
 L1–L3：现有 `ssh-*`、`remote-*` 合同、Registry/多 Host、传输并发与客户端 Settings；L4–L5：Linux/macOS POSIX 对照、Windows OpenSSH 与 WSL 各自 Node/Electron 至 Linux，Windows B/C 至 macOS、两发行版同名 alias、Windows 文件 ACL/NTFS 和进程退出；L6：typecheck、lint、build、兼容、许可、文档、pack 和 packed smoke。未实跑的矩阵格标 `NOT_RUN` / `BLOCKED`。
 
-原生先决条件探针（无网络、无安装）：在 Windows 执行 `node scripts/probe-windows-ssh-initiator.mjs windows-openssh`，以及 `node scripts/probe-windows-ssh-initiator.mjs wsl "<发行版 A>" "<发行版 B>"`。只启动显式列出的发行版。Helper 控制面探针（一次性测试设施，连接显式给出的 alias，不读取个人凭据）：`node scripts/probe-windows-ssh-initiator.mjs windows-openssh-helper <alias> <remote-node> <remote-helper> <canonical-workspace> <entry-sha256> <linux|darwin>`，见 W3-B 阶段报告。该脚本不验证 sshd、PSK 或托管凭据。
+原生先决条件探针（无网络、无安装）：在 Windows 执行 `node scripts/probe-windows-ssh-initiator.mjs windows-openssh`，`node scripts/probe-windows-ssh-initiator.mjs wsl-list`（只读列出 `--list --quiet`，不启动任何发行版），以及 `node scripts/probe-windows-ssh-initiator.mjs wsl "<发行版 A>" "<发行版 B>"`。只启动显式列出的发行版。Helper 控制面探针（一次性测试设施，连接显式给出的 alias，不读取个人凭据）：`node scripts/probe-windows-ssh-initiator.mjs windows-openssh-helper <fixture-ssh-config> <alias> <remote-node> <remote-helper> <canonical-workspace> <entry-sha256> <linux|darwin>`，见 W3-B 阶段报告。`<fixture-ssh-config>` 必须是显式绝对路径的测试专用 SSH 配置，只含测试 key 与 known_hosts，不得 Include 其他文件、不得指向用户主配置；探针同时以 `IdentityAgent=none`/`IdentitiesOnly=yes`/`IdentityFile=none` 关闭 agent 与默认身份。该脚本不验证 sshd、PSK 或托管凭据。
 
 ## W0 阶段报告
 
@@ -89,6 +89,8 @@ POSIX 旧行为未动：不传 `initiator` 时摘要与投影逐字节一致（�
 
 未验收/未实现（W2 维持关闭）：原生配置读写与 ACL/`getuid`/mode 保护、config 文件系统与本地 I/O、身份切换与多 Host 一致性均未实施；Windows 命名管道真实行为 `NOT_RUN`（本机无 Windows）。调查记录：`src/worktrees/native-io.ts` 已有 Win32 路径钉扎的读取句柄（卷级 metadata handle），但没有 Windows 稳定传输 `fileState` 与 no-replace 发布——本地 transfer gate 不移除。生产路径保持关闭。
 
+独立评审遗留发现（未关闭）：有效发起端身份尚未穿过 `RemoteControlPlane`/`loadPersonalManifest`/缓存失效链路——当前只有 manager 侧 `initiator` 选项与 manifest `personalIdentity.initiator` 字段，投产生成方没有接线。激活前必须在 owner/follower 看到的同一摘要内携带该事实，不得只在 transport 内做后处理；非 personal 环境有意排除在外。本计划不更改 plane/运行时门禁。
+
 ## W3-B 阶段报告
 
 基准 HEAD `cbf0a10`（W2 提交后，工作区干净）。本轮为受限开发切片：只交付 Windows OpenSSH 命令构造与官方 Helper 控制面校验，未做任何生产启用、TLS PSK、SFTP 或管理面声明。
@@ -104,10 +106,32 @@ POSIX 旧行为未动：不传 `initiator` 时摘要与投影逐字节一致（�
 可复制的原生验证命令（Windows Node/Electron，连接一次性测试设施）：
 
 ```
-node scripts/probe-windows-ssh-initiator.mjs windows-openssh-helper <alias> <remote-node> <remote-helper> <canonical-workspace> <entry-sha256> <linux|darwin>
+node scripts/probe-windows-ssh-initiator.mjs windows-openssh-helper <fixture-ssh-config> <alias> <remote-node> <remote-helper> <canonical-workspace> <entry-sha256> <linux|darwin>
 ```
 
+`<fixture-ssh-config>` 为显式绝对路径的测试专用配置：只含测试 key 与 known_hosts，不 Include 其他文件、不复用用户主配置；探针追加 `IdentityAgent=none`/`IdentitiesOnly=yes`/`IdentityFile=none` 关闭 agent 与默认身份，并在 spawn 前 `statSync` 校验 `ssh.exe` 存在。结束后清理是有界的（peer.close + stdin/stdout destroy + SIGTERM 子进程 + 5s 未关闭即 unref 拒绝），不证明远端所有进程已退出。
+
+评审修复（W3-B 范围，已合入工作区）：`windows-openssh-helper` 参数由 6 增至 7（新增 fixture 配置，经 `windowsOpenSshHelperArgs` 盘符校验后作为 `-F` 传递）；spawn 追加身份固定选项；`SystemRoot` 校验追加 `.`/`..` 段拒绝。剩余 `NOT_RUN` 原生缺口不变。
+
 未验收/未实现（W3-B 维持关闭）：真实 Windows OpenSSH 执行、官方 Helper 实机握手、TLS PSK、SFTP、管理命令路由与异常清理均 `NOT_RUN`（本机无 Windows）；生产路径未接线，`capability` 门禁未动，Windows 远端控制面保持关闭。
+
+## W3-C 阶段报告
+
+基准 HEAD `4e3c9e7`（W3-B 提交后，工作区干净）。本轮为受限开发切片：只做 WSL 发行版发现与所选发行版内启动校验，不做 WSL 版本验证、依赖部署或 Bridge 实现。
+
+变更面：
+
+- 新增 `src/remote/initiator/wsl.ts`：`wslExecutable`（复用 `windowsSystem32` 盘符校验）；`parseWslDistributions`（只解析成功的 `--list --quiet` stdout：BOM 或无 BOM 的 UTF-16LE 行分隔探测、fatal 解码，逐名校验非空/≤256/无首尾空白/无前导 `-`/无控制字符、无重复，畸形即抛错，不猜本地化文本）；`wslExecArgs`（选中项必须在已安装清单内，否则拒绝并返回 `--distribution <name> --exec <command...>`）。
+- `scripts/probe-windows-ssh-initiator.mjs`：移除顶层 `SystemRoot`/`system32` 局部与 `isAbsolute`（helper 各自校验路径）；新增 `wsl-list` 分支输出 `JSON.stringify(names)`，不启动发行版；`wsl` 分支先 `--list --quiet` 得已安装清单、逐个校验所选发行版存在后才在其内执行——`node -e` 打印 JSON 核验 `platform=linux`、版本、POSIX `executable`、非空默认 `user` 与 `/` 起始 `home`，再 `ssh -V`，最后用 `runtime.executable`（而非裸 `node`）做 65537 字节 stdin/stdout 二进制与 EOF 校验。
+- `tests/windows-ssh-initiator.spec.ts`：新增 5 用例覆盖 `wslExecutable` 路径、UTF-8/无 BOM UTF-16LE/带 BOM UTF-16LE 三种编码等价解析、空缓冲、畸形清单（首尾空白/重复/NUL/非法 UTF-8）、`wslExecArgs` 精确 argv 与缺席/大小写/前导 `-` 注入拒绝（伪造清单含 `--exec` 也不放行）。纯 fixture，不起进程、不访问网络。
+
+验证（本机 macOS arm64 / Node 24.18.0 / pnpm 11.25.0，`pnpm_config_verify_deps_before_run=false`）：`pnpm exec vitest run tests/windows-ssh-initiator.spec.ts` —— 1 文件、10 通过，exit 0；`pnpm typecheck` exit 0；`pnpm exec oxlint` 新文件 exit 0；`node --check scripts/probe-windows-ssh-initiator.mjs` exit 0；`node scripts/probe-windows-ssh-initiator.mjs wsl-list` 与 `… wsl Ubuntu Debian` 在 macOS 均按设计 BLOCKED、exit 2。
+
+原生验证命令（Windows Node/Electron）：`node scripts/probe-windows-ssh-initiator.mjs wsl-list` 只读枚举；`node scripts/probe-windows-ssh-initiator.mjs wsl "<发行版 A>" "<发行版 B>"` 为两发行版证明（各校验 Linux Node 可执行路径、默认用户/home、OpenSSH、二进制 stdio 与 EOF）。
+
+评审修复（W3-C 范围，已合入工作区）：发行版名校验改为共享 `isWslDistributionName`（`identity.ts` 导出，wsl.ts 两个校验点与持久化 schema 同一条规则，schema 侧同样拒绝前导 `-`）；UTF-16LE 探测追加"奇数索引高字节为 0"判据，使无换行的单条 UTF-16LE 清单（如仅 `Ubuntu`）也能识别，不接受非法编码；新增对应 fixture 用例。剩余 `NOT_RUN` 原生缺口不变。
+
+未验收/未实现（W3-C 维持关闭）：真实双发行版 WSL 执行 `NOT_RUN`（本机无 Windows）；WSL 版本判定、Linux 依赖安装/部署、manifest ACK、Bridge、管理与工具、异常清理与代次隔离均未实施；`capability` 门禁未动，Windows 远端控制面保持关闭。
 
 ## 恢复与验收
 

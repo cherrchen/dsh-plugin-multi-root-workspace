@@ -4,6 +4,7 @@ export function windowsSystem32(systemRoot: string | undefined = process.env.Sys
   if (systemRoot === undefined || !/^[A-Za-z]:[\\/]/u.test(systemRoot) || systemRoot.includes('\0')) {
     throw new Error('Windows SystemRoot is unavailable')
   }
+  if (systemRoot.split(/[\\/]/u).some(part => part === '.' || part === '..')) throw new Error('Windows SystemRoot is unavailable')
   return win32.join(systemRoot, 'System32')
 }
 
