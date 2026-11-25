@@ -11,6 +11,7 @@ import { dirname, isAbsolute } from 'node:path'
 import { z } from 'zod'
 import { canonicalPath } from '@deepseek-ai/dsh-sandbox'
 import { isCanonicallyUnder, primaryKey } from '../roots.ts'
+import { windowsInitiatorIdentitySchema } from './initiator/identity.ts'
 
 export class ManifestError extends Error {
   constructor(readonly code: string, message: string) {
@@ -54,6 +55,7 @@ const environmentSchema = z.object({
     hostname: z.string().min(1),
     port: z.number().int().min(1).max(65535),
     credentialDigest: z.string().regex(/^[0-9a-f]{64}$/),
+    initiator: windowsInitiatorIdentitySchema.optional(),
   }).strict().optional(),
   platform: z.string().min(1),
   account: z.string().min(1).max(64),

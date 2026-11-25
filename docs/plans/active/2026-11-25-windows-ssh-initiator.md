@@ -18,7 +18,7 @@
 | --- | --- | --- | --- |
 | W0 | BLOCKED | 需求与实际基线一致；已找到平台、连接、准入、凭据和 I/O 接缝 | 两版上游合同；真实 Windows Node/Electron 和至少两个真实 WSL 环境，或明确各自阻塞；分别判定 B/C |
 | W1 | PASS (限定：共享接缝、本机回归) | 官方 provider 的实际接入合同明确；记录 POSIX 基线 | 通过共享运行时接缝运行原有 POSIX 用例；缺包与 Windows 门禁不改；无 Root 迁移 |
-| W2 | NOT_STARTED | W1 合同稳定；Windows 共用信任边界明确 | 配置及本地文件授权/发布、后端身份、切换及多 Host 一致性用例通过；未验证 capability 关闭 |
+| W2 | BLOCKED（身份与 IPC 基础完成；原生配置、文件 I/O、切换未验收） | W1 合同稳定；Windows 共用信任边界明确 | 配置及本地文件授权/发布、后端身份、切换及多 Host 一致性用例通过；未验证 capability 关闭 |
 | W3-B | NOT_STARTED | W1/W2 可用；W0-B 已验证或明确限定为不可发布的开发验证 | 严格主机验证、官方 Helper RPC、TLS PSK、SFTP、管理和清理通过 Windows Node/Electron 实机与独立版本门禁 |
 | W3-C | NOT_STARTED | W1/W2 可用；在所选真实发行版上验证 stdio/依赖/退出 | 显式多发行版选择与初始化、manifest ACK、管理与工具、异常清理及代次隔离通过 |
 | W4 | NOT_STARTED | W1/W2 可用；分别确认 B/C 的可验收项 | 现有 SSH Settings/i18n，完整用户旅程，真实矩阵、安装制品、回归、评审及发布决策 |
@@ -71,6 +71,23 @@ W1 未跑跨平台矩阵与任何原生实测；Windows capability 保持关闭�
 - F5（范围说明，不处理）：`capability` 为合同暴露给未来实现；POSIX 仍依赖既有 gate，W2 前不接新 capability。
 
 复测：`pnpm exec vitest run tests/ssh-environment.spec.ts tests/remote-tools-switch.spec.ts tests/remote-tools.spec.ts tests/static-ssh-imports.spec.ts` —— 4 个文件、47 通过、0 跳过，exit 0；`pnpm typecheck` exit 0；`pnpm docs:check` exit 0。独立评审结论：无 High/Critical。
+
+## W2 阶段报告
+
+基准 HEAD `4a4bd02`（W1 评审收口提交后，工作区干净）。本轮只做身份与 IPC 基础块，不含 settings/config 文件系统与本地 I/O；Windows capability 门禁未动。变更面：
+
+- 新增 `src/remote/initiator/identity.ts`：`windowsInitiatorIdentitySchema`（`windows-openssh` 或 `wsl`{distribution,user}，zod discriminatedUnion + strict）与 `sameInitiatorIdentity`。控制字符检查用 `Array.from` + `charCodeAt` 写法（oxlint `no-control-regex` 规避，与 lead 备选一致，无语义差异）。
+- `src/remote/manifest.ts`：`personalIdentity` schema 在 `credentialDigest` 后加 `initiator: windowsInitiatorIdentitySchema.optional()`；无 digest 代码改动——字段由既有 canonical JSON 覆盖，无默认值。
+- `src/remote/personal/config.ts`：`toDeploymentManifest` 加第三可选参 `initiator?: WindowsInitiatorIdentity`，在投影的 `personalIdentity` 下 `...(initiator === undefined ? {} : { initiator })`；序列化/加载/路径不变，现有调用仍按两参调用。
+- `src/remote/ssh-environment.ts`：新增 `initiator` 选项与 `requireInitiator(environment)`，`openFresh` 与 `openSftpFresh` 均在 `requireGate()` 之后、transport/身份核验之前调用——Helper 与 SFTP 在同 alias 不同身份下先拒（`initiator-mismatch`），不触及 `ssh -G`。rebind 与生产调用方未改。
+- `src/authority/native.ts`：win32 `storeIdentity` 提取 `endpoint` 常量并返回 `remoteEndpoint: \`${endpoint}-remote\``；v1 管道名逐字节不变，POSIX `.r1.sock` 端点不变。win32 capability 关闭时无 remote-2 监听（远端面未启用）。
+- 测试：`tests/ssh-environment.spec.ts` 在 refusal describe 加 initiator 失配用例（`initiator-mismatch`，`exec` 零调用）；`tests/remote-manifest.spec.ts` 加五身份变体（POSIX 缺席/B/C 发行版+用户/同名发行版异用户/Unicode 发行版名有意）摘要全异、`grantState` 仅同身份 `registered` 其余 `withheld`；`tests/remote-personal.spec.ts` 加 `toDeploymentManifest` 第三参投影用例（POSIX 两参投影断言传 `undefined`，旧断言未改）；`tests/remote-protocol.spec.ts` 首个 `hello binds store` 用例由 `nativeTest` 改 `it.skipIf(!availability.available)` 并断言 `remoteEndpoint !== endpoint`，其余时序/平台用例不变。
+
+验证（本机 macOS arm64 / Node 24.18.0 / pnpm 11.25.0，均加 `pnpm_config_verify_deps_before_run=false`，原因见 W0）：`pnpm exec vitest run tests/remote-manifest.spec.ts tests/remote-personal.spec.ts tests/remote-protocol.spec.ts tests/remote-registry.spec.ts tests/ssh-environment.spec.ts` —— 5 个文件、115 通过、0 跳过，exit 0；`pnpm typecheck` exit 0；`pnpm docs:check` exit 0。
+
+POSIX 旧行为未动：不传 `initiator` 时摘要与投影逐字节一致（选项缺席即 POSIX）；`storeIdentity` POSIX 路径与管道名不变。
+
+未验收/未实现（W2 维持关闭）：原生配置读写与 ACL/`getuid`/mode 保护、config 文件系统与本地 I/O、身份切换与多 Host 一致性均未实施；Windows 命名管道真实行为 `NOT_RUN`（本机无 Windows）。调查记录：`src/worktrees/native-io.ts` 已有 Win32 路径钉扎的读取句柄（卷级 metadata handle），但没有 Windows 稳定传输 `fileState` 与 no-replace 发布——本地 transfer gate 不移除。生产路径保持关闭。
 
 ## 恢复与验收
 

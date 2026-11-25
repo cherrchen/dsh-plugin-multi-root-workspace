@@ -40,7 +40,10 @@ export function storeIdentity(root: string): { root: string; id: string; endpoin
   const physical = realpathSync.native(root)
   const info = statSync(physical, { bigint: true })
   const id = createHash('sha256').update(`${info.dev}:${info.ino}:${process.platform === 'win32' ? physical.toLowerCase() : physical}`).digest('hex')
-  if (process.platform === 'win32') return { root: physical, id, endpoint: `\\\\.\\pipe\\LOCAL\\dsh-registry-${id}` }
+  if (process.platform === 'win32') {
+    const endpoint = `\\\\.\\pipe\\LOCAL\\dsh-registry-${id}`
+    return { root: physical, id, endpoint, remoteEndpoint: `${endpoint}-remote` }
+  }
   // A fixed, short path independent of arbitrarily long store paths.
   const directory = `/tmp/dsh-registry-${process.getuid!()}`
   try { mkdirSync(directory, { mode: 0o700 }) } catch (error) { if ((error as NodeJS.ErrnoException).code !== 'EEXIST') throw error }

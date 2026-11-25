@@ -176,6 +176,14 @@ describe.skipIf(process.platform === 'win32')('personal config store', () => {
     expect(manifest.configVersion).toBe('personal-0')
     expect(digest).toMatch(/^[0-9a-f]{64}$/)
   })
+
+  it('toDeploymentManifest binds the effective initiator into personalIdentity when given', () => {
+    const initiator = { kind: 'wsl' as const, distribution: 'Ubuntu 24.04', user: 'dsh' }
+    const { manifest } = toDeploymentManifest(CONFIG(), '/nowhere.json', initiator)
+    expect(manifest.environments[0]!.personalIdentity?.initiator).toEqual(initiator)
+    const { manifest: posix } = toDeploymentManifest(CONFIG(), '/nowhere.json')
+    expect(posix.environments[0]!.personalIdentity?.initiator).toBeUndefined()
+  })
 })
 
 describe.skipIf(process.platform === 'win32')('managed ssh files', () => {

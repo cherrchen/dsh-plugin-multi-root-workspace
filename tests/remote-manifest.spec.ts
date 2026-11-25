@@ -3,7 +3,9 @@ import { chmodSync, mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync }
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { bindingDigest, loadDeploymentManifest, manifestDigest, parseDeploymentManifest } from '../src/remote/manifest.ts'
+import { bindingDigest, environmentDigest, loadDeploymentManifest, manifestDigest, parseDeploymentManifest } from '../src/remote/manifest.ts'
+import type { RemoteGrant } from '../src/remote/contract.ts'
+import { grantState } from '../src/remote/records.ts'
 import { RemoteControlPlane } from '../src/remote/plane.ts'
 
 const fakeStats = vi.hoisted(() => new Map<string, { uid: number; mode: number; kind: 'file' | 'dir' | 'link' }>())
@@ -182,5 +184,20 @@ describe('deployment manifest', () => {
     expect(plane.status.state).toBe('disabled')
     expect(plane.enabled).toBe(false)
     expect(plane.manifest).toBeUndefined()
+  })
+
+  it('withholds the same recorded Root when the effective initiator changes', () => {
+    const identity = { hostname: 'vps', port: 22, credentialDigest: 'a'.repeat(64) }
+    const variants = [undefined, { kind: 'windows-openssh' }, { kind: 'wsl', distribution: 'Ubuntu 24.04', user: 'ci' },
+      { kind: 'wsl', distribution: 'Debian 开发', user: 'ci' }, { kind: 'wsl', distribution: 'Ubuntu 24.04', user: 'other' }]
+    const manifests = variants.map(initiator => parseDeploymentManifest(text([env({ personalIdentity: { ...identity, initiator } })]), '/m.json', { personal: true }))
+    const [legacy, native] = manifests
+    expect(legacy!.manifest.environments[0]!.personalIdentity).toEqual(identity)
+    expect(new Set(manifests.map(row => environmentDigest(row.manifest.environments[0]!))).size).toBe(variants.length)
+    expect(new Set(manifests.map(row => row.digest)).size).toBe(variants.length)
+    const { manifest: original } = native!
+    const grant: RemoteGrant = { environmentId: 'build-01', rootId: 'app', displayPath: '/work/app', verifiedTarget: { kind: 'path', value: '/work/app' },
+      configVersion: original.configVersion, bindingDigest: bindingDigest(original.environments[0]!, original.bindings[0]!), addedAt: '2026-11-25T00:00:00.000Z' }
+    for (const row of manifests) expect(grantState(row.manifest, original.bindings[0]!.primary, grant)).toBe(row === native ? 'registered' : 'withheld')
   })
 })

@@ -17,6 +17,7 @@ import { SftpClient, type SftpVersion } from './sftp.ts'
 import { verifyHelperEntry } from './personal/operations.ts'
 import { clientPskPlan } from '../compat/ssh-stream-ciphers.ts'
 import { environmentDigest, type DeploymentManifest, type RemoteEnvironment } from './manifest.ts'
+import { sameInitiatorIdentity, type WindowsInitiatorIdentity } from './initiator/identity.ts'
 
 export class SshEnvironmentError extends Error {
   constructor(readonly code: string, message: string) {
@@ -95,6 +96,7 @@ export interface SshEnvironmentManagerOptions {
     readonly gate: Extract<SshCapability, { status: 'eligible' }>
   }) => (ctx: Context) => void
   readonly sftpFactory?: (environment: RemoteEnvironment, onLoss: () => void) => SftpClient
+  readonly initiator?: WindowsInitiatorIdentity
 }
 
 const defaultExec = (file: string, args: readonly string[], input?: string) => new Promise<{ stdout: string; stderr: string }>((resolve, reject) => {
@@ -195,6 +197,7 @@ export class SshEnvironmentManager {
   private readonly readFile: (path: string) => string
   private readonly connectionFactory: SshEnvironmentManagerOptions['connectionFactory']
   private readonly sftpFactory: SshEnvironmentManagerOptions['sftpFactory']
+  private readonly initiator: WindowsInitiatorIdentity | undefined
   private readonly openings = new Map<string, Promise<SshEnvironment>>()
   private readonly resolved = new Map<string, SshEnvironment>()
   private readonly sftpOpenings = new Map<string, Promise<SftpEnvironment>>()
@@ -222,6 +225,7 @@ export class SshEnvironmentManager {
     this.readFile = options.readFile ?? (path => readFileSync(path, 'utf8'))
     this.connectionFactory = options.connectionFactory
     this.sftpFactory = options.sftpFactory
+    this.initiator = options.initiator
   }
 
   /** Rebind personal facts while retaining unchanged connections and Root helpers. */
@@ -278,6 +282,12 @@ export class SshEnvironmentManager {
     const environment = this.manifest.environments.find(entry => entry.environmentId === environmentId)
     if (environment === undefined || environmentDigest(environment) !== expected) {
       throw new SshEnvironmentError('binding-changed', 'the connection changed after admission')
+    }
+  }
+
+  private requireInitiator(environment: RemoteEnvironment): void {
+    if (!sameInitiatorIdentity(this.initiator, environment.personalIdentity?.initiator)) {
+      throw new SshEnvironmentError('initiator-mismatch', 'the SSH environment belongs to another initiator')
     }
   }
 
@@ -526,6 +536,7 @@ export class SshEnvironmentManager {
     const environment = this.manifest.environments.find(entry => entry.environmentId === environmentId)
     if (environment === undefined) throw new SshEnvironmentError('unknown-environment', `no manifest environment "${environmentId}"`)
     this.requireGate()
+    this.requireInitiator(environment)
     // The SFTP session is the transfer adapter, not the environment's exec
     // transport: a helper environment that declares `transfer` uses the same
     // alias's SFTP subsystem, and a device may be SFTP-only.
@@ -565,6 +576,7 @@ export class SshEnvironmentManager {
     const environment = this.manifest.environments.find(entry => entry.environmentId === environmentId)
     if (environment === undefined) throw new SshEnvironmentError('unknown-environment', `no manifest environment "${environmentId}"`)
     this.requireGate()
+    this.requireInitiator(environment)
     if (environment.transport !== 'helper') throw new SshEnvironmentError('transport-not-helper', `environment "${environmentId}" uses transport "${environment.transport}"`)
     // A helper installed before full-artifact integrity has no entry point to
     // verify its file set: refuse rather than trust the single-file digest.

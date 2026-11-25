@@ -10,6 +10,7 @@ import { z } from 'zod'
 import { canonicalPath } from '@deepseek-ai/dsh-sandbox'
 import { isCanonicallyUnder } from '../../roots.ts'
 import { bindingSchema, ManifestError, parseDeploymentManifest, type DeploymentManifest } from '../manifest.ts'
+import type { WindowsInitiatorIdentity } from '../initiator/identity.ts'
 import { RegistryAuthorityLease, RegistryLeaseContendedError } from '../../registry-lease.ts'
 
 const hostName = z.string().min(1).max(253).regex(/^\S+$/).refine(value => !value.startsWith('-'), 'hostname must not start with "-"')
@@ -85,7 +86,7 @@ export type PersonalConfig = z.infer<typeof personalConfigSchema>
  * Convert the personal config into the shared manifest shape, then run the
  * SAME semantic validation the deployment manifest goes through.
  */
-export function toDeploymentManifest(config: PersonalConfig, manifestPath: string): { manifest: DeploymentManifest; digest: string } {
+export function toDeploymentManifest(config: PersonalConfig, manifestPath: string, initiator?: WindowsInitiatorIdentity): { manifest: DeploymentManifest; digest: string } {
   const environments = config.environments.map(environment => ({
     environmentId: environment.environmentId,
     ...(environment.displayName === undefined ? {} : { displayName: environment.displayName }),
@@ -95,6 +96,7 @@ export function toDeploymentManifest(config: PersonalConfig, manifestPath: strin
       hostname: environment.endpoint.hostname,
       port: environment.endpoint.port,
       credentialDigest: createHash('sha256').update(JSON.stringify([environment.identityId, environment.credential])).digest('hex'),
+      ...(initiator === undefined ? {} : { initiator }),
     },
     hostKey: environment.hostKey,
     namespace: environment.environmentId,

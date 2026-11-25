@@ -19,8 +19,9 @@ function listen(id: ReturnType<typeof endpoint>, dispatch: (m: string, a: unknow
   return RemoteServer.listen(id.remoteEndpoint!, { store: id.id, epoch: 'ep-1', manifestDigest: 'd'.repeat(64) }, dispatch)
 }
 
-nativeTest('hello binds store, epoch and digest; a digest mismatch is an explicit error', async () => {
+it.skipIf(!availability.available)('hello binds store, epoch and digest; a digest mismatch is an explicit error', async () => {
   const id = endpoint()
+  expect(id.remoteEndpoint).not.toBe(id.endpoint)
   servers.push(await listen(id))
   const bad = await RemoteClient.connect(id.remoteEndpoint!, id.id, 'e'.repeat(64), () => {}).catch(error => error)
   expect(bad).toMatchObject({ code: 'config-digest-mismatch' })

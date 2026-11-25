@@ -25,6 +25,8 @@ C 候选：用户显式初始化后，在所选发行版的 Linux 文件系统�
 
 有效身份须区分 B、C 发行版与可选 Linux 用户；POSIX 缺省保留旧摘要。切换停止新准入并退役旧代次；不迁移 SSH 配置、密钥或 known_hosts；登记记录保留，新上下文不得使用旧授权。后端选择的权威必须与 owner/follower 看到的 manifest 摘要绑定，不以本地 UI 状态替代。
 
+W2 已实现身份投影和 Win32 remote-2 命名管道端点命名；尚未开放 Windows 远端控制面。未选择 Windows 时不写身份字段，不改变 POSIX 摘要。
+
 ## 相关
 
 [ADR-0030](./ADR-0030-environment-and-root-identity.md)、[ADR-0032](./ADR-0032-upstream-ssh-backend.md)、[ADR-0033](./ADR-0033-remote-command-and-sandbox.md)、[ADR-0049](./ADR-0049-ssh-custody-modes.md)。

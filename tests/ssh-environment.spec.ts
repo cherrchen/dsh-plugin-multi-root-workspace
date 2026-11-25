@@ -156,6 +156,20 @@ describe('SshEnvironmentManager refusal ordering', () => {
     })
     expect(lookups).toEqual(['[203.0.113.95]:2222'])
   })
+
+  it('refuses a manifest from a different initiator before inspecting the alias', async () => {
+    const run = vi.fn(exec)
+    const entry = environment({ personalIdentity: { hostname: 'host', port: 22, credentialDigest: 'a'.repeat(64), initiator: { kind: 'wsl', distribution: 'Ubuntu 24.04', user: 'ci' } } })
+    const manager = new SshEnvironmentManager({
+      manifest: manifest([entry]), logger, gate: eligible, custody: 'personal', exec: run,
+      initiator: { kind: 'windows-openssh' },
+    })
+    try {
+      await expect(manager.open('vps-app', '/srv/dsh/work/app')).rejects.toMatchObject({ code: 'initiator-mismatch' })
+      await expect(manager.openSftp('vps-app')).rejects.toMatchObject({ code: 'initiator-mismatch' })
+      expect(run).not.toHaveBeenCalled()
+    } finally { await manager.disposeAll() }
+  })
 })
 
 
