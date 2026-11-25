@@ -839,10 +839,14 @@ async function remotesViewOf(
         direction: transfer.direction, environmentId: transfer.peer.environmentId, rootId: transfer.peer.rootId,
       }))
       const capabilities = remoteCapabilitiesOf(state, binding.actions, transfers, mode, capped)
+      const browseTargetMatches = grant !== undefined && (
+        grant.verifiedTarget.kind === 'path'
+          ? grant.verifiedTarget.value === grant.displayPath && grant.displayPath === binding.path
+          : environment.transport === 'helper'
+      )
       const browseAuthorization = browsable !== undefined
         && state === 'registered' && grant !== undefined && capabilities.read
-        && grant.verifiedTarget.kind === 'path'
-        && grant.verifiedTarget.value === grant.displayPath && grant.displayPath === binding.path
+        && browseTargetMatches
         && browsable.supports(binding.environmentId, binding)
         ? remoteFilesAuthorization(snapshot.epoch, grant.grantId ?? grant.addedAt, grant.bindingDigest, environmentDigest(environment))
         : undefined

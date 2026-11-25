@@ -142,7 +142,7 @@ GUI 入口有两处：
 
 ### Workspace Root 绑定对话框
 
-从 Workspace Folders 打开 `SshWorkspaceBindingsDialog`。「添加绑定」打开 `AddBindingWizard`（`src/client/wizard/add-binding.tsx`），与「添加远端工作目录」向导共用 `WizardShell` 的绑定、登记两步：第一步在整页表单中选择已有连接、指定远端路径（只读 SFTP 浏览或手动输入规范化的 POSIX 绝对路径）、勾选允许动作与本地传输对端（`primary` 和可用附加根的 `aliasId`），「下一步」经 revision CAS 保存（草稿携带已保存的 `rootId`，「上一步→下一步」的重复保存编辑同一绑定而非重复登记）；第二步展示环境、路径、动作与传输摘要并调用 `remotes.add` 登记，成功后进入完成页。已有绑定仍在对话框内联编辑或解除，其他绑定和 SSH 连接独立保留；编辑权限或更新部署后状态变为「待重新登记」的目录，从 Workspace Folders 行尾「…」菜单重新登记。
+从 Workspace Folders 打开 `SshWorkspaceBindingsDialog`。「添加绑定」打开 `AddBindingWizard`（`src/client/wizard/add-binding.tsx`），与「添加远端工作目录」向导共用 `WizardShell` 的绑定、登记两步：第一步在整页表单中选择已有连接、指定远端路径（只读 SFTP 浏览或手动输入规范化的 POSIX 绝对路径）、勾选允许动作、可选的 Files 稳定路径列举断言与本地传输对端（`primary` 和可用附加根的 `aliasId`），「下一步」经 revision CAS 保存（草稿携带已保存的 `rootId`，「上一步→下一步」的重复保存编辑同一绑定而非重复登记）；第二步展示环境、路径、动作与传输摘要并调用 `remotes.add` 登记，成功后进入完成页。已有绑定仍在对话框内联编辑或解除，其他绑定和 SSH 连接独立保留；编辑权限或更新部署后状态变为「待重新登记」的目录，从 Workspace Folders 行尾「…」菜单重新登记。
 
 新建绑定时，Host 将路径的末级目录名转换为最多 63 字符的小写标识。转换结果为空，或同一项目和 SSH 环境已有同名标识时，改用 UUID 的前 8 位，并保证该标识在当前范围内唯一。编辑已有绑定时沿用原标识。
 
@@ -192,4 +192,4 @@ exec 与 transfer 独立授权：执行前用 helper 的只读受限 stat/realpa
 
 ## Files 标签页目录浏览
 
-绑定声明 `directoryListing: 'stable-path'`（仅无 Helper 的 SFTP 连接可在绑定对话框勾选，见[使用指南](../guide/user/ssh-remote-environments.md#在-files-标签页浏览远端目录可选)）后，宿主在面板通道上提供两个端点：`remoteFiles.list`（受限目录列举，17 个固定错误码）与 `remotes.waitForAuthorizationChange`（授权元数据租约，非文件监视）。二者与上面传输端点共用同一套会话/登记/令牌权威。组件依赖、时序、生命周期与安全姿态的唯一真源见 [file-browsing-providers.md](../architecture/file-browsing-providers.md)，决策见 [ADR-0052](../decisions/ADR-0052-provider-file-browsing.md)。
+绑定声明 `directoryListing: 'stable-path'`（纯 SFTP 与 Helper 连接均可勾选，且必须同时允许 `read`；Helper 登记在对象核验后追加独立的 SFTP v3 路径核验，见[使用指南](../guide/user/ssh-remote-environments.md#在-files-标签页浏览远端目录可选)）后，宿主在面板通道上提供两个端点：`remoteFiles.list`（受限目录列举，17 个固定错误码）与 `remotes.waitForAuthorizationChange`（授权元数据租约，非文件监视）。二者与上面传输端点共用同一套会话/登记/令牌权威。组件依赖、时序、生命周期与安全姿态的唯一真源见 [file-browsing-providers.md](../architecture/file-browsing-providers.md)，决策见 [ADR-0052](../decisions/ADR-0052-provider-file-browsing.md)。

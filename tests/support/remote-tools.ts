@@ -71,6 +71,8 @@ export interface RemoteToolsWorldOptions {
   readonly seed?: Readonly<Record<string, Readonly<Record<string, string>> | undefined>>
   /** Opt the device binding into `directoryListing: 'stable-path'`. */
   readonly deviceListing?: boolean
+  /** Opt the Helper-backed build binding into `directoryListing: 'stable-path'`. */
+  readonly buildListing?: boolean
   /** Session sandbox policy mode; default `workspace-write`. */
   readonly policyMode?: 'read-only' | 'workspace-write'
 }
@@ -78,6 +80,7 @@ export interface RemoteToolsWorldOptions {
 function manifestFile(fixture: FixtureWorkspace, options: RemoteToolsWorldOptions): string {
   const manifest = fakeManifest({
     deviceListing: options.deviceListing,
+    buildListing: options.buildListing,
     primary: fixture.workspace,
     localRootIds: options.localRootIds ?? ['primary'],
     ...(options.deviceActions === undefined ? {} : { deviceActions: options.deviceActions }),

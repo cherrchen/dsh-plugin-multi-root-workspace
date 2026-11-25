@@ -548,6 +548,7 @@ export const en = {
   'wizard.summaryActions': 'Allowed actions',
   'wizard.summaryTransfers': 'Local transfers',
   'wizard.summaryNone': 'None',
+  'wizard.summaryEnabled': 'Enabled',
   'wizard.register': 'Register in workspace',
   'wizard.done': 'Registered',
   'wizard.doneHint': 'The remote directory joined the workspace for this session; the agent accesses it under the binding permissions.',

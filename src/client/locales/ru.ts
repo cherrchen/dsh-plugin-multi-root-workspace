@@ -548,6 +548,7 @@ export const ru = {
   'wizard.summaryActions': 'Разрешённые действия',
   'wizard.summaryTransfers': 'Локальные передачи',
   'wizard.summaryNone': 'Нет',
+  'wizard.summaryEnabled': 'Включено',
   'wizard.register': 'Зарегистрировать в рабочей области',
   'wizard.done': 'Зарегистрировано',
   'wizard.doneHint': 'Удалённый каталог присоединён к рабочей области этой сессии; агент обращается к нему с правами привязки.',

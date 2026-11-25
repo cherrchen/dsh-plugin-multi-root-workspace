@@ -98,6 +98,11 @@ export function RemoteRootMenu(props: RemoteRootMenuProps): ReactNode {
       await ssh.bindingSave(sessionId, draft.revision, {
         environmentId, rootId, path,
         actions: ACTIONS.filter(action => draft.actions.has(action)),
+        // The quick capability editor does not expose the stable-path
+        // deployment assertion, but it must never silently drop one chosen in
+        // the full binding editor.
+        ...(draft.binding.directoryListing === 'stable-path' && draft.actions.has('read')
+          ? { directoryListing: 'stable-path' as const } : {}),
         ...(draft.transfers.length === 0 ? {} : { transfers: draft.transfers }),
       })
       props.onClose()

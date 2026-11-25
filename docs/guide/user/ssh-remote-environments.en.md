@@ -84,17 +84,17 @@ Connections are plugin-global, while directory bindings belong to each workspace
 
 ## Browsing a remote directory in the Files tab (optional)
 
-A registered binding can also appear in the **Files tab's root-switcher menu**, letting you browse the remote directory level by level just like a local additional root. This is an off-by-default, per-binding opt-in, and it is only offered for connections **without a Helper installed** (pure SFTP transport).
+A registered binding can also appear in the **Files tab's root-switcher menu**, letting you browse the remote directory level by level just like a local additional root. This is an off-by-default, per-binding opt-in. Both pure-SFTP connections and connections with a Helper installed can enable it; a Helper connection is admitted through an independent SFTP v3 path verification and this does not weaken the Helper object authorization used by `remote_bash` / `remote_copy`.
 
 ### Enabling it
 
-In the project binding dialog (adding or editing a binding), tick **List in Files (stable SFTP path)**. The hint next to the checkbox states its precondition:
+Tick **List in Files (stable SFTP path)** in any binding flow: the binding step of **+ → Add remote working directory**, **Add binding** in the project bindings dialog, or an existing binding's **Edit** form. The checkbox is available only when **read** is also ticked. The hint next to it states its precondition:
 
 > Enable only if untrusted processes cannot replace the root, its ancestors, or directories below it while browsing.
 
-This is a **deployment assertion**: you declare that the paths on the remote machine are stable while you browse. Host-side manifest validation stays authoritative — if the connection has a Helper (transport is not pure SFTP), the checkbox is not shown and the declaration cannot take effect.
+This is a **deployment assertion**: you declare that the paths on the remote machine are stable while you browse. Host-side manifest validation stays authoritative — the declaration is part of the binding identity and requires `read`; simply ticking read does not silently enable browsing.
 
-Toggling the checkbox **changes the binding's identity**: after saving, the binding enters the `withheld` state; click **Register** in the row's `…` menu to complete a real connection check and restore it.
+Toggling the checkbox **changes the binding's identity**: after saving, the binding enters the `withheld` state; click **Register** in the row's `…` menu to complete a real connection check and restore it. For a Helper connection, registration performs both the Helper object verification used by `remote_bash` / `remote_copy` and the independent SFTP path verification used only for browsing.
 
 ### Supported and unsupported actions
 

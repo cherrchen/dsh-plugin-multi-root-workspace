@@ -548,6 +548,7 @@ export const pt = {
   'wizard.summaryActions': 'Ações permitidas',
   'wizard.summaryTransfers': 'Transferências locais',
   'wizard.summaryNone': 'Nenhuma',
+  'wizard.summaryEnabled': 'Ativado',
   'wizard.register': 'Registar no espaço de trabalho',
   'wizard.done': 'Registado',
   'wizard.doneHint': 'O diretório remoto juntou-se ao espaço de trabalho desta sessão; o agente acede com as permissões da vinculação.',

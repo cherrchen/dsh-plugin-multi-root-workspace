@@ -157,10 +157,20 @@ export function AddBindingWizard(props: {
             <WizardCheckbox key={action} checked={draft[action]}
               disabled={busy || (action === 'exec' && !draft.exec && environment?.exec === undefined)}
               label={t(`remote.capability.${action}`)}
-              onChange={next => setDraft({ ...draft, [action]: next })} />
+              onChange={next => setDraft({ ...draft, [action]: next, ...(action === 'read' && !next ? { directoryListing: false } : {}) })} />
           ))}
         </div>
       </section>
+      {environment === undefined ? null : (
+        <section className="mrfw-wizSection" aria-label={t('ssh.binding.directoryListing')}>
+          <div className="mrfw-wizCheckRow">
+            <WizardCheckbox checked={draft.directoryListing} disabled={busy || !draft.read}
+              label={t('ssh.binding.directoryListing')}
+              onChange={next => setDraft({ ...draft, directoryListing: next })} />
+          </div>
+          <p className="mrfw-note">{t('ssh.binding.directoryListingHint')}</p>
+        </section>
+      )}
       {localPeers.length === 0 ? null : (
         <section className="mrfw-wizSection" aria-label={t('ssh.binding.transfers')}>
           <span className="mrfw-wizFieldLabel">{t('ssh.binding.transfers')}</span>
@@ -209,6 +219,10 @@ export function AddBindingWizard(props: {
         <div className="mrfw-wizSummaryRow">
           <dt>{t('wizard.summaryActions')}</dt>
           <dd>{actions.map(action => t(`remote.capability.${action}`)).join(', ') || t('wizard.summaryNone')}</dd>
+        </div>
+        <div className="mrfw-wizSummaryRow">
+          <dt>{t('ssh.binding.directoryListing')}</dt>
+          <dd>{draft.directoryListing ? t('wizard.summaryEnabled') : t('wizard.summaryNone')}</dd>
         </div>
         <div className="mrfw-wizSummaryRow">
           <dt>{t('wizard.summaryTransfers')}</dt>

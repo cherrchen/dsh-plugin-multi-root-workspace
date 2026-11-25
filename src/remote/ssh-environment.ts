@@ -547,9 +547,6 @@ export class SshEnvironmentManager {
     if (purpose === 'transfer' && environment.transfer === undefined) {
       throw new SshEnvironmentError('transfer-unavailable', `environment "${environmentId}" declares no transfer block`)
     }
-    if (purpose === 'files' && environment.transport !== 'sftp') {
-      throw new SshEnvironmentError('capability-unsupported', `environment "${environmentId}" is not an sftp transport`)
-    }
     await this.verifyHostIdentity(environment)
     signal?.throwIfAborted()
     // Host verification is async: a personal rebind may have landed while it

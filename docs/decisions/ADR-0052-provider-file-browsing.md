@@ -58,8 +58,8 @@ Host 计划新增严格独立的 `remoteFiles.list` 端点（不复用 `workspac
 
 ### 6. 各后端的诚实边界
 
-- **SFTP（path 后端）**：校验只覆盖 canonical 路径 + mode 位，无 inode，校验与 OPENDIR 之间的符号链接竞争不可排除。**不得宣称任何 SFTP 后端对并发恶意 rename 健壮。** 该后端只在附带书面隔离条件（P3 定稿）下准入，且**绝不用于 Helper 对象（dev:ino）授权**。
-- **Helper（object 后端）**：`listDir` 返回数组、无 fd-bound 列举；需要一份「对已准入 dev:ino 的目录、在真实 confinement 内做有界、按描述符锚定列举」的证据（实现或否决性证明），否则该后端 fail closed，不随本批发布。
+- **SFTP（path 后端）**：校验只覆盖 canonical 路径 + mode 位，无 inode，校验与 OPENDIR 之间的符号链接竞争不可排除。**不得宣称任何 SFTP 后端对并发恶意 rename 健壮。** 该后端只在附带书面隔离条件（P3 定稿）下准入，且**绝不把 Helper 对象（dev:ino）授权改写或解释为 path 授权**。
+- **Helper（object 后端）**：Helper 原生 `listDir` 返回数组、无 fd-bound 列举；该原生列举后端 fail closed，不随本批发布。**2026-11-24 修订**：这不等于禁止 Helper transport 使用浏览功能。若绑定显式声明 `directoryListing:'stable-path'`，登记仍先完成 Helper object probe（供 exec/copy 的既有授权域使用），随后必须独立通过同一 SFTP v3 路径 probe；浏览准入只依赖这项显式 path 部署断言与双重运行期 probe，绝不把 dev:ino 当成路径身份。换句话说，path 后端没有“为 Helper object 授权”，而是在同一绑定上为 list-only 浏览建立独立、较窄的准入。
 - **Broker**：当前无目录流方法；没有兼容端口时 fail closed，不绕过 broker 自行开直连。
 
 ## 备选方案
@@ -76,7 +76,7 @@ Host 计划新增严格独立的 `remoteFiles.list` 端点（不复用 `workspac
 - 树、搜索、导航键控从「路径」改为「RootRef + 授权代次」：本地三键（session、tab/pane、根）保持等价语义，远端获得互不串扰的状态空间。
 - Provider 端口是本地 fork 与远端实现之间唯一的接缝：本地 API 拼写不变保证旧宿主与主根零变化，远端能力差异（无 watch、无 search）在端口上以「缺省即无流/无面」表达。
 - 授权语义收紧：浏览准入显式声明 UI 只读目的，网络 I/O 不进入 Registry 临界区，撤权在两个准入点之间必然被截获。
-- 明确不承诺的安全边界：SFTP 校验—OPENDIR 竞争窗口、Helper 无 fd-bound 列举、Broker 无目录流——三者在证据补齐前分别「条件准入 / fail closed / fail closed」。
+- 明确不承诺的安全边界：SFTP 校验—OPENDIR 竞争窗口由显式部署断言条件准入；Helper 原生 fd-bound 列举仍 fail closed（浏览改走独立的 SFTP path 准入，不复用 Helper 列举）；Broker 无目录流仍 fail closed。
 - 计划文档的 P0–P7 管线按此决策排布；P3 结束时要拿出 SFTP 隔离条件定稿与 Helper 后端证据或否决结论。
 
 ## 实施记录
@@ -89,6 +89,7 @@ Host 计划新增严格独立的 `remoteFiles.list` 端点（不复用 `workspac
 - **P6（预览端口评估，已完成，检查点 `ede0ee1`）**：fake-port 探针三条既有回归（`client-files-provider.spec.ts` 的 preview 端口手势/死 signal/缺端口 no-op）验证「选择 + 失效」机制可复用；结论为**预览端口暂不放行**——远端内容读取协议未定义、未接线，保留 fake 实现与失败关闭。架构与安全记录归档于 `docs/architecture/file-browsing-providers.md`。
 - **P7（全量门禁 + 真实 SSH + GUI + 矩阵）**：**PARTIAL PASS**。跑过：`pnpm verify:all` 全段绿（2771 用例）、聚焦规格复测 4 文件 109 用例、真 Chromium 远端树/菜单截图（`.dsh-smoke/gui/`）、用户态 `sshd` loopback 上的生产 `SftpClient` 列举（`tests/ssh-loopback.e2e.ts`）。**P7 补证已补齐两项强制门禁**：真实 DSH↔SSH 端到端——`remote-ssh.live.e2e.ts` 19/19 在真实 `ali` VPS 上通过（`remote_bash` 经 helper 传输、`remote_copy` 经 sftp 传输，旧专用 VPS 已失联，环境以 `~/.dsh-ssh-test/live-ali.json` 承载）；真实宿主 GUI——`scripts/live-remote-gui.mjs`（`DSH_LIVE_GUI=1`）9/9，打包 tarball 装入隔离 `DSH_HOME` 的 web profile（四个 SSH peer 经 `dsh plugin add` 装入）、真实 `dsh web` 0.2.2-rc.5 + 真实 Chrome，远端登记、RootSwitcher 禁用行、远端树绘制/展开截图齐全（`.dsh-smoke/live-gui/evidence/`）。补证还修出一个真实 WAN 缺陷：`TransferIO` 清理窗口自首个 `cleanupClient` 调用起算导致 publish 后 `remove()` 饥饿、`.dsh-staging-*` 残留——改为逐次 1 秒窗口（remote-copy 系 61 用例 + live 19 用例回归）。未跑：其余 25 个 DSH 发布与 CI macos/ubuntu/windows 车道（矩阵源 26 个精确发布、SSH 地板 5 个 `0.2.2-rc.1`–`rc.5`，仅本机 `0.2.2-rc.5` macOS 实测）。验收明细与诚实限制见实施计划 §8。
 - **P4/P5 终审补丁（检查点 `ede0ee1`）**：`providers/ssh.ts` 的 `listDirectory` 三个 signal 闸（请求前/await 后/catch 中先于 `failureOf`）——目录信号已止的迟到授权类失败不再触发 invalidated，非编码错误一律本地化 `connection-failed` 不回传原文；`RootSwitcher` `setSelected` 同步写 `selectedRef`（layout effect 跟随），租约循环改用种子选择 + 键匹配闸；`wait` 到期序列改为先停通知/等在飞重准入/全新最终准入，`admit` 并入 `manager.capability?.eligible` 闸；合同新增 `pathBytes:4096`/`absolutePathBytes:8192` 字节界（相对路径按 UTF-8 字节、opt-in 根路径 manifest 期拒绝、通道开启前装配路径预检）。
+- **2026-11-24 修订（Helper transport 浏览准入）**：按本文 §6 的修订落地——manifest 不再把 `directoryListing` 限制在 helper-less transport；Helper 绑定的登记在 object probe 后追加 owned SFTP v3 路径 probe；`openFilesSftp` 取消 transport 预先拒绝但保留 SFTP v3、宿主身份、digest 与 owned-channel 闸；`browseAuthorization` 对 object grant 仅在环境为 Helper transport、binding digest 含显式 opt-in 且 `capabilities.read` 成立时签发。三条绑定 UX（`+ 添加远端工作目录`、绑定对话框的添加向导、编辑表单）都暴露同一个默认关闭选项；manifest 同时强制该声明必须伴随 `read`。快捷能力菜单不暴露该部署断言，但保存时不再静默丢弃它。实机证据：`remote-ssh.live.e2e.ts` 20/20（含 opted-in Helper root 浏览）与 `live-remote-gui` 9/9（Helper 行 `browseAuthorization: present:64` 且可选）。
 
 ## 相关
 

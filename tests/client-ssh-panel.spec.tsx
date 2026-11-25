@@ -905,12 +905,38 @@ describe('the SSH management dialog', () => {
     expect(within(dialog).getAllByRole('textbox')).toEqual([within(dialog).getByLabelText('ssh.binding.path')])
     fireEvent.change(within(dialog).getByLabelText('ssh.binding.path'), { target: { value: '/srv/data' } })
     fireEvent.click(imports[1]!)
+    fireEvent.click(within(dialog).getByRole('checkbox', { name: 'ssh.binding.directoryListing' }))
     fireEvent.click(within(dialog).getByRole('button', { name: 'ssh.step.next' }))
     expect(await callsOf(ssh, 'bindingSave')).toEqual([['session-1', 7, {
       environmentId: 'env-prod',
       path: '/srv/data',
       actions: ['read'],
+      directoryListing: 'stable-path',
       transfers: [{ direction: 'import', peer: { environmentId: 'local', rootId: 'payments' } }],
+    }]])
+  })
+
+  it('offers the stable-path opt-in for a Helper connection in the add-binding wizard and ties it to read', async () => {
+    const ssh = fakeSsh(sshState({ environments: [ENV_HELPER] }))
+    const dialog = await openBindings(ssh)
+    const read = within(dialog).getByRole('checkbox', { name: 'remote.capability.read' }) as HTMLInputElement
+    const listing = within(dialog).getByRole('checkbox', { name: 'ssh.binding.directoryListing' }) as HTMLInputElement
+    expect(listing.disabled).toBe(false)
+    fireEvent.click(listing)
+    expect(listing.checked).toBe(true)
+    fireEvent.click(read)
+    expect(listing.checked).toBe(false)
+    expect(listing.disabled).toBe(true)
+    fireEvent.click(read)
+    expect(listing.disabled).toBe(false)
+    fireEvent.click(listing)
+    fireEvent.change(within(dialog).getByLabelText('ssh.binding.path'), { target: { value: '/srv/helper-app' } })
+    fireEvent.click(within(dialog).getByRole('button', { name: 'ssh.step.next' }))
+    expect(await callsOf(ssh, 'bindingSave')).toEqual([['session-1', 7, {
+      environmentId: 'env-helper',
+      path: '/srv/helper-app',
+      actions: ['read'],
+      directoryListing: 'stable-path',
     }]])
   })
 
@@ -1158,6 +1184,7 @@ describe('the SSH management dialog', () => {
     const binding = {
       environmentId: 'env-prod', rootId: 'web', path: '/srv/app',
       actions: ['read'] as const,
+      directoryListing: 'stable-path' as const,
       transfers: [{ direction: 'export' as const, peer: { environmentId: 'local', rootId: 'payments' } }],
     }
     const endpoint = {
@@ -1208,7 +1235,10 @@ describe('the SSH management dialog', () => {
       state: 'registered' as const, actions: [...binding.actions], transfers: [],
       capabilities: { read: true, write: false, exec: false, receive: false, send: true },
     }
-    const ssh = fakeSsh(sshState({ bindings: [binding] }))
+    const ssh = fakeSsh(sshState({
+      environments: [{ ...ENV_HELPER, environmentId: 'env-prod' }],
+      bindings: [binding],
+    }))
     renderDialog({ ssh, endpoints: [endpoint] })
     const row = (await screen.findByText('ssh://deploy@prod.internal:22/srv/app')).closest('.mrfw-row') as HTMLElement
     fireEvent.click(within(row).getByRole('button', { name: 'panel.more' }))
@@ -1222,6 +1252,13 @@ describe('the SSH management dialog', () => {
     const path = within(dialog).getByLabelText<HTMLInputElement>('ssh.binding.path')
     await waitFor(() => expect(path.value).toBe('/srv/app'))
     expect((within(dialog).getByRole('button', { name: 'ssh.binding.environment' }) as HTMLButtonElement).disabled).toBe(true)
+    const listing = within(dialog).getByRole('checkbox', { name: 'ssh.binding.directoryListing' }) as HTMLInputElement
+    expect(listing.disabled).toBe(false)
+    fireEvent.click(listing)
+    fireEvent.click(within(dialog).getByRole('button', { name: 'ssh.binding.save' }))
+    expect(await callsOf(ssh, 'bindingSave')).toEqual([['session-1', 7, {
+      environmentId: 'env-prod', rootId: 'web', path: '/srv/app', actions: ['read'], directoryListing: 'stable-path',
+    }]])
   })
 
   it('pre-selects the binding form when the dialog gets a matching initialEdit', async () => {

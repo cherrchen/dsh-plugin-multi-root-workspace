@@ -548,6 +548,7 @@ export const fr = {
   'wizard.summaryActions': 'Actions autorisées',
   'wizard.summaryTransfers': 'Transferts locaux',
   'wizard.summaryNone': 'Aucun',
+  'wizard.summaryEnabled': 'Activé',
   'wizard.register': 'Enregistrer dans l’espace de travail',
   'wizard.done': 'Enregistré',
   'wizard.doneHint': 'Le répertoire distant a rejoint l’espace de travail de cette session ; l’agent y accède selon les permissions de la liaison.',

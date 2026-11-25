@@ -547,6 +547,7 @@ export const zh = {
   'wizard.summaryActions': '允许动作',
   'wizard.summaryTransfers': '本地传输',
   'wizard.summaryNone': '无',
+  'wizard.summaryEnabled': '启用',
   'wizard.register': '登记到工作区',
   'wizard.done': '已登记',
   'wizard.doneHint': '远端目录已加入本会话的工作区，Agent 按绑定权限访问。',

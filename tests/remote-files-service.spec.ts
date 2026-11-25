@@ -1,7 +1,8 @@
 /**
  * P3: the `remoteFiles.list` service fails closed — forged sessions, missing
- * opt-ins, object grants and stale tokens never open a channel — and a legal
- * opt-in listing is bounded, owned, and re-admitted before bytes are trusted.
+ * opt-ins and stale tokens never open a channel — and a legal opt-in listing
+ * is bounded, owned, and re-admitted before bytes are trusted. Helper-backed
+ * object grants are admissible only when their binding explicitly opts in.
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { createFixtureWorkspace, type FixtureWorkspace } from './support/temp-workspace.ts'
@@ -94,17 +95,32 @@ describe.skipIf(process.platform === 'win32')('remoteFiles.list admission', () =
     expect(manager.opens).toBe(0)
   })
 
-  it('refuses an opt-out binding and an object-target grant with zero channel opens', async () => {
+  it('refuses opt-out SFTP and Helper bindings with zero channel opens', async () => {
     await mount({ deviceListing: false })
     await registerRemote(world!, 'device', 'out')
     const token = '0'.repeat(64)
     await expect(service!.list(request({ authorization: token }) as never)).rejects.toMatchObject({ code: 'binding-changed' })
-    // build is a helper environment with no opt-in: its grant is object-targeted.
+    // build is a Helper object-target grant; without the explicit opt-in it
+    // still has no browse admission.
     await registerRemote(world!, 'build', 'app')
     const code = await service!.list(request({ environmentId: 'build', rootId: 'app', authorization: token }) as never)
       .then(() => 'none', (error: RemoteFilesError) => error.code)
     expect(['binding-changed', 'root-identity-changed']).toContain(code)
     expect(manager.opens).toBe(0)
+  })
+
+  it('admits an opted-in Helper binding through its browse-only SFTP path admission', async () => {
+    await mount({ buildListing: true, seed: { build: { '/srv/root/helper-only.txt': 'h' } } })
+    await registerRemote(world!, 'build', 'app')
+    const view = await world!.panel('remotes', { sessionId: world!.session.id })
+    const endpoint = (view.value as { endpoints: { rootId: string; browseAuthorization?: string }[] })
+      .endpoints.find(entry => entry.rootId === 'app')
+    expect(endpoint?.browseAuthorization).toMatch(/^[0-9a-f]{64}$/)
+    const listing = await service!.list(request({
+      environmentId: 'build', rootId: 'app', authorization: endpoint!.browseAuthorization!,
+    }) as never)
+    expect(listing.entries.map(entry => entry.name)).toContain('helper-only.txt')
+    expect(manager.opens).toBe(1)
   })
 
   it('rejects a stale authorization token before any I/O', async () => {

@@ -1307,7 +1307,8 @@ export function SshWorkspaceBindingsDialog(props: SshWorkspaceBindingsDialogProp
                 {(['read', 'write', 'exec'] as const).map(action => (
                   <WizardCheckbox key={action} checked={draft[action]}
                     disabled={busy || (action === 'exec' && !draft.exec && environment?.exec === undefined)}
-                    label={t(`remote.capability.${action}`)} onChange={next => setDraft({ ...draft, [action]: next })} />
+                    label={t(`remote.capability.${action}`)}
+                    onChange={next => setDraft({ ...draft, [action]: next, ...(action === 'read' && !next ? { directoryListing: false } : {}) })} />
                 ))}
               </div>
             </section>
@@ -1326,16 +1327,15 @@ export function SshWorkspaceBindingsDialog(props: SshWorkspaceBindingsDialogProp
                 ))}
               </section>
             )}
-            {/* The stable-SFTP-path Files browsing opt-in (ADR-0052): offered
-                only on a helper-less environment, whose transport is SFTP — a
-                Helper environment's transport can never honor the field, and
-                the host's manifest validation stays authoritative either way.
-                Toggling it changes the binding's identity, so the existing
-                re-registration flow applies after saving. */}
-            {environment === undefined || environment.helper !== null ? null : (
+            {/* The stable-SFTP-path Files browsing opt-in (ADR-0052): a
+                binding-level read-only permission independent of the exec
+                transport. It requires read, stays off by default, and changing
+                it changes binding identity, so the existing re-registration
+                flow applies after saving. */}
+            {environment === undefined ? null : (
               <section className="mrfw-wizSection" aria-label={t('ssh.binding.directoryListing')}>
                 <div className="mrfw-wizCheckRow">
-                  <WizardCheckbox checked={draft.directoryListing} disabled={busy}
+                  <WizardCheckbox checked={draft.directoryListing} disabled={busy || !draft.read}
                     label={t('ssh.binding.directoryListing')}
                     onChange={next => setDraft({ ...draft, directoryListing: next })} />
                 </div>

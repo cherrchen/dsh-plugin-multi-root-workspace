@@ -16,7 +16,7 @@ function world(spawn: (handle: FakeHandle) => unknown = handle => handle) {
     subprocess: { spawn: () => { calls.push('spawn'); return spawn(handle) } },
   }
   const manager = { open: async () => { calls.push('open'); return env }, openSftp: async () => { throw new Error('unused') } }
-  return { verifier: new SshEndpointVerifier(manager as never), handle, calls }
+  return { verifier: new SshEndpointVerifier(manager as never), manager, handle, calls }
 }
 
 class FakeHandle {
@@ -71,6 +71,28 @@ describe('the endpoint verifier probe lifecycle', () => {
     await expect(pending).resolves.toMatchObject({ platform: 'linux', target: { kind: 'object', value: '1:2' } })
     expect(handle.terminateCalls).toBe(1)
     expect(handle.waitCalls).toBeGreaterThan(0)
+  })
+
+  it('adds an owned SFTP path probe when a Helper binding opts into directory listing', async () => {
+    const { verifier, manager, handle } = world()
+    let opens = 0
+    let disposals = 0
+    ;(manager as unknown as { openFilesSftp: unknown }).openFilesSftp = async () => {
+      opens++
+      return {
+        client: {
+          realpath: async (path: string) => path,
+          lstat: async () => ({ permissions: 0o040000 }),
+        },
+        dispose: async () => { disposals++ },
+      }
+    }
+    const pending = verifier.verify(ENVIRONMENT, { path: '/srv/root', directoryListing: 'stable-path' } as never, new AbortController().signal)
+    await Promise.resolve()
+    handle.completion.resolve({ exitCode: 0, signal: null })
+    await expect(pending).resolves.toMatchObject({ target: { kind: 'object', value: '1:2' } })
+    expect(opens).toBe(1)
+    expect(disposals).toBe(1)
   })
 
   it('reports a non-zero probe exit and a spawn failure without leaking', async () => {

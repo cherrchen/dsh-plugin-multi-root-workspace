@@ -7,9 +7,12 @@
  * operator's assertion that no untrusted remote process can swap workspace or
  * ancestor directories while the Host browses. Path canonicalization alone
  * cannot defeat an ABA symlink swap on SFTP, so the opt-in is the boundary;
- * without it every request fails `capability-unsupported` before any I/O, and
- * object-target grants (`verifiedTarget.kind === 'object'`) always fail
- * closed in this phase.
+ * without it every request fails `capability-unsupported` before any I/O.
+ * Helper transports may carry object-target grants for exec/copy, but browsing
+ * never interprets that object identity as a path grant: it is admitted only
+ * when the same opted-in binding also passed registration's independent SFTP
+ * path probe, and every listing re-probes the canonical path on its owned
+ * SFTP channel.
  *
  * Concurrency: at most {@link REMOTE_FILES_LIMITS.concurrent} listings are
  * active; a fifth request fails `resource-budget` immediately — there is no
@@ -124,12 +127,12 @@ export class RemoteFilesService {
     private readonly logger: { debug(message: string): void; warn(message: string): void },
   ) {}
 
-  /** Whether one binding may be browsed RIGHT NOW — the opt-in, transport and live capability gate. */
+  /** Whether one binding may be browsed RIGHT NOW — the explicit opt-in and live capability gate. */
   supports(environmentId: string, binding: RemoteBinding): boolean {
     if (!this.live || typeof this.manager.openFilesSftp !== 'function') return false
     if (this.manager.capability !== undefined && !this.manager.capability.eligible) return false
-    const environment = this.registry.remoteManifest?.environments.find(entry => entry.environmentId === environmentId)
-    return environment?.transport === 'sftp' && binding.directoryListing === 'stable-path'
+    return this.registry.remoteManifest?.environments.some(entry => entry.environmentId === environmentId) === true
+      && binding.directoryListing === 'stable-path'
   }
 
   /**
@@ -488,11 +491,7 @@ export class RemoteFilesService {
           || endpoint.bindingDigest === null || endpoint.environmentDigest === null) {
           throw new RemoteFilesError('root-identity-changed')
         }
-        // Object-target grants fail closed in this phase, always.
-        if (endpoint.verifiedTarget === null || endpoint.verifiedTarget.kind !== 'path'
-          || endpoint.verifiedTarget.value !== endpoint.displayPath) {
-          throw new RemoteFilesError('root-identity-changed')
-        }
+        if (endpoint.verifiedTarget === null) throw new RemoteFilesError('root-identity-changed')
         const token = remoteFilesAuthorization(epoch, endpoint.incarnation, endpoint.bindingDigest, endpoint.environmentDigest)
         if (request.authorization !== token || (expectedToken !== undefined && token !== expectedToken)) {
           throw new RemoteFilesError('binding-changed')
@@ -505,15 +504,24 @@ export class RemoteFilesService {
           throw new RemoteFilesError('environment-changed')
         }
         if (binding === undefined || bindingDigest(environment, binding) !== endpoint.bindingDigest
-          || endpoint.displayPath !== binding.path || endpoint.verifiedTarget.value !== binding.path) {
+          || endpoint.displayPath !== binding.path) {
           throw new RemoteFilesError('binding-changed')
+        }
+        // SFTP registrations are path-targeted and must still name the same
+        // path. Helper registrations stay object-targeted for exec/copy; the
+        // opt-in's separate SFTP path probe is what authorizes browse-only
+        // listing, never the object identity domain.
+        if (endpoint.verifiedTarget.kind === 'path' && endpoint.verifiedTarget.value !== binding.path) {
+          throw new RemoteFilesError('root-identity-changed')
+        }
+        if (endpoint.verifiedTarget.kind === 'object' && environment.transport !== 'helper') {
+          throw new RemoteFilesError('root-identity-changed')
         }
         // Same gate `supports` announces: a manager that lost eligibility
         // (Helper-less channel gone, broker demoted) may not announce a
         // matching token — listings AND authorization waits fail identically.
         // Manager-shaped fixtures without `capability` stay admitted.
-        if (environment.transport !== 'sftp' || binding.directoryListing !== 'stable-path'
-          || this.manager.capability?.eligible === false) {
+        if (binding.directoryListing !== 'stable-path' || this.manager.capability?.eligible === false) {
           throw new RemoteFilesError('capability-unsupported')
         }
         return { path: binding.path, environmentDigest: endpoint.environmentDigest, token }

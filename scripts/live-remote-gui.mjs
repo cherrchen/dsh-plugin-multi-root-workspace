@@ -9,8 +9,8 @@
  *   2. The real browser UI paints the remote section of the Workspace Folders
  *      dialog, registers both bindings through the row "…" menu (`addRemote`
  *      → real ssh -G + SFTP/helper verify against the VPS), and the
- *      RootSwitcher offers the browsable row enabled and the helper row
- *      disabled.
+ *      RootSwitcher offers both the helper-less SFTP row and the opted-in
+ *      Helper row enabled.
  *   3. Selecting the remote row lists the LIVE directory through the real
  *      `remoteFiles.list` channel endpoint — entries served off an actual SFTP
  *      `readdir` on the VPS — and a second listing happens on expand.
@@ -128,11 +128,26 @@ function seedPersonalStore() {
     schemaVersion: 1, revision: 1,
     bindings: [
       { primary, environmentId: SFTP_ENV, rootId: SFTP_ROOT, bindingId: randomUUID(), path: REMOTE_BASE, directoryListing: 'stable-path', actions: ['read'] },
-      { primary, environmentId: HELPER_ENV, rootId: HELPER_ROOT, bindingId: randomUUID(), path: '/root/coding', actions: ['read'] },
+      { primary, environmentId: HELPER_ENV, rootId: HELPER_ROOT, bindingId: randomUUID(), path: '/root/coding', actions: ['read'], directoryListing: 'stable-path' },
     ],
   }, null, 2), { mode: 0o600 })
   evidence.store.envFile = { environments: ['ali', 'ali-sftp'], note: 'ali copied verbatim; ali-sftp = same endpoint/hostKey, helper:null, credential ssh-config alias dsh-ali' }
   evidence.store.bindings = { file: BINDINGS_FILE, rows: 2 }
+}
+
+/**
+ * The authenticated browser entry URL contributed by the composition.
+ * DSH 0.2.3 moved `authenticatedUrl` off the public Connection service; older
+ * hosts still expose it as a method. Mirror smoke-journey's version-tolerant
+ * lookup so this harness runs on the full supported line.
+ */
+function entryUrlOf(ctx, base) {
+  const entries = []
+  const webServer = ctx.get('webServer')
+  if (webServer !== undefined) ctx.emit(webServer, 'webserver/entry-url', base, entries)
+  const entry = entries.find(candidate => candidate.open === true) ?? entries[0]
+  if (entry === undefined) throw new Error('live-gui: the composition contributed no entry URL')
+  return entry.url
 }
 
 /** Copy the credential root (keys, known_hosts, credentials.json, ssh_config)
@@ -303,7 +318,10 @@ try {
   const webServer = ctx.get('webServer')
   const base = `http://127.0.0.1:${webServer.port}/`
   evidence.port = webServer.port
-  const authUrl = ctx.get('connection').authenticatedUrl(base)
+  const connection = ctx.get('connection')
+  const authUrl = typeof connection?.authenticatedUrl === 'function'
+    ? connection.authenticatedUrl(base)
+    : entryUrlOf(ctx, base)
 
   // The cookie for the in-process channel probes (ground truth under the GUI).
   const authResponse = await fetch(authUrl, { redirect: 'manual' })
@@ -563,7 +581,7 @@ try {
     await dumpDom('05-registered.html')
     await shot('05-registered.png')
 
-    // --- RootSwitcher: enabled sftp row + disabled helper row --------------
+    // --- RootSwitcher: enabled sftp row + enabled opted-in helper row -------
     // Close the dialog via its own header button (aria-label = panel.close);
     // page-level "关闭" matches would hit unrelated chrome (tab × buttons).
     const dialogClose = page.locator('[aria-label="工作区目录"], [aria-label="Workspace folders"]')
@@ -572,12 +590,12 @@ try {
     await settle(600)
     await page.locator('.mrfw-rootSwitchBtn').first().click()
     await settle(2000) // opening the menu refreshes the remotes view first
-    await shot('06-remote-live-disabled.png')
-    const helperRow = page.getByRole('menuitem', { name: /helper-root.*SSH.*(不可浏览|not browsable)/ }).first()
+    await shot('06-remote-live-enabled.png')
+    const helperRow = page.getByRole('menuitem', { name: /helper-root.*SSH/ }).first()
     const helperShown = await helperRow.isVisible().catch(() => false)
-    const helperDisabled = helperShown && await helperRow.isDisabled().catch(() => false)
-    recordCheck(helperDisabled, 'the helper row renders disabled (not browsable)',
-      helperShown ? 'row present but NOT disabled' : 'row not found in the switcher menu')
+    const helperEnabled = helperShown && !(await helperRow.isDisabled().catch(() => true))
+    recordCheck(helperEnabled, 'the opted-in helper row renders selectable',
+      helperShown ? 'row present but still disabled' : 'row not found in the switcher menu')
     const sftpItem = page.getByRole('menuitem', { name: /live-browse.*dsh-live-browse.*SSH/ }).first()
     if (!(await sftpItem.isVisible().catch(() => false))) {
       await dumpDom('stuck-menu.html')

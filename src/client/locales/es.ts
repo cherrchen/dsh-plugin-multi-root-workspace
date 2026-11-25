@@ -548,6 +548,7 @@ export const es = {
   'wizard.summaryActions': 'Acciones permitidas',
   'wizard.summaryTransfers': 'Transferencias locales',
   'wizard.summaryNone': 'Ninguna',
+  'wizard.summaryEnabled': 'Activado',
   'wizard.register': 'Registrar en el espacio de trabajo',
   'wizard.done': 'Registrado',
   'wizard.doneHint': 'El directorio remoto se unió al espacio de trabajo de esta sesión; el agente accede con los permisos de la vinculación.',

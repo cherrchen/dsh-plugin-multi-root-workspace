@@ -548,6 +548,7 @@ export const de = {
   'wizard.summaryActions': 'Erlaubte Aktionen',
   'wizard.summaryTransfers': 'Lokale Übertragungen',
   'wizard.summaryNone': 'Keine',
+  'wizard.summaryEnabled': 'Aktiviert',
   'wizard.register': 'Im Arbeitsbereich registrieren',
   'wizard.done': 'Registriert',
   'wizard.doneHint': 'Das entfernte Verzeichnis ist jetzt Teil des Arbeitsbereichs dieser Sitzung; der Agent greift mit den Berechtigungen der Bindung darauf zu.',

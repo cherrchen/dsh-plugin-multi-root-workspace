@@ -283,6 +283,8 @@ export function fakeManifest(options: {
   deviceActions?: readonly ('read' | 'write' | 'exec')[]
   /** Opt the device binding into Host-side directory listing. */
   deviceListing?: boolean
+  /** Opt the Helper-backed build binding into Host-side directory listing. */
+  buildListing?: boolean
 }): DeploymentManifest {
   const buildPath = options.buildPath ?? '/srv/root'
   const devicePath = options.devicePath ?? '/srv/root'
@@ -309,6 +311,7 @@ export function fakeManifest(options: {
     bindings: [
       {
         primary: options.primary, environmentId: 'build', rootId: 'app', path: buildPath,
+        ...(options.buildListing === true ? { directoryListing: 'stable-path' as const } : {}),
         actions: ['read', 'write', 'exec'],
         transfers: [
           ...localRootIds.map(rootId => ({ direction: 'import' as const, peer: { environmentId: 'local', rootId } })),

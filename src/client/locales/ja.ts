@@ -548,6 +548,7 @@ export const ja = {
   'wizard.summaryActions': '許可する操作',
   'wizard.summaryTransfers': 'ローカル転送',
   'wizard.summaryNone': 'なし',
+  'wizard.summaryEnabled': '有効',
   'wizard.register': 'ワークスペースに登録',
   'wizard.done': '登録しました',
   'wizard.doneHint': 'リモートディレクトリがこのセッションのワークスペースに追加され、Agent はバインドされた権限でアクセスします。',

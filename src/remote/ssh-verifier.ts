@@ -61,6 +61,13 @@ export class SshEndpointVerifier implements RemoteEndpointVerifier {
       const probe = JSON.parse(collected.stdout!.readFrom(0).text) as { real: string; dev: string; ino: string; isDirectory: boolean }
       if (!probe.isDirectory) throw new EndpointVerifyError('endpoint-unverifiable', `${binding.path} is not a directory`)
       if (probe.real !== binding.path) throw new EndpointVerifyError('endpoint-redirected', `${binding.path} resolves to "${probe.real}"`)
+      // Directory browsing is a separate path-identity admission. A Helper
+      // grant remains object-targeted for exec/copy; when the binding opts in,
+      // registration additionally proves the declared path through the same
+      // owned SFTP v3 channel shape a Helper-less endpoint uses. Browsing never
+      // reinterprets dev:ino as a path grant — it relies on this second check
+      // plus the binding's explicit stable-path deployment assertion.
+      if (binding.directoryListing === 'stable-path') await this.verifySftp(environment, binding, signal)
       return { platform: env.hello.platform as 'linux' | 'darwin', target: { kind: 'object', value: `${probe.dev}:${probe.ino}` } }
     } finally {
       if (timer !== undefined) clearTimeout(timer)
@@ -77,10 +84,12 @@ export class SshEndpointVerifier implements RemoteEndpointVerifier {
   }
 
   /**
-   * SFTP endpoints carry no helper handshake: realpath must equal the declared
-   * path and lstat must name a directory. Identity is path-only — SFTP v3 has
-   * no inode, so a same-name swap at publish time cannot be detected here; the
-   * manifest's declared platform stands in for the absent remote handshake.
+   * The SFTP path probe: realpath must equal the declared path and lstat must
+   * name a directory. Helper-less endpoints use it as their registration
+   * identity; Helper endpoints use it only as the additional browse admission
+   * for an opted-in binding. Path-only identity cannot detect a same-name swap
+   * at publish time — SFTP v3 has no inode — which is why browsing remains an
+   * explicit stable-path deployment assertion.
    */
   private async verifySftp(environment: RemoteEnvironment, binding: Pick<RemoteBinding, 'path' | 'directoryListing'>, signal: AbortSignal): Promise<{ platform: 'linux' | 'darwin'; target: { kind: 'object' | 'path'; value: string } }> {
     // An opt-in binding verifies through an OWNED files channel: a listing

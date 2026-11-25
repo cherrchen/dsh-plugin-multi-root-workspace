@@ -85,7 +85,9 @@ export const bindingSchema = z.object({
    * deployment asserts that no untrusted remote process can replace this
    * workspace's ancestor or descendant directories — or change mount/symlink
    * resolution — while the Host browses. A deployment assertion, not a
-   * runtime proof; only `sftp` environments may declare it.
+   * runtime proof. Helper transports may declare it too: browsing then uses
+   * a separate SFTP path admission and never weakens the Helper object grant
+   * used by exec/copy.
    */
   directoryListing: z.literal('stable-path').optional(),
   actions: z.array(z.enum(['read', 'write', 'exec'])).min(1),
@@ -238,8 +240,8 @@ export function parseDeploymentManifest(text: string, manifestPath: string, opti
     if (new Set(binding.actions).size !== binding.actions.length) {
       throw new ManifestError('invalid-manifest', `binding "${binding.rootId}" repeats an action`)
     }
-    if (binding.directoryListing !== undefined && environment.transport !== 'sftp') {
-      throw new ManifestError('invalid-manifest', `binding "${binding.rootId}" declares directoryListing but environment "${environment.environmentId}" is not sftp`)
+    if (binding.directoryListing !== undefined && !binding.actions.includes('read')) {
+      throw new ManifestError('invalid-manifest', `binding "${binding.rootId}" declares directoryListing without read`)
     }
     // The listing contract bounds the absolute lookup path: an opt-in root
     // already past the byte floor is refused HERE, at declaration time —
