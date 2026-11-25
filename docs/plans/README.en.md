@@ -38,6 +38,8 @@ Plans with long-term reference value should not be deleted.
 
 active:
 
+- [Windows SSH Initiator W0–W4](./active/2026-11-25-windows-ssh-initiator.md) (Chinese) — W0 native test blocked: two independent SSH initiators for the native Windows Node/Electron Host (B: system OpenSSH, no WSL; C: a user-selected WSL distribution and its SSH environment), targeting Linux/macOS only, with the native Host still owning the Registry, admission, tools, and local data I/O; the Windows release gates stay closed.
+
 
 
 

@@ -38,6 +38,8 @@ completed/
 
 active：
 
+- [Windows SSH 发起端 W0–W4](./active/2026-11-25-windows-ssh-initiator.md) — W0 原生测试受阻：原生 Windows Node/Electron Host 的两个独立 SSH 发起端（B：系统 OpenSSH、无 WSL；C：用户显式选择的 WSL 发行版及其 SSH 环境），目标仅 Linux/macOS，原生 Host 仍负责 Registry、准入、工具与本地数据 I/O；Windows 发布门禁保持关闭。
+
 
 
 

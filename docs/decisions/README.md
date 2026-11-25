@@ -102,4 +102,5 @@ ADR-0002-short-title.md
 - [ADR-0048](./ADR-0048-credential-broker.md) — 独立 OS 账户托管 SSH 连接的本机凭据代理、认证与证明条件 (Proposed).
 - [ADR-0049](./ADR-0049-ssh-custody-modes.md) — SSH 远端环境的三档凭据托管：personal（Host 进程内直跑官方栈、用户凭据）、team（broker 托管、放宽部署证明）、hardened（ADR-0048 全量证据）(Accepted).
 - [ADR-0051](./ADR-0051-ssh-stream-psk-boringssl-fallback.md) — SSH 转发流的 BoringSSL PSK 套件回退：Host 只改写上游转发流的精确参数形状，插件额外生成 `helper-entry-v3.mjs` 给服务端追加 ChaCha20-PSK fallback，记录 `integrity`/`helperPath`/`bindingDigest` 不变；仍保持 PSK-only（Accepted）。
+- [ADR-0052](./ADR-0052-windows-ssh-initiator.md) — 原生 Windows Host 的 SSH 发起端：B（Windows OpenSSH、不依赖 WSL）与 C（用户所选 WSL 发行版 Bridge）两个独立后端、各自验证；Host 独占 Registry、准入与本地授权，不开放 Windows capability（Proposed）。
 - [ADR-0050](./ADR-0050-add-affordance-and-wizard-kit.md) — 工作区面板底栏收口为单一 `+` 按钮（按 remote-tools 开关呈双形态）、本地添加的信任确认 Dialog，以及为旧 SSH 弹窗迁移预留的向导设计套件 `src/client/wizard/` (Accepted).
