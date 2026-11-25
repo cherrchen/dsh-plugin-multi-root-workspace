@@ -1736,6 +1736,7 @@ export class MultiRootRegistry extends Service {
     await this.serializeAuthority(async () => {
       if (this.disposed) return
       const same = this.remotePlane.enabled === next.enabled && this.remotePlane.mode === next.mode
+        && this.remotePlane.matchesInitiator(next.initiator)
       if (same && (!next.enabled || next.manifestPath === undefined || next.manifestPath === this.remotePlane.liveManifestPath)) return
       rebound = true
       this.remotePlane.dropFollower()

@@ -15,6 +15,7 @@ import type {
 } from './contract.ts'
 import { RemoteAdmissionError } from './contract.ts'
 import { bindingDigest, environmentDigest, type loadDeploymentManifest, ManifestError, type DeploymentManifest } from './manifest.ts'
+import { sameInitiatorIdentity, type WindowsInitiatorIdentity } from './initiator/identity.ts'
 import { loadPersonalManifest, type PersonalManifest } from './personal/config.ts'
 import { findBinding, grantState, remoteDomainSpec, REMOTE_TABLE_NAME, type PersistedRemoteGrants } from './records.ts'
 import { RemoteClient, RemoteServer, type RemoteRequestTimeouts } from './protocol.ts'
@@ -39,6 +40,8 @@ export interface RemoteLiveConfig {
   readonly mode: RemoteMode
   /** Live override for the manifest path; falls back to the row's. */
   readonly manifestPath?: string | undefined
+  /** Host-resolved personal initiator identity; absence preserves POSIX. */
+  readonly initiator?: WindowsInitiatorIdentity | undefined
 }
 
 type Medium = ReturnType<typeof storeIdentity>
@@ -57,6 +60,7 @@ export class RemoteControlPlane {
   /** Personal mode: the config revision and file identity we loaded. */
   personalRevision = 0
   private personalSnapshot: PersonalManifest | undefined
+  private liveInitiator: WindowsInitiatorIdentity | undefined
   private state: RemoteStatus
   private domain: { close(): Promise<void> } | undefined
   private table: KvTable<string, PersistedRemoteGrants> | undefined
@@ -83,8 +87,11 @@ export class RemoteControlPlane {
   effectiveConfig(next: RemoteLiveConfig): RemoteLiveConfig {
     // Deployment fixtures inject their own loader in source tests. No profile
     // configuration or Settings value can supply that constructor dependency.
-    if (this.loadDeploymentForTesting !== undefined) return next
-    return { enabled: next.enabled === true && next.mode === 'personal' && this.profileMode() === 'personal', mode: 'personal' }
+    const supplied = next.enabled && next.mode === 'personal' ? next.initiator : undefined
+    const initiator = supplied === undefined ? undefined : Object.freeze({ ...supplied })
+    if (this.loadDeploymentForTesting !== undefined) return { ...next, initiator }
+    const enabled = next.enabled === true && next.mode === 'personal' && this.profileMode() === 'personal'
+    return { enabled, mode: 'personal', initiator: enabled ? initiator : undefined }
   }
 
   /**
@@ -97,6 +104,7 @@ export class RemoteControlPlane {
     this.enabled = next.enabled
     this.mode = next.mode
     this.liveManifestPath = next.manifestPath
+    this.liveInitiator = next.initiator
     this.manifest = undefined
     this.manifestDigest = undefined
     this.personalRevision = 0
@@ -108,7 +116,7 @@ export class RemoteControlPlane {
         const path = next.manifestPath ?? this.config?.personalPath
         if (path === undefined || path.trim() === '') throw new ManifestError('manifest-untrusted', 'remoteEnvironments.personalPath is required when personal custody is enabled')
         // A missing file is the empty manifest, not an error.
-        const loaded = loadPersonalManifest(path)
+        const loaded = loadPersonalManifest(path, undefined, this.liveInitiator)
         this.manifest = loaded.manifest
         this.manifestDigest = loaded.digest
         this.personalRevision = loaded.revision
@@ -135,12 +143,13 @@ export class RemoteControlPlane {
    * domain and IPC channel. Invalid facts immediately close admission.
    */
   refreshPersonal(path?: string): 'unchanged' | 'reloaded' | 'disabled' | 'invalid' {
+    if (process.platform === 'win32') return 'disabled'
     if (!this.enabled || this.mode !== 'personal' || this.state.state === 'storage-failed') return 'disabled'
     const target = path ?? this.liveManifestPath ?? this.config?.personalPath
     if (target === undefined) return 'disabled'
     let loaded: PersonalManifest
     try {
-      loaded = loadPersonalManifest(target, this.personalSnapshot)
+      loaded = loadPersonalManifest(target, this.personalSnapshot, this.liveInitiator)
       if (loaded === this.personalSnapshot) return 'unchanged'
     } catch (error) {
       const reason = error instanceof Error ? error.message : String(error)
@@ -159,6 +168,11 @@ export class RemoteControlPlane {
     this.personalSnapshot = loaded
     if (this.table !== undefined && this.state.state === 'config-invalid') this.setState('ready')
     return changed ? 'reloaded' : 'unchanged'
+  }
+
+  /** Whether the live effective initiator matches a requested one (absence preserves POSIX). */
+  matchesInitiator(initiator: WindowsInitiatorIdentity | undefined): boolean {
+    return sameInitiatorIdentity(this.liveInitiator, initiator)
   }
 
   get status(): RemoteStatus { return this.state }
@@ -389,7 +403,7 @@ export class RemoteControlPlane {
     if (this.mode !== 'personal') return this.manifestDigest
     const path = this.liveManifestPath ?? this.config?.personalPath
     if (path === undefined) return undefined
-    try { return loadPersonalManifest(path, this.personalSnapshot).digest } catch { return undefined }
+    try { return loadPersonalManifest(path, this.personalSnapshot, this.liveInitiator).digest } catch { return undefined }
   }
 
   notifyFollowers(): void { this.server?.changed() }

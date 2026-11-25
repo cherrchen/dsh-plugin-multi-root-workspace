@@ -10,7 +10,7 @@ import { z } from 'zod'
 import { canonicalPath } from '@deepseek-ai/dsh-sandbox'
 import { isCanonicallyUnder } from '../../roots.ts'
 import { bindingSchema, ManifestError, parseDeploymentManifest, type DeploymentManifest } from '../manifest.ts'
-import type { WindowsInitiatorIdentity } from '../initiator/identity.ts'
+import { sameInitiatorIdentity, type WindowsInitiatorIdentity } from '../initiator/identity.ts'
 import { RegistryAuthorityLease, RegistryLeaseContendedError } from '../../registry-lease.ts'
 
 const hostName = z.string().min(1).max(253).regex(/^\S+$/).refine(value => !value.startsWith('-'), 'hostname must not start with "-"')
@@ -116,6 +116,7 @@ export function toDeploymentManifest(config: PersonalConfig, manifestPath: strin
   return parseDeploymentManifest(JSON.stringify({
     schemaVersion: 1,
     configVersion: `personal-${config.revision}`,
+    ...(initiator === undefined ? {} : { personalInitiator: initiator }),
     environments,
     bindings: config.bindings,
   }), manifestPath, { personal: true })
@@ -170,6 +171,8 @@ export interface PersonalManifest {
   readonly digest: string
   readonly revision: number
   readonly identity: string
+  readonly path: string
+  readonly initiator: WindowsInitiatorIdentity | undefined
 }
 
 const bindingStorePath = (path: string): string => `${path}.bindings.json`
@@ -295,11 +298,14 @@ export function loadPersonalConfig(path: string): PersonalConfig {
   return readSnapshot(path).config
 }
 
-/** Reuse the verified manifest when the bytes in both protected stores match. */
-export function loadPersonalManifest(path: string, previous?: PersonalManifest): PersonalManifest {
+/** Reuse a projection only for the same path, protected store bytes and initiator. */
+export function loadPersonalManifest(path: string, previous?: PersonalManifest, initiator?: WindowsInitiatorIdentity): PersonalManifest {
   const { config, identity } = readSnapshot(path)
-  if (previous?.identity === identity) return previous
-  return { ...toDeploymentManifest(config, path), revision: config.revision, identity }
+  if (previous?.path === path && previous.identity === identity && sameInitiatorIdentity(previous.initiator, initiator)) return previous
+  return {
+    ...toDeploymentManifest(config, path, initiator), revision: config.revision, identity, path,
+    initiator: initiator === undefined ? undefined : Object.freeze({ ...initiator }),
+  }
 }
 
 function writeProtected(path: string, data: unknown): void {

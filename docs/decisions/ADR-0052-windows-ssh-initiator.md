@@ -25,7 +25,7 @@ C 候选：用户显式初始化后，在所选发行版的 Linux 文件系统�
 
 有效身份须区分 B、C 发行版与可选 Linux 用户；POSIX 缺省保留旧摘要。切换停止新准入并退役旧代次；不迁移 SSH 配置、密钥或 known_hosts；登记记录保留，新上下文不得使用旧授权。后端选择的权威必须与 owner/follower 看到的 manifest 摘要绑定，不以本地 UI 状态替代。
 
-W2 已实现身份投影和 Win32 remote-2 命名管道端点命名；尚未开放 Windows 远端控制面。未选择 Windows 时不写身份字段，不改变 POSIX 摘要。
+W2 已实现 Win32 remote-2 命名管道端点命名，以及发起端身份的控制面接缝。Host 解析的有效身份作为 `RemoteLiveConfig.initiator` 输入，不由 manifest 文件、设置界面或 transport 决定。配置加载、操作前刷新与 owner hello 都用同一身份投影 personal manifest；缓存同时核对路径、受保护存储字节身份与发起端身份。顶层 `personalInitiator` 使空清单也进入同一摘要；环境内的 `personalIdentity.initiator` 必须与之匹配，并继续进入环境和绑定摘要。非 personal 清单不得带入该事实。未传身份时两个字段均缺席，POSIX 清单与摘要不变。显式身份变化使用 Registry 既有的串行关闭／重开路径，不宣称完成 Windows 上的切换、运行时代次或 ACK 验收。Windows 配置与刷新门禁仍关闭，生产设置与运行时未接线。
 
 ## 相关
 

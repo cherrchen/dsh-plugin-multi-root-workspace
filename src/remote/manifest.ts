@@ -11,7 +11,7 @@ import { dirname, isAbsolute } from 'node:path'
 import { z } from 'zod'
 import { canonicalPath } from '@deepseek-ai/dsh-sandbox'
 import { isCanonicallyUnder, primaryKey } from '../roots.ts'
-import { windowsInitiatorIdentitySchema } from './initiator/identity.ts'
+import { sameInitiatorIdentity, windowsInitiatorIdentitySchema } from './initiator/identity.ts'
 
 export class ManifestError extends Error {
   constructor(readonly code: string, message: string) {
@@ -91,6 +91,8 @@ export const bindingSchema = z.object({
 const manifestSchema = z.object({
   schemaVersion: z.literal(1),
   configVersion: z.string().min(1).max(128),
+  /** Personal initiator attestation, including when there are no environments. */
+  personalInitiator: windowsInitiatorIdentitySchema.optional(),
   environments: z.array(environmentSchema),
   bindings: z.array(bindingSchema),
   /** A broker-global budget applied to every environment-bound request. */
@@ -171,10 +173,16 @@ export function parseDeploymentManifest(text: string, manifestPath: string, opti
     throw new ManifestError('invalid-manifest', `${manifestPath}: ${parsed.error.issues.map(issue => `${issue.path.join('.')}: ${issue.message}`).join('; ')}`)
   }
   const manifest = parsed.data
+  if (manifest.personalInitiator !== undefined && options?.personal !== true) {
+    throw new ManifestError('invalid-manifest', 'personalInitiator is reserved for personal SSH connections')
+  }
   const byId = new Map<string, RemoteEnvironment>()
   for (const environment of manifest.environments) {
     if (environment.personalIdentity !== undefined && options?.personal !== true) {
       throw new ManifestError('invalid-manifest', 'personalIdentity is reserved for personal SSH connections')
+    }
+    if (!sameInitiatorIdentity(manifest.personalInitiator, environment.personalIdentity?.initiator)) {
+      throw new ManifestError('invalid-manifest', 'environment initiator does not match the personal manifest')
     }
     if (environment.platform === 'win32' || environment.platform === 'windows') {
       throw new ManifestError('windows-target-unsupported', `environment "${environment.environmentId}": Windows targets are unsupported in this gate`)

@@ -909,6 +909,77 @@ describe.skipIf(process.platform === 'win32')('the personal plane digest rebind 
     expect(planeOf(owner).manifestDigest).not.toBe(digest1)
     expect(planeOf(follower).manifestDigest).toBe(planeOf(owner).manifestDigest)
   })
+
+  it('binds the effective initiator into the shared manifest digest', async () => {
+    const personalPath = join(fixture.base, 'remote-personal.json')
+    const credentialRoot = join(fixture.base, 'cred')
+    const base: PersonalConfig = { ...CONFIG(), environments: [{ ...MANAGED, helper: null }] }
+    writeConfig(personalPath, base)
+
+    const mount = async (): Promise<RegistryStack> => {
+      const stack = await mountRegistryStack(join(fixture.base, 'store'), {
+        remoteEnvironments: { enabled: false, personalPath, credentialRoot },
+      }, {
+        allowUserOwnedRemoteManifestForTesting: true,
+        beforeGate: async ctx => {
+          await ctx.plugin(Projections)
+          await ctx.plugin(Sessions)
+          await ctx.plugin(Policy, { mode: 'workspace-write', workspaceRoot: fixture.workspace })
+        },
+      })
+      stacks.push(stack)
+      await stack.registry.refresh(fixture.workspace)
+      return stack
+    }
+
+    const openSsh = { kind: 'windows-openssh' as const }
+    const owner = await mount()
+    await owner.registry.configureRemote({ enabled: true, mode: 'personal', initiator: openSsh })
+    expect(owner.registry.remoteStatus.state).toBe('ready')
+
+    const follower = await mount()
+    expect(follower.registry.authority.kind).toBe('follower')
+    await follower.registry.configureRemote({ enabled: true, mode: 'personal', initiator: { kind: 'windows-openssh' } })
+    expect(follower.registry.remoteStatus.state).toBe('ready')
+    expect(planeOf(follower).manifestDigest).toBe(planeOf(owner).manifestDigest)
+    await expect(follower.registry.remoteList(fixture.workspace)).resolves.toMatchObject({ grants: expect.any(Array) })
+    // The attested manifest carries the initiator at the root and inside
+    // every environment's personal identity.
+    expect(planeOf(owner).manifest?.personalInitiator).toEqual(openSsh)
+    expect(planeOf(owner).manifest?.environments[0]?.personalIdentity?.initiator).toEqual(openSsh)
+
+    const reopen = vi.spyOn(planeOf(owner), 'openOwner')
+    const drop = vi.spyOn(planeOf(follower), 'dropFollower')
+    const connect = vi.spyOn(planeOf(follower), 'connectFollower')
+
+    // A semantically equal initiator is not a rebind: nothing tears down.
+    await owner.registry.configureRemote({ enabled: true, mode: 'personal', initiator: { kind: 'windows-openssh' } })
+    await follower.registry.configureRemote({ enabled: true, mode: 'personal', initiator: { kind: 'windows-openssh' } })
+    expect(reopen).not.toHaveBeenCalled()
+    expect(drop).not.toHaveBeenCalled()
+    expect(connect).not.toHaveBeenCalled()
+
+    // The personal bytes never changed; only the owner's effective initiator
+    // did, which re-digests the attested manifest.
+    await owner.registry.configureRemote({ enabled: true, mode: 'personal', initiator: { kind: 'wsl', distribution: 'Ubuntu', user: 'ci' } })
+    expect(owner.registry.remoteStatus.state).toBe('ready')
+    expect(reopen).toHaveBeenCalledTimes(1)
+    await vi.waitFor(() => expect(planeOf(follower).client).toBeUndefined())
+    await expect(follower.registry.remoteList(fixture.workspace)).rejects.toMatchObject({ code: 'remote-unavailable' })
+    expect(follower.registry.remoteStatus.state).toBe('config-digest-mismatch')
+
+    // A follower attesting a different initiator cannot complete the hello
+    // until its identity matches the owner's exactly.
+    await follower.registry.configureRemote({ enabled: true, mode: 'personal', initiator: { kind: 'wsl', distribution: 'Ubuntu', user: 'other' } })
+    expect(follower.registry.remoteStatus.state).toBe('config-digest-mismatch')
+    await follower.registry.configureRemote({ enabled: true, mode: 'personal', initiator: { kind: 'wsl', distribution: 'Debian', user: 'ci' } })
+    expect(follower.registry.remoteStatus.state).toBe('config-digest-mismatch')
+    await follower.registry.configureRemote({ enabled: true, mode: 'personal', initiator: { kind: 'wsl', distribution: 'Ubuntu', user: 'ci' } })
+    expect(follower.registry.remoteStatus.state).toBe('ready')
+    expect(planeOf(follower).manifestDigest).toBe(planeOf(owner).manifestDigest)
+    await expect(follower.registry.remoteList(fixture.workspace)).resolves.toMatchObject({ manifestDigest: planeOf(owner).manifestDigest })
+    expect(planeOf(follower).manifest?.environments[0]?.personalIdentity?.initiator).toEqual({ kind: 'wsl', distribution: 'Ubuntu', user: 'ci' })
+  })
 })
 
 describe.skipIf(process.platform === 'win32')('the personal plane fails closed on an invalid refresh', () => {

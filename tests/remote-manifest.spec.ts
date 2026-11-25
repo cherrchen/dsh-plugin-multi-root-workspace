@@ -4,6 +4,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { bindingDigest, environmentDigest, loadDeploymentManifest, manifestDigest, parseDeploymentManifest } from '../src/remote/manifest.ts'
+import { primaryKey } from '../src/roots.ts'
 import type { RemoteGrant } from '../src/remote/contract.ts'
 import { grantState } from '../src/remote/records.ts'
 import { RemoteControlPlane } from '../src/remote/plane.ts'
@@ -190,7 +191,7 @@ describe('deployment manifest', () => {
     const identity = { hostname: 'vps', port: 22, credentialDigest: 'a'.repeat(64) }
     const variants = [undefined, { kind: 'windows-openssh' }, { kind: 'wsl', distribution: 'Ubuntu 24.04', user: 'ci' },
       { kind: 'wsl', distribution: 'Debian 开发', user: 'ci' }, { kind: 'wsl', distribution: 'Ubuntu 24.04', user: 'other' }]
-    const manifests = variants.map(initiator => parseDeploymentManifest(text([env({ personalIdentity: { ...identity, initiator } })]), '/m.json', { personal: true }))
+    const manifests = variants.map(initiator => parseDeploymentManifest(text([env({ personalIdentity: { ...identity, initiator } })], [binding()], initiator === undefined ? {} : { personalInitiator: initiator }), '/m.json', { personal: true }))
     const [legacy, native] = manifests
     expect(legacy!.manifest.environments[0]!.personalIdentity).toEqual(identity)
     expect(new Set(manifests.map(row => environmentDigest(row.manifest.environments[0]!))).size).toBe(variants.length)
@@ -198,6 +199,33 @@ describe('deployment manifest', () => {
     const { manifest: original } = native!
     const grant: RemoteGrant = { environmentId: 'build-01', rootId: 'app', displayPath: '/work/app', verifiedTarget: { kind: 'path', value: '/work/app' },
       configVersion: original.configVersion, bindingDigest: bindingDigest(original.environments[0]!, original.bindings[0]!), addedAt: '2026-11-25T00:00:00.000Z' }
-    for (const row of manifests) expect(grantState(row.manifest, original.bindings[0]!.primary, grant)).toBe(row === native ? 'registered' : 'withheld')
+    for (const row of manifests) expect(grantState(row.manifest, primaryKey(original.bindings[0]!.primary), grant)).toBe(row === native ? 'registered' : 'withheld')
+  })
+
+  it('reserves the root initiator for personal manifests and requires it to match the nested identity', () => {
+    const invalid = expect.objectContaining({ code: 'invalid-manifest' }) as Error
+    const identity = { hostname: 'vps', port: 22, credentialDigest: 'a'.repeat(64) }
+    const initiator = { kind: 'wsl' as const, distribution: 'Ubuntu 24.04', user: 'ci' }
+    // The root attestation is a personal fact even with no environments.
+    const empty = text([], [], { personalInitiator: initiator })
+    expect(() => parseDeploymentManifest(empty, '/m.json')).toThrowError(invalid)
+    expect(() => parseDeploymentManifest(empty, '/m.json', { personal: true })).not.toThrow()
+    // A nested identity inconsistent with the root fails in either direction.
+    const mismatch = text([env({ personalIdentity: { ...identity, initiator } })], [binding()], { personalInitiator: { kind: 'windows-openssh' } })
+    expect(() => parseDeploymentManifest(mismatch, '/m.json', { personal: true })).toThrowError(invalid)
+    const orphan = text([env({ personalIdentity: { ...identity, initiator } })])
+    expect(() => parseDeploymentManifest(orphan, '/m.json', { personal: true })).toThrowError(invalid)
+    const missing = text([env({ personalIdentity: identity })], [binding()], { personalInitiator: initiator })
+    expect(() => parseDeploymentManifest(missing, '/m.json', { personal: true })).toThrowError(invalid)
+  })
+
+  it.runIf(process.platform === 'win32')('defers configure on Windows and refresh never publishes a manifest', () => {
+    const plane = new RemoteControlPlane({ personalPath: join(dir(), 'missing.json'), credentialRoot: join(dir(), 'cred') }, { warn: () => {} })
+    plane.configure({ enabled: true, mode: 'personal', initiator: { kind: 'windows-openssh' } })
+    expect(plane.status.state).toBe('platform-deferred')
+    expect(plane.refreshPersonal()).toBe('disabled')
+    expect(plane.manifest).toBeUndefined()
+    expect(plane.manifestDigest).toBeUndefined()
+    expect(plane.status.state).toBe('platform-deferred')
   })
 })

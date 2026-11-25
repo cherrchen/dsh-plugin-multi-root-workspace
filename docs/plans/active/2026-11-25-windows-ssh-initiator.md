@@ -18,16 +18,16 @@
 | --- | --- | --- | --- |
 | W0 | BLOCKED | 需求与实际基线一致；已找到平台、连接、准入、凭据和 I/O 接缝 | 两版上游合同；真实 Windows Node/Electron 和至少两个真实 WSL 环境，或明确各自阻塞；分别判定 B/C |
 | W1 | PASS (限定：共享接缝、本机回归) | 官方 provider 的实际接入合同明确；记录 POSIX 基线 | 通过共享运行时接缝运行原有 POSIX 用例；缺包与 Windows 门禁不改；无 Root 迁移 |
-| W2 | BLOCKED（身份与 IPC 基础完成；原生配置、文件 I/O、切换未验收） | W1 合同稳定；Windows 共用信任边界明确 | 配置及本地文件授权/发布、后端身份、切换及多 Host 一致性用例通过；未验证 capability 关闭 |
-| W3-B | BLOCKED（开发切片：命令与 Helper 控制面校验完成；实机、TLS PSK、SFTP、管理未验收） | W1/W2 可用；W0-B 已验证或明确限定为不可发布的开发验证 | 严格主机验证、官方 Helper RPC、TLS PSK、SFTP、管理和清理通过 Windows Node/Electron 实机与独立版本门禁 |
-| W3-C | BLOCKED（发现/启动校验完成；依赖部署、Bridge、ACK、清理未验收） | W1/W2 可用；在所选真实发行版上验证 stdio/依赖/退出 | 显式多发行版选择与初始化、manifest ACK、管理与工具、异常清理及代次隔离通过 |
+| W2 | BLOCKED（身份与 POSIX IPC 合同通过；原生配置、文件 I/O、切换未验收） | W1 合同稳定；Windows 共用信任边界明确 | 配置及本地文件授权/发布、后端身份、切换及多 Host 一致性用例通过；未验证 capability 关闭 |
+| W3-B | BLOCKED（原生命令探针通过；Helper、流转发、SFTP、管理未验收） | W1/W2 可用；W0-B 已验证或明确限定为不可发布的开发验证 | 严格主机验证、官方 Helper RPC、TLS PSK、SFTP、管理和清理通过 Windows Node/Electron 实机与独立版本门禁 |
+| W3-C | BLOCKED（原生枚举通过；双发行版、依赖部署、Bridge、ACK 未验收） | W1/W2 可用；在所选真实发行版上验证 stdio/依赖/退出 | 显式多发行版选择与初始化、manifest ACK、管理与工具、异常清理及代次隔离通过 |
 | W4 | BLOCKED（本机回归与制品验证已运行；缺完整后端及实机验收） | W1/W2 可用；分别确认 B/C 的可验收项 | 现有 SSH Settings/i18n，完整用户旅程，真实矩阵、安装制品、回归、评审及发布决策 |
 
 各阶段记录基准 HEAD、变更面、验证环境、命令与退出码、独立评审/修复、下一阶段条件。未通过项目不标 PASS；阶段形成独立提交或记录未提交阻塞。发布能力不能由测试环境变量或默认回退打开。
 
 ## 测试矩阵与证据
 
-本机 macOS arm64 / Node 24.18.0 / pnpm 11.25.0。真实 Windows 尚无本地执行环境。仓库开启 GitHub-hosted Windows CI；当前无已注册 self-hosted runner。Hosted runner 不等同于真实 WSL2 双发行版或 Windows Electron 环境，不能以平台模拟替代。
+首轮使用 macOS arm64 / Node 24.18.0 / pnpm 11.25.0；接续环境与实测见 W0 阶段报告。仓库开启 GitHub-hosted Windows CI；当前无已注册 self-hosted runner。Hosted runner 不等同于真实 WSL2 双发行版或 Windows Electron 环境，不能以平台模拟替代。
 
 L1–L3：现有 `ssh-*`、`remote-*` 合同、Registry/多 Host、传输并发与客户端 Settings；L4–L5：Linux/macOS POSIX 对照、Windows OpenSSH 与 WSL 各自 Node/Electron 至 Linux，Windows B/C 至 macOS、两发行版同名 alias、Windows 文件 ACL/NTFS 和进程退出；L6：typecheck、lint、build、兼容、许可、文档、pack 和 packed smoke。未实跑的矩阵格标 `NOT_RUN` / `BLOCKED`。
 
@@ -41,7 +41,16 @@ L1–L3：现有 `ssh-*`、`remote-*` 合同、Registry/多 Host、传输并发�
 
 探针已交付：`node --check scripts/probe-windows-ssh-initiator.mjs` exit 0；在 macOS 上执行 `node scripts/probe-windows-ssh-initiator.mjs` 按设计输出 BLOCKED、exit 2。
 
-原生实测未执行，维持关闭：真实 Windows OpenSSH（`ssh -V` / `-G` / keygen）、Windows Node/Electron 上的 TLS/PSK、真实 WSL 发行版 stdio/部署/回收与双发行版车道均 `BLOCKED`/`NOT_RUN`。判定：B BLOCKED；C BLOCKED。W1/W2 中不依赖 Windows 实机的工作可以继续，Windows capability 门禁保持关闭。
+接续基准 HEAD `6e8957b`（本地与 `origin/feat/windows-ssh-initiator` 一致，工作区干净）。Windows x64 系统 Node `24.14.0` 不满足验收版本；改用校验官方 SHA-256 后隔离解压的 Node `24.22.3`，pnpm `11.25.0`，未改系统默认。在合规运行时取得以下原始输出（两条 stderr 均为空）：
+
+```text
+> node scripts/probe-windows-ssh-initiator.mjs windows-openssh
+PASS: Windows OpenSSH config and disposable key tooling
+> node scripts/probe-windows-ssh-initiator.mjs wsl-list
+["Ubuntu","docker-desktop"]
+```
+
+两条均 exit 0：B 的系统客户端、配置解析与临时密钥工具 `PASS`；C 只读枚举 `PASS`。`docker-desktop` 不作为用户发行版，双发行版 stdio 探针 `NOT_RUN`；无隔离 SSH fixture，Helper 探针 `NOT_RUN`。未验证 Windows Electron Host；W0-B 与 W0-C 的完整门禁仍 `BLOCKED`，不能按探针放行。
 
 ## W1 阶段报告
 
@@ -87,9 +96,11 @@ W1 未跑跨平台矩阵与任何原生实测；Windows capability 保持关闭�
 
 POSIX 旧行为未动：不传 `initiator` 时摘要与投影逐字节一致（选项缺席即 POSIX）；`storeIdentity` POSIX 路径与管道名不变。
 
-未验收/未实现（W2 维持关闭）：原生配置读写与 ACL/`getuid`/mode 保护、config 文件系统与本地 I/O、身份切换与多 Host 一致性均未实施；Windows 命名管道真实行为 `NOT_RUN`（本机无 Windows）。调查记录：`src/worktrees/native-io.ts` 已有 Win32 路径钉扎的读取句柄（卷级 metadata handle），但没有 Windows 稳定传输 `fileState` 与 no-replace 发布——本地 transfer gate 不移除。生产路径保持关闭。
+首轮未验收（历史记录）：原生配置读写与 ACL/`getuid`/mode 保护、config 文件系统与本地 I/O、身份切换与多 Host 一致性均未实施；Windows 命名管道真实行为 `NOT_RUN`（本机无 Windows）。调查记录：`src/worktrees/native-io.ts` 已有 Win32 路径钉扎的读取句柄（卷级 metadata handle），但没有 Windows 稳定传输 `fileState` 与 no-replace 发布——本地 transfer gate 不移除。生产路径保持关闭。
 
-独立评审遗留发现（未关闭）：有效发起端身份尚未穿过 `RemoteControlPlane`/`loadPersonalManifest`/缓存失效链路——当前只有 manager 侧 `initiator` 选项与 manifest `personalIdentity.initiator` 字段，投产生成方没有接线。激活前必须在 owner/follower 看到的同一摘要内携带该事实，不得只在 transport 内做后处理；非 personal 环境有意排除在外。本计划不更改 plane/运行时门禁。
+接续关闭身份接线的评审发现：配置、操作前刷新与 owner hello 现在共同使用 `loadPersonalManifest` 的有效发起端身份，缓存不复用其他路径、后端、发行版或用户的投影。顶层及环境内摘要的分工见 [ADR-0052](../../decisions/ADR-0052-windows-ssh-initiator.md)。无身份时验证了旧空清单的序列化与原摘要；Windows 端额外锁定首次配置和后续刷新都不能发布清单。
+
+共享 Registry 合同：同身份且文件未变不重启远端面；仅改变 owner 发起端后，旧 follower 不能重新握手或获取列表；不同发行版或用户均拒绝，匹配后恢复。该测试在显式指定的 Ubuntu 内以 POSIX IPC 运行，不证明 Win32 remote-2 命名管道或实际发起端运行时。命令及结果见[阶段交付报告](./2026-11-25-windows-ssh-initiator-report.md)。W2 仍缺原生 ACL 与配置读写、路径钉扎与 no-replace I/O、选择持久化与 Win32 多 Host／在飞代次验证；不开放 Windows capability。
 
 ## W3-B 阶段报告
 
@@ -113,7 +124,7 @@ node scripts/probe-windows-ssh-initiator.mjs windows-openssh-helper <fixture-ssh
 
 评审修复（W3-B 范围，已合入工作区）：`windows-openssh-helper` 参数由 6 增至 7（新增 fixture 配置，经 `windowsOpenSshHelperArgs` 盘符校验后作为 `-F` 传递）；spawn 追加身份固定选项；`SystemRoot` 校验追加 `.`/`..` 段拒绝。剩余 `NOT_RUN` 原生缺口不变。
 
-未验收/未实现（W3-B 维持关闭）：真实 Windows OpenSSH 执行、官方 Helper 实机握手、TLS PSK、SFTP、管理命令路由与异常清理均 `NOT_RUN`（本机无 Windows）；生产路径未接线，`capability` 门禁未动，Windows 远端控制面保持关闭。
+接续的原生命令探针见 W0。Windows Node 运行已有 TLS PSK 兼容测试通过，包含本机回环握手；这不是经 OpenSSH 的 Helper 流测试。隔离目标的官方 Helper、SSH 流转发、Node/Electron 间的 PSK、SFTP 扩展、Askpass、配置同源和异常清理仍未验收；生产路径和 capability 保持关闭。
 
 ## W3-C 阶段报告
 
@@ -131,7 +142,7 @@ node scripts/probe-windows-ssh-initiator.mjs windows-openssh-helper <fixture-ssh
 
 评审修复（W3-C 范围，已合入工作区）：发行版名校验改为共享 `isWslDistributionName`（`identity.ts` 导出，wsl.ts 两个校验点与持久化 schema 同一条规则，schema 侧同样拒绝前导 `-`）；UTF-16LE 探测追加"奇数索引高字节为 0"判据，使无换行的单条 UTF-16LE 清单（如仅 `Ubuntu`）也能识别，不接受非法编码；新增对应 fixture 用例。剩余 `NOT_RUN` 原生缺口不变。
 
-未验收/未实现（W3-C 维持关闭）：真实双发行版 WSL 执行 `NOT_RUN`（本机无 Windows）；WSL 版本判定、Linux 依赖安装/部署、manifest ACK、Bridge、管理与工具、异常清理与代次隔离均未实施；`capability` 门禁未动，Windows 远端控制面保持关闭。
+接续的原生枚举见 W0。现有环境只有一个合格发行版，双发行版 stdio 探针 `NOT_RUN`；WSL 版本判定、产品运行时部署、manifest ACK、Bridge、管理与工具、异常清理与代次隔离均未验收或未实现。Ubuntu 只用于 POSIX 合同测试；不计为 Bridge 或双发行版证据。生产路径和 capability 保持关闭。
 
 ## W4 阶段报告
 
