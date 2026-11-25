@@ -4,8 +4,7 @@ import { REMOTE_CONTEXT_NAME, renderRemoteCapabilities } from './capabilities.ts
 import { remoteBashTool } from './exec-tool.ts'
 import type { RemoteExecutionBackend } from './exec.ts'
 import { environmentDigest } from './manifest.ts'
-import { lazySshExecBackend } from './ssh-exec-backend.ts'
-import type { SshEnvironmentManager } from './ssh-environment.ts'
+import { lazySshExecBackend, type SshExecManager } from './ssh-exec-backend.ts'
 import { SshEndpointVerifier, type SshEndpointManager } from './ssh-verifier.ts'
 import { remoteCopyTool, type RemoteConnectionManager } from './transfer.ts'
 
@@ -60,10 +59,10 @@ export function mountRemoteTools(
       // The SSH adapter needs a connection opening and a live generation. Probe
       // the structure, never the class: an injected manager that cannot open a
       // connection simply has no execution backend.
-      const opening = manager as Partial<SshEnvironmentManager>
-      const backend = typeof opening.open !== 'function' || typeof opening.generationOf !== 'function'
+      const opening = manager as Partial<SshExecManager>
+      const backend = typeof opening.open !== 'function' || typeof opening.generationOf !== 'function' || typeof opening.markStale !== 'function' || typeof opening.openSftp !== 'function'
         ? undefined
-        : lazySshExecBackend(environment, opening as SshEnvironmentManager, root)
+        : lazySshExecBackend(environment, opening as SshExecManager, root)
       cache.set(key, { digest, backend })
       return backend
     }

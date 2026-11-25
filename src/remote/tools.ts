@@ -44,17 +44,23 @@ export function apply(ctx: Context, config: Config = {}): void {
   const resolveGate = () => inspectSshProfile(ctx).gate
   const mount = (scope: Context, gate: NonNullable<ReturnType<typeof resolveGate>>): void => {
     void scope.effect(async function* () {
-      const { SshEnvironmentManager } = await import('./ssh-environment.ts')
+      const { createPosixInitiator } = await import('./initiator/posix.ts')
       const credentialRoot = registry.remoteCredentialRoot
-      const manager = new SshEnvironmentManager({
+      const { runtime } = createPosixInitiator({
         manifest: registry.remoteManifest, logger: scope.logger, custody: 'personal', gate, resolveGate,
         managedKnownHostsFile: credentialRoot === undefined ? undefined : join(credentialRoot, 'known_hosts'),
       })
-      yield () => manager.disposeAll()
-      const rebind = () => manager.rebind(registry.remoteManifest)
-      scope.effect(() => registry.onRemoteChange(rebind))
-      rebind()
-      mountRemoteTools(scope, manager)
+      yield () => runtime.disposeAll()
+      const rebind = () => runtime.rebind(registry.remoteManifest)
+      const rebindFailed = () => { scope.logger.warn('multi-root remote tools: initiator manifest rebind failed') }
+      scope.effect(() => registry.onRemoteChange(() => {
+        try {
+          void rebind()?.catch(rebindFailed)
+        } catch { rebindFailed() }
+      }))
+      const initial = rebind()
+      if (initial !== undefined) await initial
+      mountRemoteTools(scope, runtime)
     })
   }
 

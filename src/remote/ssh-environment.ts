@@ -65,6 +65,14 @@ export interface SftpEnvironment {
   dispose(): Promise<void>
 }
 
+interface SshHelperConnectionConfig {
+  readonly host: string
+  readonly launch: { readonly kind: 'node-script'; readonly node: string }
+  readonly helper: string
+  readonly helperHash: string
+  readonly workspace: string
+}
+
 export interface SshEnvironmentManagerOptions {
   readonly manifest: DeploymentManifest | undefined
   readonly logger: { debug(message: string): void; warn(message: string): void }
@@ -81,6 +89,12 @@ export interface SshEnvironmentManagerOptions {
   readonly exec?: (file: string, args: readonly string[], input?: string) => Promise<{ stdout: string; stderr: string }>
   readonly managedKnownHostsFile?: string | undefined
   readonly readFile?: (path: string) => string
+  readonly connectionFactory?: (input: {
+    readonly environment: RemoteEnvironment
+    readonly config: SshHelperConnectionConfig
+    readonly gate: Extract<SshCapability, { status: 'eligible' }>
+  }) => (ctx: Context) => void
+  readonly sftpFactory?: (environment: RemoteEnvironment, onLoss: () => void) => SftpClient
 }
 
 const defaultExec = (file: string, args: readonly string[], input?: string) => new Promise<{ stdout: string; stderr: string }>((resolve, reject) => {
@@ -179,6 +193,8 @@ export class SshEnvironmentManager {
   private readonly personalCustody: boolean
   private readonly exec: NonNullable<SshEnvironmentManagerOptions['exec']>
   private readonly readFile: (path: string) => string
+  private readonly connectionFactory: SshEnvironmentManagerOptions['connectionFactory']
+  private readonly sftpFactory: SshEnvironmentManagerOptions['sftpFactory']
   private readonly openings = new Map<string, Promise<SshEnvironment>>()
   private readonly resolved = new Map<string, SshEnvironment>()
   private readonly sftpOpenings = new Map<string, Promise<SftpEnvironment>>()
@@ -204,6 +220,8 @@ export class SshEnvironmentManager {
     this.personalCustody = options.custody === 'personal'
     this.exec = options.exec ?? defaultExec
     this.readFile = options.readFile ?? (path => readFileSync(path, 'utf8'))
+    this.connectionFactory = options.connectionFactory
+    this.sftpFactory = options.sftpFactory
   }
 
   /** Rebind personal facts while retaining unchanged connections and Root helpers. */
@@ -517,7 +535,7 @@ export class SshEnvironmentManager {
     if (environment.transfer === undefined) throw new SshEnvironmentError('transfer-unavailable', `environment "${environmentId}" declares no transfer block`)
     await this.verifyHostIdentity(environment)
     signal?.throwIfAborted()
-    const client = SftpClient.connect(environment.connection.host, { onLoss })
+    const client = this.sftpFactory?.(environment, onLoss) ?? SftpClient.connect(environment.connection.host, { onLoss })
     const cancel = () => client.dispose()
     signal?.addEventListener('abort', cancel, { once: true })
     const timeout = setTimeout(cancel, 15_000)
@@ -574,19 +592,22 @@ export class SshEnvironmentManager {
       // the recorded entry so the OpenSSL-to-OpenSSL path is byte-identical.
       if (psk.kind === 'fallback') launchEntry = verified.currentPath
     }
-    const modules = await loadHostSshPackages(this.requireGate()) as Record<string, Record<string, unknown> & { default?: Record<string, unknown> }>
+    const gate = this.requireGate()
+    const modules = await loadHostSshPackages(gate) as Record<string, Record<string, unknown> & { default?: Record<string, unknown> }>
     const exported = (pkg: string, name: string) => modules[pkg]![name] ?? modules[pkg]!.default?.[name]
+    const config: SshHelperConnectionConfig = {
+      host: connection.host,
+      launch: { kind: 'node-script', node: connection.nodePath! },
+      helper: launchEntry, helperHash: environment.helper!.sha256,
+      workspace,
+    }
+    const ssh = this.connectionFactory?.({ environment, config, gate }) ?? exported('@deepseek-ai/dsh-ssh', 'SshConnection')
     const ctx = new Context()
     const mount = ctx.plugin.bind(ctx) as (plugin: unknown, config?: unknown) => { dispose(): Promise<void> }
     const fibers = [
       mount(SessionProjectionRegistry),
       mount(SandboxPolicyService, { mode: 'read-only', workspaceRoot: workspace }),
-      mount(exported('@deepseek-ai/dsh-ssh', 'SshConnection'), {
-        host: connection.host,
-        launch: { kind: 'node-script', node: connection.nodePath! },
-        helper: launchEntry, helperHash: environment.helper!.sha256,
-        workspace,
-      }),
+      mount(ssh, config),
       mount(exported('@deepseek-ai/dsh-fs-ssh', 'SshFileSystem')),
       mount(exported('@deepseek-ai/dsh-subprocess-ssh', 'SshSubprocessRuntime')),
       mount(exported('@deepseek-ai/dsh-sandbox-ssh', 'SshSandboxProvider')),

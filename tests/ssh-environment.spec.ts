@@ -1,5 +1,7 @@
 /** SshEnvironmentManager refusal ordering — injected exec/readFile, no network. */
+import type { Context } from '@deepseek-ai/cordis'
 import { describe, expect, it, vi } from 'vitest'
+import { classifyInstallation, classifySshCapability, sshPackageVersion, sshPrivateCopy } from '../src/compat/dsh-version.ts'
 import { hostKeyFingerprint, parseSshConfig, SshEnvironmentManager } from '../src/remote/ssh-environment.ts'
 import { SftpClient } from '../src/remote/sftp.ts'
 import type { DeploymentManifest } from '../src/remote/manifest.ts'
@@ -157,16 +159,48 @@ describe('SshEnvironmentManager refusal ordering', () => {
 })
 
 
+const officialGate = classifySshCapability({
+  platform: process.platform, local: classifyInstallation(),
+  readVersion: sshPackageVersion, privateCopy: sshPrivateCopy,
+})
+
+it.skipIf(officialGate.status !== 'eligible')('mounts the injected connection with the official provider context after identity checks', async () => {
+  const binding = environment()
+  const assertOpen = vi.fn()
+  const connectionFactory = vi.fn(() => (ctx: Context) => {
+    const ready = Promise.resolve({ platform: 'linux', workspace: binding.connection.workspace, protocol: 1 })
+    ctx.provide('ssh', { ready, assertOpen } as never)
+  })
+  const manager = new SshEnvironmentManager({
+    manifest: manifest([binding]), logger, gate: officialGate, allowUnattestedForTesting: true,
+    exec, readFile: () => KEY_LINE, connectionFactory,
+  })
+  try {
+    const opened = await manager.open('vps-app')
+    expect(connectionFactory).toHaveBeenCalledExactlyOnceWith({
+      environment: binding, gate: officialGate,
+      config: { host: binding.connection.host, launch: { kind: 'node-script', node: binding.connection.nodePath },
+        helper: binding.connection.helperPath, helperHash: binding.helper.sha256, workspace: binding.connection.workspace },
+    })
+    expect(typeof opened.sandbox.confine).toBe('function')
+    expect(typeof opened.subprocess.spawn).toBe('function')
+    opened.assertAlive()
+    expect(assertOpen).toHaveBeenCalled()
+  } finally { await manager.disposeAll() }
+})
+
+
 describe('shared SFTP openings', () => {
   it('cancels only the waiting caller and retains the live generation on an unrelated rebind', async () => {
     const connection = environment({ transfer: { maxBytes: 1024, timeoutMs: 10_000 } })
-    const manager = new SshEnvironmentManager({
-      manifest: manifest([connection]), logger, gate: eligible, custody: 'personal', exec, readFile: () => KEY_LINE,
-    })
     const entered = Promise.withResolvers<void>()
     const handshake = Promise.withResolvers<{ version: number; extensions: Record<string, string> }>()
     const client = { init: () => { entered.resolve(); return handshake.promise }, dispose: vi.fn() }
-    const connect = vi.spyOn(SftpClient, 'connect').mockReturnValue(client as never)
+    const connect = vi.fn(() => client as unknown as SftpClient)
+    const manager = new SshEnvironmentManager({
+      manifest: manifest([connection]), logger, gate: eligible, custody: 'personal', exec, readFile: () => KEY_LINE,
+      sftpFactory: connect,
+    })
     const controller = new AbortController()
     try {
       const first = manager.openSftp('vps-app', controller.signal)
@@ -176,7 +210,7 @@ describe('shared SFTP openings', () => {
       await expect(first).rejects.toMatchObject({ name: 'AbortError' })
       handshake.resolve({ version: 3, extensions: { 'hardlink@openssh.com': '1', 'fsync@openssh.com': '1' } })
       const opened = await second
-      expect(connect).toHaveBeenCalledTimes(1)
+      expect(connect).toHaveBeenCalledExactlyOnceWith(connection, expect.any(Function))
       expect(client.dispose).not.toHaveBeenCalled()
 
       manager.rebind(manifest([{ ...connection, displayName: 'Renamed' }, environment({ environmentId: 'vps-other' })]))
@@ -188,7 +222,6 @@ describe('shared SFTP openings', () => {
       await expect.poll(() => client.dispose.mock.calls.length).toBe(1)
     } finally {
       await manager.disposeAll()
-      connect.mockRestore()
     }
   })
 })

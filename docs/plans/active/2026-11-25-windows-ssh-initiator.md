@@ -17,7 +17,7 @@
 | 阶段 | 状态 | Entry Gate | Exit Gate |
 | --- | --- | --- | --- |
 | W0 | BLOCKED | 需求与实际基线一致；已找到平台、连接、准入、凭据和 I/O 接缝 | 两版上游合同；真实 Windows Node/Electron 和至少两个真实 WSL 环境，或明确各自阻塞；分别判定 B/C |
-| W1 | NOT_STARTED | 官方 provider 的实际接入合同明确；记录 POSIX 基线 | 通过共享运行时接缝运行原有 POSIX 用例；缺包与 Windows 门禁不改；无 Root 迁移 |
+| W1 | PASS (限定：共享接缝、本机回归) | 官方 provider 的实际接入合同明确；记录 POSIX 基线 | 通过共享运行时接缝运行原有 POSIX 用例；缺包与 Windows 门禁不改；无 Root 迁移 |
 | W2 | NOT_STARTED | W1 合同稳定；Windows 共用信任边界明确 | 配置及本地文件授权/发布、后端身份、切换及多 Host 一致性用例通过；未验证 capability 关闭 |
 | W3-B | NOT_STARTED | W1/W2 可用；W0-B 已验证或明确限定为不可发布的开发验证 | 严格主机验证、官方 Helper RPC、TLS PSK、SFTP、管理和清理通过 Windows Node/Electron 实机与独立版本门禁 |
 | W3-C | NOT_STARTED | W1/W2 可用；在所选真实发行版上验证 stdio/依赖/退出 | 显式多发行版选择与初始化、manifest ACK、管理与工具、异常清理及代次隔离通过 |
@@ -42,6 +42,35 @@ L1–L3：现有 `ssh-*`、`remote-*` 合同、Registry/多 Host、传输并发�
 探针已交付：`node --check scripts/probe-windows-ssh-initiator.mjs` exit 0；在 macOS 上执行 `node scripts/probe-windows-ssh-initiator.mjs` 按设计输出 BLOCKED、exit 2。
 
 原生实测未执行，维持关闭：真实 Windows OpenSSH（`ssh -V` / `-G` / keygen）、Windows Node/Electron 上的 TLS/PSK、真实 WSL 发行版 stdio/部署/回收与双发行版车道均 `BLOCKED`/`NOT_RUN`。判定：B BLOCKED；C BLOCKED。W1/W2 中不依赖 Windows 实机的工作可以继续，Windows capability 门禁保持关闭。
+
+## W1 阶段报告
+
+基准 HEAD `013f59d`（W0 提交后，工作区干净）。变更面：
+
+- 新增 `src/remote/initiator/contract.ts`：`SshInitiatorBackend`（`kind: 'posix' | 'windows-openssh' | 'wsl'` 与 `runtime`）和 `SshInitiatorRuntime`（`RemoteToolsManager & SshExecManager`，加 `capability`、可同步或异步的 `rebind`、`disposeAll`）。
+- 新增 `src/remote/initiator/posix.ts`：`createPosixInitiator(options)` 返回 `{ kind: 'posix', runtime: new SshEnvironmentManager(options) }`。
+- `src/remote/tools.ts`：mount 改为动态导入 `createPosixInitiator`；`onRemoteChange` 回调经 `Promise.resolve(rebind())` 捕获失败并 warn；初始 `rebind()` 返回非 undefined 时 await——POSIX rebind 同步返回，无新增 microtask。teardown 顺序不变。
+- `src/remote/tools-registration.ts`：manager 探测面从 `Partial<SshEnvironmentManager>` 改为 `Partial<SshExecManager>`，守卫增加 `markStale` 函数检查；`SshEnvironmentManager` 类型导入删除。
+- `src/remote/ssh-environment.ts`：新增 `SshHelperConnectionConfig` 接口与 `connectionFactory`/`sftpFactory` 选项（私有字段捕获）；`openSftpFresh` 走 `sftpFactory ?? SftpClient.connect`；`openFresh` 在分配 Cordis Context 前构造共享 `config`，以 `connectionFactory ?? dsh-ssh SshConnection` 挂载 `mount(ssh, config)`，其余四处 provider/registry mount 不变；eligibility、Helper 核验与 TLS 回退均未移动。
+- `tests/ssh-environment.spec.ts`：首个共享 SFTP 用例改用 `sftpFactory` 注入并断言 `(connection, onLoss)` 精确一次调用；相邻同时复制用例保留 `SftpClient.connect` 静态 spy，覆盖生产默认路径。
+
+验证（本机 macOS arm64 / Node 24.18.0 / pnpm 11.25.0，命令均加 `pnpm_config_verify_deps_before_run=false`，原因见 W0）：
+
+- `pnpm exec vitest run tests/ssh-environment.spec.ts tests/ssh-environment-shutdown.spec.ts tests/ssh-exec-backend.spec.ts tests/remote-tools-switch.spec.ts tests/remote-tools.spec.ts tests/remote-registry.spec.ts tests/remote-copy.spec.ts tests/remote-journey.e2e.ts` —— 8 个文件、135 通过、1 跳过，exit 0。
+- `pnpm typecheck` —— exit 0。
+- `pnpm docs:check` —— exit 0。
+
+W1 未跑跨平台矩阵与任何原生实测；Windows capability 保持关闭。正式 PASS 判定留待评审。
+
+评审收口（自有评审 + 独立只读评审，生产代码无 High/Critical）：
+
+- F1：rebind 回调可能同步抛错——`tools.ts` 的 `onRemoteChange` 回调改为 `try { void rebind()?.catch(rebindFailed) } catch { rebindFailed() }`，同步与异步失败统一 warn；POSIX 同步退役不变（不得挪入微任务）。
+- F2：合同措辞——`initiator/contract.ts` 的 `rebind` 注释改为「Retire superseded access synchronously. Only the latest requested manifest's ACK can make a remote runtime usable.」，未来远端运行时自持代次 ACK，当前无异步后端。
+- F3：探测面一致性——`tools-registration.ts` 守卫补 `openSftp` 函数检查，与 `SshExecManager` 完整对齐。
+- F4：缺真实 Cordis/provider 合同测试——`tests/ssh-environment.spec.ts` 新增注入 `connectionFactory` 用例：身份核验后在官方 provider Context 挂载 `ctx.provide('ssh', ...)`，断言 factory 收到 `(environment, config, gate)` 及 `sandbox.confine`/`subprocess.spawn`/`assertOpen` 可用；`it.skipIf(officialGate.status !== 'eligible')` 在本机未跳过、实际执行。
+- F5（范围说明，不处理）：`capability` 为合同暴露给未来实现；POSIX 仍依赖既有 gate，W2 前不接新 capability。
+
+复测：`pnpm exec vitest run tests/ssh-environment.spec.ts tests/remote-tools-switch.spec.ts tests/remote-tools.spec.ts tests/static-ssh-imports.spec.ts` —— 4 个文件、47 通过、0 跳过，exit 0；`pnpm typecheck` exit 0；`pnpm docs:check` exit 0。独立评审结论：无 High/Critical。
 
 ## 恢复与验收
 
