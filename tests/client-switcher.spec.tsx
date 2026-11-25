@@ -24,6 +24,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { OPEN_IN_APP_APPS_ROUTE, OPEN_IN_APP_OPEN_ROUTE } from '@deepseek-ai/dsh-host-open-in-app/shared'
 import type { StoreInstance } from '@deepseek-ai/dsh-client-store'
 import { PANEL_CHANNEL, type PanelRequest, type RootView, type RootsView } from '../src/contract.ts'
+import type { RemotesView } from '../src/remote/panel-contract.ts'
 import type { FilesState } from '../src/client/files-tree/store.ts'
 import * as client from '../src/client/index.ts'
 import { NS } from '../src/client/locales.ts'
@@ -147,6 +148,8 @@ interface Harness {
   readonly holdSearch: () => () => void
   /** Make the search endpoint reject with a panel code, or answer normally when undefined. */
   setSearchFailure: (code: string | undefined) => void
+  /** Flip the composed remote-tools settings form. */
+  setRemoteEnabled: (enabled: boolean) => void
 }
 
 /** Optional host services a spec can put behind `ctx.get`. */
@@ -159,6 +162,8 @@ interface HostServices {
 interface MountOptions {
   /** Give the stub `workspaceFiles` the `0.2.2-rc.2` search method (the search seat's probe). */
   readonly workspaceSearch?: boolean
+  /** Compose the modern remote-tools settings form, initially switched off. */
+  readonly remoteForm?: boolean
 }
 
 /** Apply the real client entry to a recording stub context. */
@@ -173,6 +178,20 @@ function mount(withConnection = true, services: HostServices = {}, options: Moun
   let listFails = false
   let searchFailure: string | undefined
   let searchGate: Promise<void> | undefined
+  let remoteEnabledFlag = false
+  const remoteListeners = new Set<() => void>()
+  const remoteForm = {
+    getSnapshot: () => ({ status: 'ready', writable: true, revision: 0, value: { enabled: remoteEnabledFlag } }),
+    subscribe: (listener: () => void) => { remoteListeners.add(listener); return () => { remoteListeners.delete(listener) } },
+    mutate: async () => true,
+  }
+  const remoteView: RemotesView = {
+    primaryRoot: '/repos/primary',
+    mode: 'workspace-write',
+    custodyMode: 'personal',
+    status: { state: 'ready' },
+    endpoints: [],
+  }
   const connection = {
     rpc: {
       call: async (channel: string, endpoint: string, payload: PanelRequest) => {
@@ -180,6 +199,7 @@ function mount(withConnection = true, services: HostServices = {}, options: Moun
         if (endpoint === 'list' && listFails) {
           return { ok: false, error: { code: 'registry-contended', message: 'registry busy' } }
         }
+        if (endpoint === 'remotes') return { ok: true, value: remoteView }
         if (endpoint === 'search') {
           const gate = searchGate
           if (gate !== undefined) await gate
@@ -229,8 +249,16 @@ function mount(withConnection = true, services: HostServices = {}, options: Moun
       const dispose = callback()
       return typeof dispose === 'function' ? dispose : () => {}
     },
-    // The Files-pane switcher spec does not exercise the workspace menu.
-    inject: () => () => {},
+    // The Files-pane switcher spec does not exercise the workspace menu. The
+    // settings card's dynamic injection resolves immediately only when this
+    // harness is asked to compose the modern remote-tools form.
+    inject: (services: readonly string[], callback: (scope: unknown) => unknown) => {
+      if (options.remoteForm === true && services.includes('configForms')) {
+        const out = callback(ctx)
+        return typeof out === 'function' ? out : () => {}
+      }
+      return () => {}
+    },
     locale: {
       register: () => () => {},
       bind: (ns: string) => (key: string) => `${ns}.${key}`,
@@ -253,6 +281,9 @@ function mount(withConnection = true, services: HostServices = {}, options: Moun
       }
       if (name === 'contextMenus') return services.contextMenus
       if (name === 'sidebarRightTabs') return services.sidebarRightTabs
+      if (name === 'configForms') return options.remoteForm === true
+        ? { get: (entryId: string) => entryId === 'multi-root-remote-tools' ? remoteForm : undefined }
+        : undefined
       if (name === 'sessions') {
         return {
           list: {
@@ -339,6 +370,10 @@ function mount(withConnection = true, services: HostServices = {}, options: Moun
       }
     },
     setSearchFailure: next => { searchFailure = next },
+    setRemoteEnabled: next => {
+      remoteEnabledFlag = next
+      for (const listener of remoteListeners) listener()
+    },
   }
 }
 
@@ -676,6 +711,33 @@ describe('the Files-tab root switcher', () => {
     await waitFor(() => { expect(screen.getByRole('dialog')).toBeTruthy() })
     // The dialog is the same manager: it reads the roots view for the session.
     expect(harness.calls.every(call => call.payload.sessionId === 'session-1')).toBe(true)
+  })
+
+  it('keeps the remote-enabled add menu in the dialog opened from the trailing manage item', async () => {
+    const harness = mount(true, {}, { remoteForm: true })
+    renderInPane(harness)
+    await waitFor(() => { expect(harness.calls.length).toBeGreaterThanOrEqual(1) })
+    act(() => { harness.setRemoteEnabled(true) })
+
+    await openMenu()
+    fireEvent.click(screen.getByRole('button', { name: `${NS}.switcher.manage` }))
+    await waitFor(() => { expect(screen.getByRole('dialog')).toBeTruthy() })
+
+    // ADR-0050's ON shape must reach this locally owned dialog too: `+` is a
+    // menu opener with the local and remote entries, not the OFF shape's
+    // direct local-add action. The footer already shares the same dependency
+    // bundle; this pins the RootSwitcher pass-through that used to drop it.
+    const wrap = await waitFor(() => {
+      const element = document.querySelector('.mrfw-addWrap') as HTMLElement | null
+      expect(element).not.toBeNull()
+      return element as HTMLElement
+    })
+    const trigger = wrap.querySelector('button')
+    expect(trigger?.getAttribute('aria-haspopup')).toBe('menu')
+    fireEvent.click(trigger!)
+    await screen.findByText(`${NS}.panel.addLocal`)
+    const remoteItem = screen.getByText(`${NS}.panel.addRemote`).closest('button')
+    expect(remoteItem).toHaveProperty('disabled', false)
   })
 
   it('degrades to a menu-only switcher without a data-files-root ancestor', async () => {
