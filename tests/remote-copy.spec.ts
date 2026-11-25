@@ -829,7 +829,7 @@ describe('total transfer I/O deadline and cancellation', () => {
   it.skipIf(process.platform === 'win32')('a timed-out write abandons only the waiter and breaks the shared session after a bounded grace', async () => {
     fixture = createFixtureWorkspace('copy-shared-timeout')
     writeFileSync(join(fixture.workspace, 'source.txt'), 'shared bytes')
-    const s = stack({ uniqueOperationIds: true, transfer: { maxBytes: 1024, timeoutMs: 50 } })
+    const s = stack({ uniqueOperationIds: true, transfer: { maxBytes: 1024, timeoutMs: 1_000 } })
     const dispose = vi.fn()
     Object.assign(s.mem, { dispose })
     const entered = Promise.withResolvers<void>()
@@ -839,7 +839,13 @@ describe('total transfer I/O deadline and cancellation', () => {
       await writing.promise
     })
     const first = run(s, localToRemote(), { manager: s.manager })
-    await entered.promise
+    // Long enough for a loaded runner to reach the instrumented write. If
+    // the budget still ends the transfer first, fail immediately instead of
+    // waiting for `entered` until the outer test timeout.
+    await Promise.race([
+      entered.promise,
+      first.then(result => { throw new Error(`Transfer ended before the stalled SFTP write: ${JSON.stringify(result)}`) }),
+    ])
     const second = run(s, localToRemote({ to: { ...localToRemote().to, relativePath: 'peer.txt' } }), { manager: s.manager })
     await expect(first).resolves.toMatchObject({ code: 'transfer-timeout' })
     // The timed-out waiter is abandoned; the sibling transfer keeps the session.
@@ -854,7 +860,7 @@ describe('total transfer I/O deadline and cancellation', () => {
   it.skipIf(process.platform === 'win32')('a timed-out request that answers inside the grace keeps the shared session', async () => {
     fixture = createFixtureWorkspace('copy-shared-timeout-late')
     writeFileSync(join(fixture.workspace, 'source.txt'), 'shared bytes')
-    const s = stack({ uniqueOperationIds: true, transfer: { maxBytes: 1024, timeoutMs: 50 } })
+    const s = stack({ uniqueOperationIds: true, transfer: { maxBytes: 1024, timeoutMs: 1_000 } })
     const dispose = vi.fn()
     Object.assign(s.mem, { dispose })
     const entered = Promise.withResolvers<void>()
@@ -864,7 +870,10 @@ describe('total transfer I/O deadline and cancellation', () => {
       await writing.promise
     })
     const first = run(s, localToRemote(), { manager: s.manager })
-    await entered.promise
+    await Promise.race([
+      entered.promise,
+      first.then(result => { throw new Error(`Transfer ended before the stalled SFTP write: ${JSON.stringify(result)}`) }),
+    ])
     await expect(first).resolves.toMatchObject({ code: 'transfer-timeout' })
     writing.resolve()
     await new Promise(resolve => setTimeout(resolve, 1_500))
