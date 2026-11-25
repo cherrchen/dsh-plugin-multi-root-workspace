@@ -38,7 +38,7 @@ Plans with long-term reference value should not be deleted.
 
 active:
 
-- [2026-11-24-provider-remote-file-tree.md](./active/2026-11-24-provider-remote-file-tree.md) (Chinese) — Provider-based file tree and remote Workspace Root browsing: a `RootRef` discriminated union plus authorization-incarnation keying replaces path identity, a provider port dispatches the primary/additional/remote root kinds, the host gains an independent `remoteFiles.list` under a UI-read-only admission with dual ordering around network I/O, the SFTP path backend is admitted only under a documented isolation condition, and Helper/Broker fail closed without the required evidence; P0 baseline done, a P0–P7 pipeline with per-stage forced gates, decision proposed in [ADR-0052](../decisions/ADR-0052-provider-file-browsing.md).
+- [2026-11-24-provider-remote-file-tree.md](./active/2026-11-24-provider-remote-file-tree.md) (Chinese) — Provider-based file tree and remote Workspace Root browsing: a `RootRef` discriminated union plus authorization-incarnation keying replaces path identity, a provider port dispatches the primary/additional/remote root kinds, and the host gains an independent `remoteFiles.list` under a UI-read-only admission with dual ordering around network I/O; browsing uniformly requires the explicit stable-path deployment assertion and an owned SFTP v3 channel, Helper object authorization is never reinterpreted as path identity, and Broker fails closed without a directory stream; the P0–P8 implementation and full version × OS matrix have passed, while the branch awaits PR review/merge, with the decision proposed in [ADR-0052](../decisions/ADR-0052-provider-file-browsing.md).
 
 
 

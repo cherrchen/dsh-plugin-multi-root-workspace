@@ -1,6 +1,6 @@
 # Provider 化文件树与远端 Workspace Root 浏览（2026-11-24）
 
-> 状态：**active — P0–P7 已完成；P8（Helper transport 浏览准入与统一能力编辑 UX）本地/实机证据已补齐，待推送后复验 CI 矩阵。** P7 检查点 `f49139a`；P8 检查点为本批 HEAD 提交。设计取舍见 [ADR-0052](../../decisions/ADR-0052-provider-file-browsing.md)（Proposed）。
+> 状态：**active — P0–P8 的实现、真实机证据与全版本 × OS CI 矩阵均已通过；分支待 PR 评审/合并与后续发布。** P7 检查点 `f49139a`；P8 检查点 `19ff368`；P8 CI run `45636794330` 为 success，34/34 jobs 通过。设计取舍见 [ADR-0052](../../decisions/ADR-0052-provider-file-browsing.md)（Proposed）。
 >
 > 关联：[ADR-0052](../../decisions/ADR-0052-provider-file-browsing.md)、[ADR-0015](../../decisions/ADR-0015-files-tab-plugin-owned-browsing.md)、[ADR-0016](../../decisions/ADR-0016-files-tab-native-tree-fork.md)、[ADR-0030](../../decisions/ADR-0030-environment-and-root-identity.md)、[ADR-0031](../../decisions/ADR-0031-filesystem-routing.md)、[ADR-0041](../../decisions/ADR-0041-additional-root-workspace-search.md)、[ADR-0049](../../decisions/ADR-0049-ssh-custody-modes.md)、[外部评审（2026-11-21）](../../reviews/2026-11-21-ssh-branch-review.md)、[SSH 远端环境参考](../../reference/ssh-remote-environments.md)。
 
@@ -253,7 +253,7 @@
 
 ### 未跑项与限制（诚实记录）
 
-- **P7 全版本 × OS CI 矩阵已通过。** `f49139a` 的 [CI run 45427743897](https://github.com/cherrchen/dsh-plugin-multi-root-workspace/actions/runs/45427743897) 为 success，34/34 jobs 通过（ubuntu-latest、ubuntu-22.04、macos-latest、windows-latest 的 group 1–8，以及 releases 和 gate）。P8 增量尚未推送，推送后仍需以同一矩阵复验。
+- **P7 与 P8 全版本 × OS CI 矩阵均已通过。** `f49139a` 的 [CI run 45427743897](https://github.com/cherrchen/dsh-plugin-multi-root-workspace/actions/runs/45427743897) 为 success，34/34 jobs 通过；P8 最终 HEAD `19ff368` 的 [CI run 45636794330](https://github.com/cherrchen/dsh-plugin-multi-root-workspace/actions/runs/45636794330) 也为 success，34/34 jobs 通过（ubuntu-latest、ubuntu-22.04、macos-latest、windows-latest 的 group 1–8，以及 releases 和 gate）。复验暴露并修复两处只影响测试夹具确定性的 CI 问题：legacy personal fixture 的同尺寸原地重写可能命中 stat-identity 缓存（`295ed2b` 改为原子替换），共享会话超时用例的 50ms 预算可能在插桩写之前耗尽（`19ff368` 改为 1s 并提前显式失败）。`macos-latest/group 5` 首次尝试在尚未分配 runner、没有任何 step 时被 GitHub 取消；按同一 SHA 定向重跑该 job 后成功，gate 随后通过。
 - 依赖真实 SSH 控制面的列举和租约规格限 macOS/Linux 执行。所有平台仍校验 UTF-8 路径预算和 RPC 不可用响应，Windows 另断言开启实验时控制面为 `platform-deferred`（[ADR-0030](../../decisions/ADR-0030-environment-and-root-identity.md)）。worktree 重新挂载规格先用被动检查建立有效快照，确认没有 watcher 后再删除 `.git`，由重新挂载触发失效判断。独立的 watcher 失效和恢复规格继续验证通知路径。
 - **远端树仍为 list-only**：无 watch/search/preview/menu/open-in-app/内容读取；预览端口为 fake-port 结论、未接线。
 - **live e2e 环境口径**：旧专用 VPS（`64.118.149.252`）SSH 层失联，本次以 `~/.dsh` 的 `ali` 环境承载 `remote-ssh.live.e2e.ts`（`live-ali.json` + `~/.dsh-ssh-test/ssh_config` 的 `dsh-ali`/`Host *` 块——均为测试环境文件，`~/.dsh` 本体未写）。四个 helper/sftp 环境共用一个 `root` 账号与同一台主机，账户/主机隔离语义弱于原双账号双别名夹具；`xfer` 的「托管 SFTP 账户」语义以同机同用户近似。旧 VPS 恢复后可用原 `live.json` 复跑。
@@ -263,4 +263,4 @@
 
 ### 最终结论
 
-**P7 PASS；P8 本地/实机 PASS、CI 待复验。** P7 的全部强制门禁已在 `f49139a` 补齐：全量脚本、真实 DSH↔SSH 端到端、真实宿主 GUI 与 34/34 全版本×OS CI 矩阵均通过。P8（Helper transport 浏览准入与统一能力编辑 UX）已在工作树完成并通过全量测试、lint/typecheck/docs、compat/pack/smoke、真实 `ali` SSH live e2e 20/20 与真实宿主 GUI 10/10；因该增量尚未提交/推送，矩阵复验仍待补，计划暂保留 active。
+**P7 PASS；P8 PASS（分支验证完成）。** P7 的全部强制门禁已在 `f49139a` 补齐：全量脚本、真实 DSH↔SSH 端到端、真实宿主 GUI 与 34/34 全版本×OS CI 矩阵均通过。P8（Helper transport 浏览准入与统一能力编辑 UX）已在 `19ff368` 完成并通过全量测试、lint/typecheck/docs、compat/pack/smoke、真实 `ali` SSH live e2e 20/20、真实宿主 GUI 10/10，以及 34/34 全版本×OS CI 矩阵。计划暂保留 active 仅因为分支尚未经过 PR 评审/合并，且用户明确要求本阶段不执行发布动作；这不表示实现或矩阵证据仍有缺口。
