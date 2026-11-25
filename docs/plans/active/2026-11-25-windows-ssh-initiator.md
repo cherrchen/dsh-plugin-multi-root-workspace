@@ -19,7 +19,7 @@
 | W0 | BLOCKED | 需求与实际基线一致；已找到平台、连接、准入、凭据和 I/O 接缝 | 两版上游合同；真实 Windows Node/Electron 和至少两个真实 WSL 环境，或明确各自阻塞；分别判定 B/C |
 | W1 | PASS (限定：共享接缝、本机回归) | 官方 provider 的实际接入合同明确；记录 POSIX 基线 | 通过共享运行时接缝运行原有 POSIX 用例；缺包与 Windows 门禁不改；无 Root 迁移 |
 | W2 | BLOCKED（身份与 IPC 基础完成；原生配置、文件 I/O、切换未验收） | W1 合同稳定；Windows 共用信任边界明确 | 配置及本地文件授权/发布、后端身份、切换及多 Host 一致性用例通过；未验证 capability 关闭 |
-| W3-B | NOT_STARTED | W1/W2 可用；W0-B 已验证或明确限定为不可发布的开发验证 | 严格主机验证、官方 Helper RPC、TLS PSK、SFTP、管理和清理通过 Windows Node/Electron 实机与独立版本门禁 |
+| W3-B | BLOCKED（开发切片：命令与 Helper 控制面校验完成；实机、TLS PSK、SFTP、管理未验收） | W1/W2 可用；W0-B 已验证或明确限定为不可发布的开发验证 | 严格主机验证、官方 Helper RPC、TLS PSK、SFTP、管理和清理通过 Windows Node/Electron 实机与独立版本门禁 |
 | W3-C | NOT_STARTED | W1/W2 可用；在所选真实发行版上验证 stdio/依赖/退出 | 显式多发行版选择与初始化、manifest ACK、管理与工具、异常清理及代次隔离通过 |
 | W4 | NOT_STARTED | W1/W2 可用；分别确认 B/C 的可验收项 | 现有 SSH Settings/i18n，完整用户旅程，真实矩阵、安装制品、回归、评审及发布决策 |
 
@@ -31,7 +31,7 @@
 
 L1–L3：现有 `ssh-*`、`remote-*` 合同、Registry/多 Host、传输并发与客户端 Settings；L4–L5：Linux/macOS POSIX 对照、Windows OpenSSH 与 WSL 各自 Node/Electron 至 Linux，Windows B/C 至 macOS、两发行版同名 alias、Windows 文件 ACL/NTFS 和进程退出；L6：typecheck、lint、build、兼容、许可、文档、pack 和 packed smoke。未实跑的矩阵格标 `NOT_RUN` / `BLOCKED`。
 
-原生先决条件探针（无网络、无安装）：在 Windows 执行 `node scripts/probe-windows-ssh-initiator.mjs windows-openssh`，以及 `node scripts/probe-windows-ssh-initiator.mjs wsl "<发行版 A>" "<发行版 B>"`。只启动显式列出的发行版。该脚本不验证 sshd、Helper、PSK 或托管凭据。
+原生先决条件探针（无网络、无安装）：在 Windows 执行 `node scripts/probe-windows-ssh-initiator.mjs windows-openssh`，以及 `node scripts/probe-windows-ssh-initiator.mjs wsl "<发行版 A>" "<发行版 B>"`。只启动显式列出的发行版。Helper 控制面探针（一次性测试设施，连接显式给出的 alias，不读取个人凭据）：`node scripts/probe-windows-ssh-initiator.mjs windows-openssh-helper <alias> <remote-node> <remote-helper> <canonical-workspace> <entry-sha256> <linux|darwin>`，见 W3-B 阶段报告。该脚本不验证 sshd、PSK 或托管凭据。
 
 ## W0 阶段报告
 
@@ -88,6 +88,26 @@ W1 未跑跨平台矩阵与任何原生实测；Windows capability 保持关闭�
 POSIX 旧行为未动：不传 `initiator` 时摘要与投影逐字节一致（选项缺席即 POSIX）；`storeIdentity` POSIX 路径与管道名不变。
 
 未验收/未实现（W2 维持关闭）：原生配置读写与 ACL/`getuid`/mode 保护、config 文件系统与本地 I/O、身份切换与多 Host 一致性均未实施；Windows 命名管道真实行为 `NOT_RUN`（本机无 Windows）。调查记录：`src/worktrees/native-io.ts` 已有 Win32 路径钉扎的读取句柄（卷级 metadata handle），但没有 Windows 稳定传输 `fileState` 与 no-replace 发布——本地 transfer gate 不移除。生产路径保持关闭。
+
+## W3-B 阶段报告
+
+基准 HEAD `cbf0a10`（W2 提交后，工作区干净）。本轮为受限开发切片：只交付 Windows OpenSSH 命令构造与官方 Helper 控制面校验，未做任何生产启用、TLS PSK、SFTP 或管理面声明。
+
+变更面：
+
+- 新增 `src/remote/initiator/windows-openssh.ts`：`windowsSystem32`（仅接受盘符 SystemRoot，拒绝 UNC/根相对/盘相对/NUL）、`windowsOpenSshCommands`（`System32/OpenSSH` 下 ssh/ssh-keygen/ssh-keyscan 三个绝对路径）、`windowsOpenSshHelperArgs`（alias 白名单、远端 node/helper 必须 POSIX 绝对路径、托管 config 必须盘符绝对路径；argv 为 `-T`、可选 `-F`、BatchMode/StrictHostKeyChecking/ForwardAgent=no/ClearAllForwardings/UpdateHostKeys=no/ConnectTimeout/ServerAlive，尾部 `<alias> '<node>' '--disable-sigusr1' '<helper>'` 单引号转义命令；无 `-M`/`-S` 复用、无 `/dev/null`）。
+- `scripts/probe-windows-ssh-initiator.mjs`：`windows-openssh` 分支改用 `windowsOpenSshCommands()` 三个路径，并 `statSync` 拒绝缺失的 `ssh-keyscan`（不发起网络扫描）；新增 `windows-openssh-helper` 分支，恰 6 参 `[alias, node, helper, workspace, digest, platform]`，`probeHelper` 经官方 `SshRpcPeer` 发 `hello`（断言 hash/kind=`node-script`/platform/workspace/无 bootstrapHash）、`heartbeat`、`close` 并各自确认，`SSH_PROTOCOL_VERSION !== 3` 直接拒绝；`main` 改 async。探针 argv 只接受显式操作者输入，无生产挂载、不读取个人凭据。
+- 新增 `tests/windows-ssh-initiator.spec.ts`：纯 argv 断言，5 用例，不启动进程、不访问网络。
+
+验证（本机 macOS arm64 / Node 24.18.0 / pnpm 11.25.0，`pnpm_config_verify_deps_before_run=false`）：`pnpm exec vitest run tests/windows-ssh-initiator.spec.ts` —— 1 文件、5 通过，exit 0；`pnpm typecheck` exit 0；`pnpm exec oxlint` 两个新文件 exit 0；`node --check scripts/probe-windows-ssh-initiator.mjs` exit 0；`node scripts/probe-windows-ssh-initiator.mjs windows-openssh` 在 macOS 按设计输出 BLOCKED、exit 2。
+
+可复制的原生验证命令（Windows Node/Electron，连接一次性测试设施）：
+
+```
+node scripts/probe-windows-ssh-initiator.mjs windows-openssh-helper <alias> <remote-node> <remote-helper> <canonical-workspace> <entry-sha256> <linux|darwin>
+```
+
+未验收/未实现（W3-B 维持关闭）：真实 Windows OpenSSH 执行、官方 Helper 实机握手、TLS PSK、SFTP、管理命令路由与异常清理均 `NOT_RUN`（本机无 Windows）；生产路径未接线，`capability` 门禁未动，Windows 远端控制面保持关闭。
 
 ## 恢复与验收
 
