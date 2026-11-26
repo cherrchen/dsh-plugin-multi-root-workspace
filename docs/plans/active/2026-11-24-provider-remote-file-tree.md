@@ -257,12 +257,12 @@
 
 - SFTP path probe 的调用方取消和 30 秒期限覆盖整个 `realpath`/`lstat` 生命周期；owned files 通道在探测静默时以一次 memoized dispose 打断，非 owned 共享登记通道只结束探测竞态、不被牺牲。
 - `scripts/live-remote-gui.mjs` 的远端夹具改为每轮 `mktemp -d /root/dsh-live-browse.XXXXXXXX`；路径形状经白名单校验后才用于填充/清理，创建失败或路径非法时绝不执行远端删除。
-- `RemoteFilesClient.list` 增加与 Host 上限 4 相同的客户端 FIFO 名额；排队请求可在到达 RPC 前取消，开始后的请求沿用原调用信号，`wait` 授权租约不占用列举名额。Host 契约仍是零排队、超额即拒。
+- `RemoteFilesClient.list` 增加与 Host 上限 4 相同的客户端 FIFO 名额；排队请求可在到达 RPC 前取消，开始后的请求沿用原调用信号，`wait` 授权租约不占用列举名额。Host 契约仍是零排队、超额即拒；取消在途 RPC 后 Host 后台清理造成的短暂 `resource-budget` 在 12 秒预算内退避重试，重试等待仍持有本地名额且可取消。
 - fork store 的已删除目录子树清理改用当前 provider 的 `joinChild`，POSIX 名字末尾的字面反斜杠不再被本地默认分隔符规则吞掉；`FORK.md` 已记录该差集。
 - provider 失效只遗忘 `searchStateKey(tab, provider)` 的搜索记录；同页签其他根（包括本地根）的查询与搜索栏状态保留，页签真实关闭仍走 `forgetTab`。
-- `RemoteFilesService.list` 在释放并发名额和完成 `dispose()` 前排空已进入 dirty-loop 的通知重准入；调用方取消仍可提前返回，但后台 Registry 工作不会越过资源记账边界。
+- `RemoteFilesService.list` 在释放并发名额和完成 `dispose()` 前排空已进入 dirty-loop 的通知重准入；成功路径先停止接收通知、排空已启动重查，再做一次新的有序准入，因此读到较新撤权的旧重查不会让目录数据成功返回。调用方取消仍可提前返回，但后台 Registry 工作不会越过资源记账边界。
 
-回归覆盖：`tests/ssh-verifier.spec.ts`（静默 `realpath` 取消、静默 `lstat` 超时均只 dispose 一次）、`tests/live-remote-fixture.spec.ts`（路径形状、populate 无 `rm -rf`、创建失败零远端删除）、`tests/client-remote-files-client.spec.ts`（第 5 个列举本地排队、槽位释放后启动、排队取消从未到达 RPC）、`tests/client-files-provider.spec.ts`（父名以字面反斜杠结尾时删除子目录后其真实树键子树被清除）、`tests/client-search-ownership.spec.ts`（远端失效不清除同页签本地搜索）、`tests/remote-files-service.spec.ts`（通知触发的准入未收尾前列举名额保持占用）。
+回归覆盖：`tests/ssh-verifier.spec.ts`（静默 `realpath` 取消、静默 `lstat` 超时均只 dispose 一次）、`tests/live-remote-fixture.spec.ts`（路径形状、populate 无 `rm -rf`、创建失败零远端删除）、`tests/client-remote-files-client.spec.ts`（第 5 个列举本地排队、槽位释放后启动、排队取消从未到达 RPC、取消在途后的短暂 `resource-budget` 退避重试成功）、`tests/client-files-provider.spec.ts`（父名以字面反斜杠结尾时删除子目录后其真实树键子树被清除）、`tests/client-search-ownership.spec.ts`（远端失效不清除同页签本地搜索）、`tests/remote-files-service.spec.ts`（通知触发的准入未收尾前列举名额保持占用；已排空重查读到较新撤权时最终有序准入拒绝返回目录数据）。
 
 ### 未跑项与限制（诚实记录）
 

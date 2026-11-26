@@ -480,18 +480,73 @@ describe.skipIf(process.platform === 'win32')('remoteFiles.list admission', () =
       await registerRemote(world!, 'device', 'out')
       const pending = svc.list(request({ authorization: await authorization() }) as never)
         .then(() => { settled = true; return 'ok' as const }, (error: RemoteFilesError) => error.code)
-      await vi.waitFor(() => { expect(admissions).toBe(3) })
+      await vi.waitFor(() => { expect(admissions).toBe(2) })
       await new Promise(resolve => setTimeout(resolve, 30))
-      // The bytes and the final admission have completed, but the notification
-      // recheck is still inside the registry. Neither the caller-visible run
-      // nor the concurrency slot may retire ahead of it.
+      // The bytes have completed, but the notification recheck is still
+      // inside the registry. Neither the caller-visible run nor the
+      // concurrency slot may retire ahead of it and its final re-admission.
       expect(settled).toBe(false)
       expect((svc as unknown as { active: number }).active).toBe(1)
       releaseRecheck?.()
       expect(await pending).toBe('ok')
+      expect(admissions).toBe(3)
       await vi.waitFor(() => { expect((svc as unknown as { active: number }).active).toBe(0) })
     } finally {
       releaseRecheck?.()
+      await svc.dispose()
+    }
+  })
+
+  it('does not return bytes when the drained recheck saw a newer revocation', async () => {
+    await mount({ seed: { device: { '/srv/root/x.txt': 'x' } } })
+    const listeners = new Set<() => void>()
+    let admissions = 0
+    let rejectRecheck: (() => void) | undefined
+    const revokedRegistry: RemoteFilesRegistry = {
+      get remoteManifest() { return world!.stack.registry.remoteManifest },
+      onRemoteChange: listener => {
+        listeners.add(listener)
+        return () => { listeners.delete(listener) }
+      },
+      withRemoteFilesRead: (sessionId, endpoint, body) => {
+        admissions++
+        if (admissions === 2) {
+          return new Promise((_, reject) => {
+            rejectRecheck = () => { reject(new RemoteFilesError('binding-changed')) }
+          })
+        }
+        if (admissions === 3) throw new RemoteFilesError('binding-changed')
+        return world!.stack.registry.withRemoteFilesRead(sessionId, endpoint, body)
+      },
+    }
+    class NotifyManager extends FilesManager {
+      override async openFilesSftp(environmentId: string, signal: AbortSignal, expectedDigest: string) {
+        const env = await super.openFilesSftp(environmentId, signal, expectedDigest)
+        const inner = env.client
+        const client = {
+          realpath: (path: string) => inner.realpath(path),
+          lstat: (path: string) => inner.lstat(path),
+          readdirBounded: async (path: string, readSignal: AbortSignal) => {
+            const listing = await inner.readdirBounded(path, readSignal)
+            for (const listener of listeners) listener()
+            return listing
+          },
+        }
+        return { ...env, client: client as unknown as SftpClient }
+      }
+    }
+    const svc = new RemoteFilesService(revokedRegistry, new NotifyManager(world!), world!.ctx.logger)
+    try {
+      await registerRemote(world!, 'device', 'out')
+      const pending = svc.list(request({ authorization: await authorization() }) as never)
+        .then(() => 'ok' as const, (error: RemoteFilesError) => error.code)
+      await vi.waitFor(() => { expect(admissions).toBe(2) })
+      await new Promise(resolve => setTimeout(resolve, 30))
+      rejectRecheck?.()
+      expect(await pending).toBe('binding-changed')
+      expect(admissions).toBe(3)
+    } finally {
+      rejectRecheck?.()
       await svc.dispose()
     }
   })

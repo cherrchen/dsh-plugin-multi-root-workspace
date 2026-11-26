@@ -105,7 +105,7 @@ client.apply（src/client/index.ts）
        → invalidateNow(owner,key) 校验仍为当前接管后中止+遗忘并回退 primary
 ```
 
-浏览器侧的 `RemoteFilesClient` 对 `remoteFiles.list` 维持一个同 Host 上限（4）一致的本地 FIFO 名额。它不改变 Host「零排队、超额即拒」的契约，而是避免同一棵树的一次刷新把超出名额的兄弟目录直接打成 `resource-budget`；排队期间可被取消且从未到达 RPC，开始后沿用调用者信号。授权租约 `wait` 有自己的 16 并发预算，不经过该列举名额。Host 侧列举在释放名额或完成服务卸载前，必须先等待已进入 dirty-loop 的通知重准入收尾；调用方仍可因取消竞态提前返回。
+浏览器侧的 `RemoteFilesClient` 对 `remoteFiles.list` 维持一个同 Host 上限（4）一致的本地 FIFO 名额。它不改变 Host「零排队、超额即拒」的契约，而是避免同一棵树的一次刷新把超出名额的兄弟目录直接打成 `resource-budget`；排队期间可被取消且从未到达 RPC，开始后沿用调用者信号。已取消的在途 RPC 可能先于 Host 后台清理返回，因此 `resource-budget`（契约中本即 retryable）在 12 秒重试预算内按短指数退避重试；重试等待仍持有本地名额且可取消。授权租约 `wait` 有自己的 16 并发预算，不经过该列举名额。Host 侧列举在释放名额或完成服务卸载前，必须先等待已进入 dirty-loop 的通知重准入收尾；成功返回前再按租约结束顺序做一次新的有序准入，调用方仍可因取消竞态提前返回。
 
 ### 5.3 失效错误码的处理二分
 

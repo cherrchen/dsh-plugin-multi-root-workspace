@@ -451,9 +451,18 @@ export class RemoteFilesService {
         // SFTP offers no fd-bound listing: the same canonical probes repeat
         // AFTER the read so a swap landing mid-listing still fails closed.
         await this.probe(env.client, admitted, request.relativePath, signal)
-        await this.admit(request, admitted.token)
         signal.throwIfAborted()
         if (!env.live()) throw new RemoteFilesError('connection-lost')
+        // Finish in the authorization lease's order: stop taking newer
+        // notifications, drain the recheck already admitted into the dirty
+        // loop, then require a NEW ordered admission. A recheck that ordered
+        // before a newer revoke can never stand in for the final proof.
+        done = true
+        unsubscribe()
+        if (rechecking !== undefined) await rechecking
+        signal.throwIfAborted()
+        await this.admit(request, admitted.token)
+        signal.throwIfAborted()
         return listing
       } finally {
         done = true

@@ -75,6 +75,23 @@ const failureOf = (error: unknown, signal: AbortSignal): RemoteFilesError => {
     : unavailable()
 }
 
+/** Cancellation-aware sleep used only while a locally admitted retry still holds its scheduler slot. */
+function retryAfter(ms: number, signal: AbortSignal): Promise<void> {
+  return new Promise<void>((resolve, reject) => {
+    const timer = setTimeout(() => {
+      signal.removeEventListener('abort', cancel)
+      resolve()
+    }, ms)
+    const cancel = (): void => {
+      clearTimeout(timer)
+      signal.removeEventListener('abort', cancel)
+      reject(new RemoteFilesError('cancelled'))
+    }
+    signal.addEventListener('abort', cancel, { once: true })
+    if (signal.aborted) cancel()
+  })
+}
+
 /**
  * The browser-side listing scheduler. It exists because the Host's cap is a
  * refusal, not a queue: overflow would surface as a spurious per-directory
@@ -151,14 +168,34 @@ export function createRemoteFilesClient(connection: Channel): RemoteFilesClient 
   }
   return {
     list: async (request, signal) => {
-      await listGate.acquire(signal)
-      try {
-        const value = await call(REMOTE_FILES_LIST, { ...request }, signal)
-        const parsed = remoteFilesListing.safeParse(value)
-        if (!parsed.success) throw new RemoteFilesError('invalid-listing')
-        return parsed.data
-      } finally {
-        listGate.release()
+      // `resource-budget` is explicitly retryable. It can also be transiently
+      // caused by THIS client: a cancelled wire call answers before the Host
+      // has finished unwinding the slot it already admitted. Re-admitting a
+      // queued listing once is therefore not enough — while the retry budget
+      // lasts, a budget refusal waits (still cancellable, still holding its
+      // local slot) and tries again instead of turning one ordinary refresh
+      // into a missing directory.
+      let started: number | undefined
+      let refusals = 0
+      for (;;) {
+        await listGate.acquire(signal)
+        started ??= Date.now()
+        try {
+          const value = await call(REMOTE_FILES_LIST, { ...request }, signal)
+          const parsed = remoteFilesListing.safeParse(value)
+          if (!parsed.success) throw new RemoteFilesError('invalid-listing')
+          return parsed.data
+        } catch (error: unknown) {
+          if (!(error instanceof RemoteFilesError) || error.code !== 'resource-budget' || signal.aborted) throw error
+          const elapsed = Date.now() - started!
+          const remaining = REMOTE_FILES_LIMITS.deadlineMs - elapsed
+          if (remaining <= 0) throw error
+          const backoff = Math.min(25 * 2 ** refusals, 200, remaining)
+          refusals++
+          await retryAfter(backoff, signal)
+        } finally {
+          listGate.release()
+        }
       }
     },
     wait: async (request, signal) => {
