@@ -197,6 +197,67 @@ describe('a watch-less provider through the real face and store', () => {
     // The stale entry never overwrote it.
     expect(JSON.stringify(instance.getSnapshot().byTab[bucket])).not.toContain('stale.ts')
   })
+
+
+  it('prunes a deleted child with the provider join rule when its parent name ends in a literal backslash', async () => {
+    const instance = createFilesStore().create('spec')
+    const face = filesFace(instance.actions)
+    const root: WorkspaceRootRef = { kind: 'remote', environmentId: 'env-1', rootId: 'r-1' }
+    const treeRoot = '/mrfw'
+    const parentName = 'literal\\'
+    const parentKey = `${treeRoot}/${parentName}`
+    const childKey = `${parentKey}/sub`
+    let parentEntries: { readonly name: string; readonly type: 'directory' }[] = [{ name: 'sub', type: 'directory' }]
+    let parentLists = 0
+    const provider: WorkspaceFilesProvider = {
+      identity: { sessionId: SESSION, root, incarnation: 'grant-1' },
+      treeRoot,
+      joinChild: (parent, name) => `${parent}/${name}`,
+      resource: (treePath) => {
+        if (treePath === treeRoot) return { root, relativePath: '' }
+        const prefix = `${treeRoot}/`
+        return treePath.startsWith(prefix) ? { root, relativePath: treePath.slice(prefix.length) } : undefined
+      },
+      listDirectory: async (resource): Promise<DirectoryListing> => {
+        if (resource.relativePath === '') {
+          return { ok: true, value: { entries: [{ name: parentName, type: 'directory' }], truncated: false } }
+        }
+        if (resource.relativePath === parentName) {
+          parentLists++
+          return { ok: true, value: { entries: parentEntries, truncated: false } }
+        }
+        if (resource.relativePath === `${parentName}/sub`) {
+          return { ok: true, value: { entries: [{ name: 'old.txt', type: 'file' }], truncated: false } }
+        }
+        return { ok: true, value: { entries: [], truncated: false } }
+      },
+    }
+    const controller = new AbortController()
+    const bucket = treeBucketId(OWNER, provider.identity)
+    face.hold(bucket, provider, controller.signal)
+    await vi.waitFor(() => {
+      expect(instance.getSnapshot().byTab[bucket]?.levels[treeRoot]?.kind).toBe('ready')
+    })
+
+    face.toggle(bucket, treeRoot, parentKey, instance.getSnapshot().byTab[bucket]!.expanded, controller.signal)
+    await vi.waitFor(() => {
+      expect(instance.getSnapshot().byTab[bucket]?.levels[parentKey]?.kind).toBe('ready')
+    })
+    face.toggle(bucket, parentKey, childKey, instance.getSnapshot().byTab[bucket]!.expanded, controller.signal)
+    await vi.waitFor(() => {
+      expect(instance.getSnapshot().byTab[bucket]?.levels[childKey]?.kind).toBe('ready')
+    })
+    expect(instance.getSnapshot().byTab[bucket]?.expanded).toContain(childKey)
+
+    parentEntries = []
+    face.refresh(bucket)
+    await vi.waitFor(() => { expect(parentLists).toBe(2) })
+    await new Promise(resolve => setTimeout(resolve, 0))
+    const state = instance.getSnapshot().byTab[bucket]
+    expect(state?.levels[childKey]).toBeUndefined()
+    expect(state?.expanded).not.toContain(childKey)
+    expect(state?.expanded).toContain(parentKey)
+  })
 })
 
 describe('row gestures through rowActions', () => {

@@ -465,6 +465,11 @@ export class RemoteFilesService {
       }
     } finally {
       unsubscribe()
+      // A notification already admitted into the dirty-loop is part of this
+      // listing's ordered work. Drain it before `run` settles: the caller may
+      // still win the cancellation race early, but the listing slot and the
+      // service-dispose barrier never release ahead of the registry request.
+      if (rechecking !== undefined) await rechecking
     }
   }
 

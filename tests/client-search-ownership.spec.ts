@@ -72,6 +72,20 @@ describe('the search records ownership', () => {
     expect(injected.search.state(keyB)).toMatchObject({ query: 'config' })
   })
 
+  it('provider invalidation drops only that provider’s record in the same tab', () => {
+    const { injected } = product(seats(), 'session-a')
+    const invalidated = searchStateKey(TAB_A, OTHER)
+    const local = searchStateKey(TAB_A, ROOT)
+    injected.search.setQuery(invalidated, 'remote query')
+    injected.search.setQuery(local, 'local query')
+    injected.takeover.signal(TAB_A, OTHER)
+
+    injected.takeover.invalidate(TAB_A, OTHER)
+
+    expect(injected.search.state(invalidated)).toMatchObject({ query: '' })
+    expect(injected.search.state(local)).toMatchObject({ query: 'local query' })
+  })
+
   it("keeps a tab's records when only the body unmounts", () => {
     const { injected } = product(seats(), 'session-a')
     const key = searchStateKey(TAB_B, ROOT)

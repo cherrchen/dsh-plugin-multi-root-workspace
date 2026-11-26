@@ -152,7 +152,7 @@ export function filesFace(
       // A newer listing of this level was asked for since, or the record is
       // gone and its bookkeeping with it: nothing left for this one to write.
       if (stale()) return
-      if (result.ok) actions.loaded(tabId, path, result.value)
+      if (result.ok) actions.loaded(tabId, path, result.value, provider.joinChild)
       else actions.failed(tabId, path, result.error)
       return result.ok ? result.value : undefined
     }, (error: unknown) => {

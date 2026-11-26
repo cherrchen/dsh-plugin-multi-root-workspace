@@ -11,12 +11,19 @@
  * answer) collapses to `provider-unavailable`, and an aborted caller signal
  * reports `cancelled` — matching what the host itself would answer.
  *
+ * The Host deliberately refuses a fifth concurrent listing instead of
+ * queueing it. A tree refresh can fan out wider than that inside this one
+ * browser client, so `list` calls are scheduled here at the same cap; the
+ * local wait is cancellation-aware (a hidden/switched/closed tree never
+ * reaches the wire) and never applies to authorization leases.
+ *
  * @module @dsh-electron/dsh-plugin-multi-root-workspace/client/remote-files-client
  */
 import { PANEL_CHANNEL } from '../contract.ts'
 import {
   REMOTE_FILES_AUTHORIZATION_WAIT,
   REMOTE_FILES_FAILURES,
+  REMOTE_FILES_LIMITS,
   REMOTE_FILES_LIST,
   RemoteFilesError,
   remoteFilesAuthorizationAnswer,
@@ -69,11 +76,67 @@ const failureOf = (error: unknown, signal: AbortSignal): RemoteFilesError => {
 }
 
 /**
+ * The browser-side listing scheduler. It exists because the Host's cap is a
+ * refusal, not a queue: overflow would surface as a spurious per-directory
+ * `resource-budget` during one ordinary tree refresh. Waiting callers hold no
+ * Host resources, and aborting one removes it before any wire call is made.
+ */
+function createListGate(): {
+  readonly acquire: (signal: AbortSignal) => Promise<void>
+  readonly release: () => void
+} {
+  let active = 0
+  const waiting: { readonly start: () => void; readonly cancel: () => void }[] = []
+  const pump = (): void => {
+    while (active < REMOTE_FILES_LIMITS.concurrent && waiting.length !== 0) {
+      waiting.shift()!.start()
+    }
+  }
+  return {
+    acquire: async signal => {
+      if (signal.aborted) throw new RemoteFilesError('cancelled')
+      if (active < REMOTE_FILES_LIMITS.concurrent) {
+        active++
+        return
+      }
+      await new Promise<void>((resolve, reject) => {
+        let settled = false
+        const waiter = {
+          start: (): void => {
+            if (settled) return
+            settled = true
+            signal.removeEventListener('abort', waiter.cancel)
+            active++
+            resolve()
+          },
+          cancel: (): void => {
+            if (settled) return
+            settled = true
+            const at = waiting.indexOf(waiter)
+            if (at >= 0) waiting.splice(at, 1)
+            signal.removeEventListener('abort', waiter.cancel)
+            reject(new RemoteFilesError('cancelled'))
+          },
+        }
+        waiting.push(waiter)
+        signal.addEventListener('abort', waiter.cancel, { once: true })
+        if (signal.aborted) waiter.cancel()
+      })
+    },
+    release: () => {
+      active--
+      pump()
+    },
+  }
+}
+
+/**
  * Build the remote-files client.
  * @param connection - the client Connection service.
  * @returns the client, with every failure normalized to the fixed vocabulary.
  */
 export function createRemoteFilesClient(connection: Channel): RemoteFilesClient {
+  const listGate = createListGate()
   const call = async (endpoint: string, payload: Record<string, unknown>, signal: AbortSignal): Promise<unknown> => {
     signal.throwIfAborted()
     let result: { ok: boolean; value?: unknown; error?: { code?: unknown } }
@@ -88,10 +151,15 @@ export function createRemoteFilesClient(connection: Channel): RemoteFilesClient 
   }
   return {
     list: async (request, signal) => {
-      const value = await call(REMOTE_FILES_LIST, { ...request }, signal)
-      const parsed = remoteFilesListing.safeParse(value)
-      if (!parsed.success) throw new RemoteFilesError('invalid-listing')
-      return parsed.data
+      await listGate.acquire(signal)
+      try {
+        const value = await call(REMOTE_FILES_LIST, { ...request }, signal)
+        const parsed = remoteFilesListing.safeParse(value)
+        if (!parsed.success) throw new RemoteFilesError('invalid-listing')
+        return parsed.data
+      } finally {
+        listGate.release()
+      }
     },
     wait: async (request, signal) => {
       const value = await call(REMOTE_FILES_AUTHORIZATION_WAIT, { ...request }, signal)

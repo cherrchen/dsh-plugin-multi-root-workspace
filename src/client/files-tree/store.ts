@@ -14,6 +14,7 @@ import { defineStore, type EngineStoreHandle } from '@deepseek-ai/dsh-client-sto
 import type { RemoteFailure } from '@deepseek-ai/dsh-api-remotes/client'
 import type { TabId } from '@deepseek-ai/dsh-client-ui-dockkit'
 import type { WorkspaceDirectoryEntry } from '@deepseek-ai/dsh-api-workspace-files/types'
+import { childPath, type JoinTreeChild } from './resource-path.ts'
 
 /**
  * One directory's contents, as one expanded level of the tree.
@@ -75,7 +76,7 @@ type FilesActions = {
   autoRefresh: (draft: FilesState, tabId: TabId, enabled: boolean) => void
   start: (draft: FilesState, tabId: TabId, root: string) => void
   loading: (draft: FilesState, tabId: TabId, path: string) => void
-  loaded: (draft: FilesState, tabId: TabId, path: string, level: DirLevel) => void
+  loaded: (draft: FilesState, tabId: TabId, path: string, level: DirLevel, joinChild?: JoinTreeChild) => void
   failed: (draft: FilesState, tabId: TabId, path: string, failure: RemoteFailure) => void
   toggled: (draft: FilesState, tabId: TabId, path: string) => void
   scrolled: (draft: FilesState, tabId: TabId, scrollTop: number) => void
@@ -121,14 +122,14 @@ export function createFilesStore(): EngineStoreHandle<FilesState, FilesActions> 
        * @param path - absolute directory path.
        * @param level - the listing to show under it.
        */
-      loaded: (d, tabId: TabId, path: string, level: DirLevel) => {
+      loaded: (d, tabId: TabId, path: string, level: DirLevel, joinChild: JoinTreeChild = childPath) => {
         const state = bucket(d, tabId)
         const previous = state.levels[path]
         if (previous?.kind === 'ready') {
           const directories = new Set(level.entries.filter(entry => entry.type === 'directory').map(entry => entry.name))
           for (const entry of previous.level.entries) {
             if (entry.type !== 'directory' || directories.has(entry.name)) continue
-            const removed = `${path.replace(/[/\\]+$/, '')}/${entry.name}`
+            const removed = joinChild(path, entry.name)
             state.expanded = state.expanded.filter(value => value !== removed && !value.startsWith(`${removed}/`))
             state.levels = Object.fromEntries(Object.entries(state.levels)
               .filter(([key]) => key !== removed && !key.startsWith(`${removed}/`)))

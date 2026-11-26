@@ -16,9 +16,10 @@
  *      `readdir` on the VPS — and a second listing happens on expand.
  *
  * Safety: never writes to the real `$DSH_HOME` (read-only copy source), never
- * touches the remote host outside `/root/dsh-live-browse` (created, used, and
- * removed by this run), and every host artifact lives under
- * `.dsh-smoke/live-gui/` (wiped and recreated on each run).
+ * touches the remote host outside one per-run `mktemp` directory under
+ * `/root/dsh-live-browse.*` (created, used, and removed by this run only),
+ * and every host artifact lives under `.dsh-smoke/live-gui/` (wiped and
+ * recreated on each run).
  *
  * Run: `DSH_LIVE_GUI=1 node scripts/live-remote-gui.mjs`
  *
@@ -32,13 +33,19 @@ import { dirname, join } from 'node:path'
 import { createChecker } from './lib/check.mjs'
 import { packTarball } from './check-pack.mjs'
 import { bootProfile } from './lib/profile-boot.mjs'
+import {
+  cleanupCreatedLiveRemoteFixture,
+  LIVE_REMOTE_FIXTURE_CREATE,
+  liveRemoteFixturePopulateScript,
+  validLiveRemoteFixtureBase,
+} from './lib/live-remote-fixture.mjs'
 import { assertIsolatedHome, captureDsh, installPluginProfile, loadRuntimeModule, REPO_ROOT, runtimeRequire } from './lib/dsh-runtime.mjs'
 import { chatCompletionFrames, messagesFrames } from './lib/scripted-model-frames.mjs'
 
 if (process.env.DSH_LIVE_GUI !== '1') {
   console.error([
     'live-remote-gui: refusing to run without DSH_LIVE_GUI=1.',
-    'This harness drives the REAL user VPS over SSH (fixture /root/dsh-live-browse),',
+    'This harness drives the REAL user VPS over SSH (a per-run /root/dsh-live-browse.* fixture),',
     'boots a scratch DSH web profile, and drives headless Chrome through the real UI.',
     'Run explicitly: DSH_LIVE_GUI=1 node scripts/live-remote-gui.mjs',
   ].join('\n'))
@@ -63,7 +70,6 @@ const SSH_ROOT = join(STORAGES, 'multi_root_workspace.ssh')
 const SSH_CONFIG = join(SSH_ROOT, 'ssh_config')
 
 const SESSION_ID = 'live-remote-gui'
-const REMOTE_BASE = '/root/dsh-live-browse'
 const SFTP_ENV = 'ali-sftp'
 const SFTP_ROOT = 'live-browse'
 const HELPER_ENV = 'ali'
@@ -74,7 +80,7 @@ const evidence = {
   harness: 'live-remote-gui', startedAt: new Date().toISOString(),
   dshVersion: undefined, tarball: undefined, sessionId: SESSION_ID,
   scratchHome: HOME, workspace: undefined, port: undefined,
-  remoteFixture: REMOTE_BASE, store: {}, screenshots: {}, wire: [],
+  remoteFixture: undefined, store: {}, screenshots: {}, wire: [],
   remoteRows: undefined, registerOutcomes: {}, listings: {}, remotesView: undefined,
   checks: [], notes: [],
 }
@@ -109,7 +115,7 @@ note(`scratch run dir: ${RUN}`)
  * Include already resolves it). The helper-less lane covers the original pure
  * SFTP transport; the opted-in `ali` lane covers the distinct Helper-object +
  * independent SFTP-path admission shape. */
-function seedPersonalStore() {
+function seedPersonalStore(remoteBase) {
   const stored = JSON.parse(readFileSync(REAL_ENV_FILE, 'utf8'))
   const ali = stored.environments.find(entry => entry.environmentId === HELPER_ENV)
   if (ali === undefined) throw new Error(`the real personal store has no "${HELPER_ENV}" environment to replicate`)
@@ -128,7 +134,7 @@ function seedPersonalStore() {
   writeFileSync(BINDINGS_FILE, JSON.stringify({
     schemaVersion: 1, revision: 1,
     bindings: [
-      { primary, environmentId: SFTP_ENV, rootId: SFTP_ROOT, bindingId: randomUUID(), path: REMOTE_BASE, directoryListing: 'stable-path', actions: ['read'] },
+      { primary, environmentId: SFTP_ENV, rootId: SFTP_ROOT, bindingId: randomUUID(), path: remoteBase, directoryListing: 'stable-path', actions: ['read'] },
       { primary, environmentId: HELPER_ENV, rootId: HELPER_ROOT, bindingId: randomUUID(), path: '/root/coding', actions: ['read'], directoryListing: 'stable-path' },
     ],
   }, null, 2), { mode: 0o600 })
@@ -167,24 +173,8 @@ function seedCredentialRoot() {
   evidence.store.credentialRoot = { source: REAL_SSH_ROOT, note: 'copied read-only; ssh_config paths rewritten to scratch' }
 }
 
-// Remote fixture on the VPS (fixture path only). `literal\\dir` reaches the
-// remote shell as one backslash inside double quotes — a literal-backslash dir.
-const FIXTURE_SCRIPT = [
-  'set -eu',
-  `base=${REMOTE_BASE}`,
-  'rm -rf "$base"',
-  'mkdir -p "$base/deep/inner" "$base/space dir" "$base/literal\\\\dir"',
-  'printf \'live-browse\\n\' > "$base/readme.txt"',
-  'printf \'unicode name\\n\' > "$base/uni-名字.md"',
-  'printf \'leaf of the live tree\\n\' > "$base/deep/inner/leaf.txt"',
-  'printf \'a file with a space\\n\' > "$base/space dir/a file.txt"',
-  'printf \'literal backslash dir\\n\' > "$base/literal\\\\dir/note.txt"',
-  'ln -s readme.txt "$base/alias.link"',
-  'find "$base" | sort',
-].join('\n')
-const CLEANUP_SCRIPT = `rm -rf ${REMOTE_BASE}`
-
 let ctx, model, browser, page, sessionId = SESSION_ID, guiError, fatal
+let remoteBase, remoteFixtureCreated = false
 
 function sshAli(script) {
   // The scratch ssh_config reuses the copied managed keypair + known_hosts.
@@ -217,12 +207,22 @@ try {
   evidence.tarball = { name: tarball.split('/').pop(), sha256: createHash('sha256').update(readFileSync(tarball)).digest('hex') }
   note(`packed ${evidence.tarball.name} (${evidence.tarball.sha256.slice(0, 12)}…)`)
 
-  seedPersonalStore()
   seedCredentialRoot()
-  note('scratch personal store seeded (ali verbatim + ali-sftp browsable; two bindings)')
 
-  note('creating the remote fixture on the VPS (fixture path only)')
-  const fixtureListing = sshAli(FIXTURE_SCRIPT)
+  note('creating the per-run remote fixture directory on the VPS')
+  const createdFixture = sshAli(LIVE_REMOTE_FIXTURE_CREATE).trim()
+  if (!validLiveRemoteFixtureBase(createdFixture)) {
+    throw new Error(`live-gui: mktemp returned an unsafe fixture path ${JSON.stringify(createdFixture)}`)
+  }
+  remoteBase = createdFixture
+  remoteFixtureCreated = true
+  evidence.remoteFixture = remoteBase
+
+  seedPersonalStore(remoteBase)
+  note(`scratch personal store seeded for ${remoteBase} (ali verbatim + ali-sftp browsable; two bindings)`)
+
+  note('populating the remote fixture on the VPS (this run\'s fixture path only)')
+  const fixtureListing = sshAli(liveRemoteFixturePopulateScript(remoteBase))
   evidence.store.fixture = fixtureListing.trim().split('\n')
   note(`fixture: ${fixtureListing.trim().split('\n').length} remote entries`)
 
@@ -714,10 +714,17 @@ try {
   try { await browser?.close() } catch { /* best effort */ }
   try { await ctx?.fiber.dispose() } catch { /* best effort */ }
   try { model?.close() } catch { /* best effort */ }
-  // `rm -rf` on an absent path is a no-op, so the cleanup is unconditional —
-  // it must still run when the run died between fixture creation and now.
-  try { sshAli(CLEANUP_SCRIPT); note(`remote fixture ${REMOTE_BASE} removed`) }
-  catch (error) { note(`fixture cleanup FAILED: ${error instanceof Error ? error.message : String(error)} — remove ${REMOTE_BASE} manually`) }
+  // Only a fixture whose mktemp creation succeeded in THIS run may be
+  // removed. A failed run before creation issues no remote deletion at all;
+  // a failure during population still cleans the unique directory this run
+  // provably created.
+  try {
+    const cleaned = cleanupCreatedLiveRemoteFixture(sshAli, remoteBase, remoteFixtureCreated)
+    if (cleaned) note(`remote fixture ${remoteBase} removed`)
+    else note('remote fixture cleanup skipped: this run did not create one')
+  } catch (error) {
+    note(`fixture cleanup FAILED: ${error instanceof Error ? error.message : String(error)} — remove ${remoteBase} manually`)
+  }
 }
 
 check.finish()

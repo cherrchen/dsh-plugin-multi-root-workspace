@@ -203,7 +203,7 @@
 | 真实 SSH（loopback） | 用户态 OpenSSH `sshd`（127.0.0.1，一次性 host/user 密钥，不触碰 `~/.ssh`、不用外部主机），生产 `SftpClient` 经生成 `ssh_config`（`-F`）连接——即 `listRemoteDirectories` 对托管个人环境使用的同一机制；SFTP v3 握手、根/嵌套 `readdirBounded`、字面 POSIX 名（空格 / Unicode / 字面反斜杠）逐字节透传、`realpath`/`lstat` 一致 | `tests/ssh-loopback.e2e.ts`（`DSH_MULTI_ROOT_SSH_LOOPBACK=1` 门禁，默认 skip），1/1 通过 |
 | GUI 截图（真 Chromium） | 同一 `client.apply` + 真实 `RootSwitcher`/`FilesPane` 在 headless Chromium（vitest browser mode + Playwright）渲染：菜单远端行、远端树绘制（含 Unicode/反斜杠名）、展开产生第二条 `remoteFiles.list` RPC、`withheld` 行禁用态；Host 侧为录制 stub（文档化） | `tests/client-remote-tree.browser.tsx` + `vitest.remote-tree-browser.config.ts`；截图 `.dsh-smoke/gui/remote-*.png`（4 张） |
 | `ssh -G` 身份校验边界 | `SshEnvironmentManager.openFilesSftp` 的身份检查走 `ssh -G <alias>`，当前调用没有传入隔离配置；本次没有改用户配置，也没有用 loopback 覆盖这段生产路径 | 本次仅由进程内规格覆盖；`DSH_MULTI_ROOT_SSH_LIVE` 未执行 |
-| **真实宿主 GUI 端到端（P7 补证）** | 打包 tarball 装入隔离 scratch `DSH_HOME` 的 `web` profile（四个 SSH peer 包经 `dsh plugin add` 装入 profile 依赖树，与线上 install-ssh-deps 同一机制）→ 进程内启动真实 `dsh web`（0.2.2-rc.5）→ 真实 Google Chrome 驱动：侧边栏开真实会话 → 右侧栏 Workspace files → Files pane → Workspace Folders 对话框远端区列出两个种子端点 → 行菜单登记 sftp（`Registered`、`browseAuthorization: present:64`）与 helper（`Registered`、`browseAuthorization: absent`）→ RootSwitcher 菜单 sftp 行可用、helper 行置灰「not browsable」→ 远端树绘制全部 7 个夹具项（`literal\dir`/`space dir`/`uni-名字.md`/`alias.link` 原样）→ `deep/inner` 两级展开再发两次 `remoteFiles.list`。远端夹具 `/root/dsh-live-browse` 每次运行前创建、结束即删；`~/.dsh` 仅只读复制（凭据 root + 清单），测试侧全在 scratch 目录 | `DSH_LIVE_GUI=1 node scripts/live-remote-gui.mjs`，**9/9 通过**；证据 `.dsh-smoke/live-gui/evidence/`（截图 01–08、DOM dump、`evidence.json`、wire 日志） |
+| **真实宿主 GUI 端到端（P7 补证）** | 打包 tarball 装入隔离 scratch `DSH_HOME` 的 `web` profile（四个 SSH peer 包经 `dsh plugin add` 装入 profile 依赖树，与线上 install-ssh-deps 同一机制）→ 进程内启动真实 `dsh web`（0.2.2-rc.5）→ 真实 Google Chrome 驱动：侧边栏开真实会话 → 右侧栏 Workspace files → Files pane → Workspace Folders 对话框远端区列出两个种子端点 → 行菜单登记 sftp（`Registered`、`browseAuthorization: present:64`）与 helper（`Registered`、`browseAuthorization: absent`）→ RootSwitcher 菜单 sftp 行可用、helper 行置灰「not browsable」→ 远端树绘制全部 7 个夹具项（`literal\dir`/`space dir`/`uni-名字.md`/`alias.link` 原样）→ `deep/inner` 两级展开再发两次 `remoteFiles.list`。远端夹具按每轮 `mktemp -d /root/dsh-live-browse.XXXXXXXX` 独立创建，仅清理由本轮创建成功的目录；`~/.dsh` 仅只读复制（凭据 root + 清单），测试侧全在 scratch 目录 | `DSH_LIVE_GUI=1 node scripts/live-remote-gui.mjs`，**9/9 通过**；证据 `.dsh-smoke/live-gui/evidence/`（截图 01–08、DOM dump、`evidence.json`、wire 日志） |
 | **真实 DSH↔SSH 全栈（P7 补证）** | 旧专用测试 VPS `64.118.149.252` 已在 SSH 层失联（TCP 通、banner 前断）；改用 `~/.dsh` 保存的真实 `ali` 环境（`8.137.81.239`，root，helper `/root/.dsh-helper/0.2.2-rc.5/helper-entry.mjs`）：`~/.dsh-ssh-test/` 新增 `live-ali.json`（复用清单里的 nodePath/helperPath/helperSha256/hostKey，`account`/`xfer*` 均 `root`、host 均 `dsh-ali`）并在其 `ssh_config` 追加 `dsh-ali` Host 块（IdentityFile/UserKnownHostsFile 引用受管路径，只读）+ `Host *` 补 `BatchMode yes`/`UpdateHostKeys no`（`parseSshConfig` 现行硬要求）。`remote_bash` 全组（注册/身份漂移/受限命令边界·截断·超时/中途撤权零 spawn/环境隔离与重开再生）、`remote_copy` 全组（sha256 校验、0B+1MiB 回环、既有目标/符号链接/多链接/源变更/撤权取消/并发单提交/下载/只读拒/relay/relay 变更/超预算拒/只读会话拒/未见证拒）全部实机通过 | `PATH=~/.dsh-ssh-test/bin:$PATH DSH_MULTI_ROOT_SSH_LIVE=~/.dsh-ssh-test/live-ali.json pnpm vitest run tests/remote-ssh.live.e2e.ts`，**19/19 通过**（38s）；夹具目录 `/root/dsh-live/{app,lib}`、`/root/dsh-live-outside/sentinel.txt`、`/import` 留在 VPS 供复跑 |
 
 ### P8 增量证据（Helper transport 浏览准入与统一能力编辑 UX）
@@ -250,6 +250,19 @@
 ### P7 补证期间新发现并已修的问题（真实 WAN 链路才暴露）
 
 - **`TransferIO` 清理窗口饥饿**：cleanup 路径共享的 1 秒窗口自**首次** `cleanupClient` 调用起算——`staging.finish()` 内的 `closeHandle` 与 `verify()` 内的 `close` 在 publish 的清理运行前就把窗口耗尽；本地/低延迟链路下各调用 <1ms 不会暴露，真实 VPS RTT 下 `verify`+`hardlink` 阶段轻易超过 1s，`remove()` 见到 `remaining <= 0` 即 `transfer-timeout` → 已提交的复制把 `.dsh-staging-<id>` 留成 `residual`。修复：cleanup 调用改为**逐次自有** 1 秒窗口（清理调用在结构上有限，逐次限界仍满足「有界、与取消无关」的设计意图）。`remote-copy` 系 4 份规格 61 用例回归通过；live e2e 11 个 residual 失败全部转通过。
+
+### PR #80 复审返工（取消、并发与键控清理）
+
+针对 `dae4915` 的三项 P2 与三项 P3 复审结论，本批修复为：
+
+- SFTP path probe 的调用方取消和 30 秒期限覆盖整个 `realpath`/`lstat` 生命周期；owned files 通道在探测静默时以一次 memoized dispose 打断，非 owned 共享登记通道只结束探测竞态、不被牺牲。
+- `scripts/live-remote-gui.mjs` 的远端夹具改为每轮 `mktemp -d /root/dsh-live-browse.XXXXXXXX`；路径形状经白名单校验后才用于填充/清理，创建失败或路径非法时绝不执行远端删除。
+- `RemoteFilesClient.list` 增加与 Host 上限 4 相同的客户端 FIFO 名额；排队请求可在到达 RPC 前取消，开始后的请求沿用原调用信号，`wait` 授权租约不占用列举名额。Host 契约仍是零排队、超额即拒。
+- fork store 的已删除目录子树清理改用当前 provider 的 `joinChild`，POSIX 名字末尾的字面反斜杠不再被本地默认分隔符规则吞掉；`FORK.md` 已记录该差集。
+- provider 失效只遗忘 `searchStateKey(tab, provider)` 的搜索记录；同页签其他根（包括本地根）的查询与搜索栏状态保留，页签真实关闭仍走 `forgetTab`。
+- `RemoteFilesService.list` 在释放并发名额和完成 `dispose()` 前排空已进入 dirty-loop 的通知重准入；调用方取消仍可提前返回，但后台 Registry 工作不会越过资源记账边界。
+
+回归覆盖：`tests/ssh-verifier.spec.ts`（静默 `realpath` 取消、静默 `lstat` 超时均只 dispose 一次）、`tests/live-remote-fixture.spec.ts`（路径形状、populate 无 `rm -rf`、创建失败零远端删除）、`tests/client-remote-files-client.spec.ts`（第 5 个列举本地排队、槽位释放后启动、排队取消从未到达 RPC）、`tests/client-files-provider.spec.ts`（父名以字面反斜杠结尾时删除子目录后其真实树键子树被清除）、`tests/client-search-ownership.spec.ts`（远端失效不清除同页签本地搜索）、`tests/remote-files-service.spec.ts`（通知触发的准入未收尾前列举名额保持占用）。
 
 ### 未跑项与限制（诚实记录）
 

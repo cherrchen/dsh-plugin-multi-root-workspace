@@ -45,7 +45,7 @@ import { filesMenuHookOf, filesMenuSeat, type FilesMenuKinds, type FilesMenuSeat
 import type { PanelClient } from '../panel-client.ts'
 import type { FilesSearchRun } from './search-client.ts'
 import type { WorkspaceSearchPreferenceBook } from './search-preferences.ts'
-import { createSearchPaneStore, type SearchPaneStates, type SearchPaneStore } from './search-state.ts'
+import { createSearchPaneStore, searchStateKey, type SearchPaneStates, type SearchPaneStore } from './search-state.ts'
 import type { FilesTreeProps } from './FilesTree.tsx'
 import { NS } from './locales.ts'
 import { NS as PLUGIN_NS } from '../locales.ts'
@@ -578,7 +578,7 @@ export function createFilesTreeSeats(
           // moved to a newer provider is somebody else's takeover.
           if (held === undefined || held.provider !== provider) return
           endTakeover(key, true)
-          searchStore.forgetTab(key)
+          searchStore.forget(searchStateKey(key, provider))
         },
         saved: (key, provider) => savedTrees.get(key)?.get(provider),
         save: (key, snapshot) => {

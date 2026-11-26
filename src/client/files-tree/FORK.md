@@ -60,7 +60,7 @@ which is always the primary root and cannot be re-pointed.
 | --- | --- |
 | `directory-node.ts` | the optional-watch delta: the constructor's `watch` may be `undefined` (a provider without `watchDirectory` gets an explicit initial `refresh()` in `open()` instead of a stream), the `joinChild` parameter customizes the child-key join (default `childPath`), and the automatic-refresh policy moved onto watch-event scheduling — a reader's manual refresh always runs, a watch event only reschedules while `automatic` is on |
 | `face.ts` | the hold/record lifecycle delta — `hold`/`release` keep the store bucket while a body is hidden, `start`/record-abort reseed/forget it (see *Intentional deltas*) — plus the provider delta: `filesFace(actions)` closes over no remote, `hold`/`start` receive the `WorkspaceFilesProvider`, the bucket is seeded at `provider.treeRoot`, every level key is mapped through `provider.resource(...)` before a port sees it, pending requests carry unique `Symbol()` tokens, and the watch is optional. `createList`/`createWatch` moved to `providers/local.ts`; `childPath` is re-exported from `resource-path.ts` |
-| `store.ts` | none — byte-identical |
+| `store.ts` | one documented join-rule delta: `loaded` accepts the provider's optional `joinChild` (default `childPath`) and uses exactly that tree-key spelling when pruning a deleted directory's expanded/level subtree, so a POSIX remote name ending in a literal backslash is not re-read as a separator |
 | `provider.ts` | plugin-owned contract (P1, ADR-0052): `WorkspaceRootRef`/`WorkspaceResourceRef`/`FilesProviderIdentity`, the optional-port `WorkspaceFilesProvider` (`retainHiddenLevels` declares whether a provider keeps its levels while its owner is hidden — the remote provider sets `false` so no cached row can repaint before authorization is revalidated), `rootKey`/`providerKey`/`treeBucketId`/`validRelativePath`/`belongsTo`, and `rowActions` — the path-keyed `open`/`canOpen`/`menu` gestures every renderer dispatches through |
 | `resource-path.ts` | plugin-owned: the shared `childPath`/`JoinTreeChild` both the fork's path math and the provider's child-key seam use — kept outside `face.ts` so the provider module has no fork cycle; `face.ts` re-exports `childPath` for the callers that still spell it |
 | `providers/resolver.ts` | plugin-owned composition slot: `FilesRootSelection` — the discriminated `LocalRootSelection \| RemoteRootSelection` union (top-level `kind`, ref + incarnation identity, path/view display metadata) — `localRootSelection`, `remoteRootSelection` (issues a record only when the endpoint is registered, read-granted and carries a valid `browseAuthorization` token), and `resolveWorkspaceFilesProvider` — the single switch selecting the local factory or the optional `ssh` factory (absent → `undefined`, no remote provider) |
@@ -347,7 +347,9 @@ and `navigator.tsx`'s portal branch: always-open bar, no mount focus, the
 refocus target.
 One store belongs to one session's inject product — records are not shared
 across sessions — and the adapter's owner-death cleanup calls `forgetTab`
-when a tab really closes; a body-only unmount keeps the record (that is what
+when a tab really closes, while a provider invalidation removes only that
+provider's `searchStateKey(tab, provider)` record so the tab's other roots
+keep their queries; a body-only unmount keeps the record (that is what
 restores expansion and scroll after a file view). Their visual rules are copied from
 upstream's `FilesBody.module.css` search block into `styles.ts` as
 `mrfw-fs*` (and `.match`/`.hidden`/`.inactive` as `mrfw-ft*`), keeping only
@@ -376,15 +378,17 @@ below. The Factory fallback must keep older or incomplete compositions usable.
    `failureLine` definitions must remain byte-identical to the new upstream
    file, so diff `FilesTree.tsx` against upstream and confirm the only
    differences are the shell, the css specifier, and the prop-driven seams.
-3. `diff` the baseline files — `store.ts` and `FilesBody.module.css` must
-   be byte-identical. `face.ts` carries the deliberate hold/release AND
-   provider deltas; `directory-node.ts` carries the optional-watch /
-   `joinChild` / refresh-coalescing delta — after copying the new upstream
-   versions, re-apply those deltas (the `FilesInjected` additions, the
+3. `diff` the baseline files — `FilesBody.module.css` must be
+   byte-identical. `store.ts` carries the deliberate provider-join pruning
+   delta (`loaded`'s optional `joinChild`, defaulting to `childPath`);
+   `face.ts` carries the deliberate hold/release AND provider deltas;
+   `directory-node.ts` carries the optional-watch / `joinChild` /
+   refresh-coalescing delta — after copying the new upstream versions,
+   re-apply those deltas (the `FilesInjected` additions, the
    `closeNode`/`forget`/`bindRecord`/`open` block, the optional `watch`
-   constructor member and its `open()`/`follow()` branches, and the
-   `joinChild` parameter) instead of resolving the diff by hand. Anything
-   else means upstream moved.
+   constructor member and its `open()`/`follow()` branches, the `joinChild`
+   parameter, and the pruning join-rule seam) instead of resolving the diff
+   by hand. Anything else means upstream moved.
 4. Diff `FilesBody.module.css` — copy changed rules into `styles.ts`'s
    `mrfw-ft*` block keeping the rename (header-only rules stay unmapped).
 5. Diff upstream `locales.ts`'s `zh` key set — extend `SidebarFilesKey` for

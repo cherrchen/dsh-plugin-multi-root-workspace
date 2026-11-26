@@ -105,6 +105,8 @@ client.apply（src/client/index.ts）
        → invalidateNow(owner,key) 校验仍为当前接管后中止+遗忘并回退 primary
 ```
 
+浏览器侧的 `RemoteFilesClient` 对 `remoteFiles.list` 维持一个同 Host 上限（4）一致的本地 FIFO 名额。它不改变 Host「零排队、超额即拒」的契约，而是避免同一棵树的一次刷新把超出名额的兄弟目录直接打成 `resource-budget`；排队期间可被取消且从未到达 RPC，开始后沿用调用者信号。授权租约 `wait` 有自己的 16 并发预算，不经过该列举名额。Host 侧列举在释放名额或完成服务卸载前，必须先等待已进入 dirty-loop 的通知重准入收尾；调用方仍可因取消竞态提前返回。
+
 ### 5.3 失效错误码的处理二分
 
 仅授权类错误码终结 provider：`provider-unavailable`、`capability-unsupported`、`session-unavailable`、`root-unregistered`、`root-identity-changed`、`binding-changed`、`environment-changed`。**不**失效： `permission-denied`（目录级 FS 语义，行内错误）、`resource-budget`、`connection-failed`、`timeout`、`cancelled`、`invalid-listing`（单请求错误，树保持 ready）。
@@ -130,7 +132,7 @@ select ──► provider 创建（一槽缓存 {key,provider}）
 三类终点：
   ① 面板隐藏/页签关闭 → 立即结束远端接管，不保留列举结果、展开或滚动位置
      （retainHiddenLevels:false；未关闭的页签可保留选择，同代次重挂也重新列举）
-  ② 租约终结（授权类错误码）→ 中止+遗忘桶/搜索/记忆，回退 primary + refreshRemotes
+  ② 租约终结（授权类错误码）→ 中止+遗忘该 provider 的桶/搜索/记忆（同页签其他根的搜索记录保留），回退 primary + refreshRemotes
   ③ 会话切换/组件卸载 → 合并中止信号触发，remoteDiscovery 中止，无全局可变态残留
 ```
 
@@ -140,7 +142,7 @@ select ──► provider 创建（一槽缓存 {key,provider}）
 
 - **浏览器零 SSH**：client bundle 不含 `src/remote/*` 传输代码；唯一的远端面是 `PANEL_CHANNEL` 上两条 RPC（`remoteFiles.list`、`remotes.waitForAuthorizationChange`），全部经严格 schema 解析。
 - **固定错误码词表**：17 个稳定码；传输层任何异常折叠为固定码，绝不向 UI 透传原始 SSH 文本；listing 载荷双重限界（条目数 + 序列化字节）。
-- **字面路径保真**：POSIX 名字逐字节透传（空格、Unicode、字面反斜杠均是合法段）；`readdirBounded` 对非法 UTF-8、重名、越界名直接 `invalid-listing`，预算触顶返回前缀而非挑短名。
+- **字面路径保真**：POSIX 名字逐字节透传（空格、Unicode、字面反斜杠均是合法段）；`readdirBounded` 对非法 UTF-8、重名、越界名直接 `invalid-listing`，预算触顶返回前缀而非挑短名。删除目录后的子树清理也使用当前 provider 的 `joinChild` 拼键，绝不把末尾字面反斜杠重新解释成分隔符。
 - **身份探测**：`probe` 每次先对 root 做 `lstat`（拒绝符号链接置换，不跟随），`realpath` 前后各一次规范祖先校验；段级 `lstat` 先于 `realpath`。
 - **部署断言非运行时证明**：绑定的 `directoryListing:'stable-path'` 要求浏览期间不可信进程无法替换根、祖先或根下目录，也无法改变挂载或符号链接解析。Host 清单校验权威，GUI 在添加/编辑绑定引导与快捷能力菜单中暴露默认关闭的勾选。Helper transport 不使用 Helper 原生 `listDir`；登记在 object probe 之外追加独立的 SFTP v3 路径 probe，浏览授权只覆盖 list-only 浏览，不改变 exec/copy 的 object 授权域。
 - **授权不落盘**：浏览令牌仅存于会话内 RPC 与内存选择；菜单与 header 只展示 `rootId · 环境名 · 路径`，不展示凭据或 `target` URI。

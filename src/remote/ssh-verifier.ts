@@ -102,20 +102,46 @@ export class SshEndpointVerifier implements RemoteEndpointVerifier {
     const env = owned
       ? await this.manager.openFilesSftp!(environment.environmentId, combined, environmentDigest(environment))
       : await this.manager.openSftp(environment.environmentId, combined, environmentDigest(environment))
+    const abortError = (): EndpointVerifyError => new EndpointVerifyError(
+      'endpoint-unverifiable',
+      deadline.signal.aborted ? 'verification timed out' : 'verification aborted',
+    )
+    const aborted = Promise.withResolvers<never>()
+    let disposal: Promise<void> | undefined
+    const disposeOwned = (): Promise<void> => disposal ??= env.dispose().catch(() => {})
+    const onAbort = (): void => {
+      aborted.reject(abortError())
+      // SFTP v3 has no request cancellation: closing the OWNED channel is the
+      // only way to make a silent realpath/lstat settle. A shared registration
+      // channel is never sacrificed for one probe; its race below still ends
+      // the verification instead of parking the registry write forever.
+      if (owned) void disposeOwned()
+    }
+    combined.addEventListener('abort', onAbort, { once: true })
+    if (combined.aborted) onAbort()
     try {
-      if (combined.aborted) throw new EndpointVerifyError('endpoint-unverifiable', 'verification aborted')
-      const real = await env.client.realpath(binding.path).catch((error: unknown) => {
-        throw new EndpointVerifyError('endpoint-unverifiable', `realpath failed: ${error instanceof Error ? error.message : String(error)}`)
-      })
-      if (real !== binding.path) throw new EndpointVerifyError('endpoint-redirected', `${binding.path} resolves to "${real}"`)
-      const attrs = await env.client.lstat(binding.path).catch((error: unknown) => {
-        throw new EndpointVerifyError('endpoint-unverifiable', `lstat failed: ${error instanceof Error ? error.message : String(error)}`)
-      })
-      if ((attrs.permissions! & 0o170000) !== 0o040000) throw new EndpointVerifyError('endpoint-unverifiable', `${binding.path} is not a directory`)
-      return { platform: environment.platform as 'linux' | 'darwin', target: { kind: 'path', value: binding.path } }
+      const probing = (async () => {
+        if (combined.aborted) throw abortError()
+        const real = await env.client.realpath(binding.path).catch((error: unknown) => {
+          throw new EndpointVerifyError('endpoint-unverifiable', `realpath failed: ${error instanceof Error ? error.message : String(error)}`)
+        })
+        if (real !== binding.path) throw new EndpointVerifyError('endpoint-redirected', `${binding.path} resolves to "${real}"`)
+        const attrs = await env.client.lstat(binding.path).catch((error: unknown) => {
+          throw new EndpointVerifyError('endpoint-unverifiable', `lstat failed: ${error instanceof Error ? error.message : String(error)}`)
+        })
+        if ((attrs.permissions! & 0o170000) !== 0o040000) throw new EndpointVerifyError('endpoint-unverifiable', `${binding.path} is not a directory`)
+        if (combined.aborted) throw abortError()
+        return { platform: environment.platform as 'linux' | 'darwin', target: { kind: 'path' as const, value: binding.path } }
+      })()
+      // A probe that loses this race is still awaited by nobody, so consume
+      // its late settlement; the owned channel's disposal is what makes that
+      // settlement happen on the real transport.
+      void probing.catch(() => {})
+      return await Promise.race([probing, aborted.promise])
     } finally {
       clearTimeout(timer)
-      if (owned) await env.dispose().catch(() => {})
+      combined.removeEventListener('abort', onAbort)
+      if (owned) await disposeOwned()
     }
   }
 }

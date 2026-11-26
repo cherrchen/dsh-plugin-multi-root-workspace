@@ -95,6 +95,50 @@ describe('the endpoint verifier probe lifecycle', () => {
     expect(disposals).toBe(1)
   })
 
+  it('disposes the owned SFTP probe channel when the caller aborts a silent realpath', async () => {
+    const { verifier, manager } = world()
+    let disposals = 0
+    ;(manager as unknown as { openFilesSftp: unknown }).openFilesSftp = async () => ({
+      client: {
+        realpath: () => new Promise<string>(() => {}),
+        lstat: async () => ({ permissions: 0o040000 }),
+      },
+      dispose: async () => { disposals++ },
+    })
+    const controller = new AbortController()
+    const pending = verifier.verify(
+      { ...ENVIRONMENT, transport: 'sftp' } as never,
+      { path: '/srv/root', directoryListing: 'stable-path' } as never,
+      controller.signal,
+    )
+    await Promise.resolve()
+    controller.abort()
+    await expect(pending).rejects.toMatchObject({ code: 'endpoint-unverifiable' })
+    expect(disposals).toBe(1)
+  })
+
+  it('disposes the owned SFTP probe channel when the 30s deadline expires inside lstat', async () => {
+    const { verifier, manager } = world()
+    let disposals = 0
+    ;(manager as unknown as { openFilesSftp: unknown }).openFilesSftp = async () => ({
+      client: {
+        realpath: async (path: string) => path,
+        lstat: () => new Promise<never>(() => {}),
+      },
+      dispose: async () => { disposals++ },
+    })
+    vi.useFakeTimers()
+    const pending = verifier.verify(
+      { ...ENVIRONMENT, transport: 'sftp' } as never,
+      { path: '/srv/root', directoryListing: 'stable-path' } as never,
+      new AbortController().signal,
+    )
+    const checked = expect(pending).rejects.toMatchObject({ code: 'endpoint-unverifiable' })
+    await vi.advanceTimersByTimeAsync(30_100)
+    await checked
+    expect(disposals).toBe(1)
+  })
+
   it('reports a non-zero probe exit and a spawn failure without leaking', async () => {
     const failed = world()
     const pending = failed.verifier.verify(ENVIRONMENT, BINDING, new AbortController().signal)

@@ -435,6 +435,66 @@ describe.skipIf(process.platform === 'win32')('remoteFiles.list admission', () =
     expect(answer.error?.code).toBe('panel/bad-request')
     expect(manager.opens).toBe(0)
   })
+
+  it('holds the listing slot until a notification-triggered recheck unwinds', async () => {
+    await mount({ seed: { device: { '/srv/root/x.txt': 'x' } } })
+    const listeners = new Set<() => void>()
+    let admissions = 0
+    let releaseRecheck: (() => void) | undefined
+    const gatedRegistry: RemoteFilesRegistry = {
+      get remoteManifest() { return world!.stack.registry.remoteManifest },
+      onRemoteChange: listener => {
+        listeners.add(listener)
+        return () => { listeners.delete(listener) }
+      },
+      withRemoteFilesRead: (sessionId, endpoint, body) => {
+        admissions++
+        if (admissions === 2) {
+          return new Promise(resolve => {
+            releaseRecheck = () => { resolve(world!.stack.registry.withRemoteFilesRead(sessionId, endpoint, body)) }
+          })
+        }
+        return world!.stack.registry.withRemoteFilesRead(sessionId, endpoint, body)
+      },
+    }
+    class NotifyManager extends FilesManager {
+      override async openFilesSftp(environmentId: string, signal: AbortSignal, expectedDigest: string) {
+        const env = await super.openFilesSftp(environmentId, signal, expectedDigest)
+        const inner = env.client
+        const client = {
+          realpath: (path: string) => inner.realpath(path),
+          lstat: (path: string) => inner.lstat(path),
+          readdirBounded: async (path: string, readSignal: AbortSignal) => {
+            const listing = await inner.readdirBounded(path, readSignal)
+            for (const listener of listeners) listener()
+            return listing
+          },
+        }
+        return { ...env, client: client as unknown as SftpClient }
+      }
+    }
+    const notifying = new NotifyManager(world!)
+    const svc = new RemoteFilesService(gatedRegistry, notifying, world!.ctx.logger)
+    let settled = false
+    try {
+      await registerRemote(world!, 'device', 'out')
+      const pending = svc.list(request({ authorization: await authorization() }) as never)
+        .then(() => { settled = true; return 'ok' as const }, (error: RemoteFilesError) => error.code)
+      await vi.waitFor(() => { expect(admissions).toBe(3) })
+      await new Promise(resolve => setTimeout(resolve, 30))
+      // The bytes and the final admission have completed, but the notification
+      // recheck is still inside the registry. Neither the caller-visible run
+      // nor the concurrency slot may retire ahead of it.
+      expect(settled).toBe(false)
+      expect((svc as unknown as { active: number }).active).toBe(1)
+      releaseRecheck?.()
+      expect(await pending).toBe('ok')
+      await vi.waitFor(() => { expect((svc as unknown as { active: number }).active).toBe(0) })
+    } finally {
+      releaseRecheck?.()
+      await svc.dispose()
+    }
+  })
 })
 
 describe.skipIf(process.platform === 'win32')('remoteFiles.wait authorization lease', () => {
