@@ -1,6 +1,6 @@
 # Provider 化文件树与远端 Workspace Root 浏览（2026-11-24）
 
-> 状态：**active — P0–P8 的实现、真实机证据与全版本 × OS CI 矩阵均已通过；分支待 PR 评审/合并与后续发布。** P7 检查点 `f49139a`；P8 检查点 `19ff368`；P8 CI run `45636794330` 为 success，34/34 jobs 通过。设计取舍见 [ADR-0052](../../decisions/ADR-0052-provider-file-browsing.md)（Proposed）。
+> 状态：**active — P0–P8 的实现、真实机证据与全版本 × OS CI 矩阵均已通过；Draft PR [#80](https://github.com/cherrchen/dsh-plugin-multi-root-workspace/pull/80) 待评审/合并与后续发布。** P7 检查点 `f49139a`；P8 检查点 `19ff368`；P8 CI run `45636794330` 为 success，34/34 jobs 通过。分支已合并 `origin/main` 的 `bcae51b`（#79），冲突只在抽取后的测试 harness，解析后 PR 首个提交为 `dc73fa8`。设计取舍见 [ADR-0052](../../decisions/ADR-0052-provider-file-browsing.md)（Proposed）。
 >
 > 关联：[ADR-0052](../../decisions/ADR-0052-provider-file-browsing.md)、[ADR-0015](../../decisions/ADR-0015-files-tab-plugin-owned-browsing.md)、[ADR-0016](../../decisions/ADR-0016-files-tab-native-tree-fork.md)、[ADR-0030](../../decisions/ADR-0030-environment-and-root-identity.md)、[ADR-0031](../../decisions/ADR-0031-filesystem-routing.md)、[ADR-0041](../../decisions/ADR-0041-additional-root-workspace-search.md)、[ADR-0049](../../decisions/ADR-0049-ssh-custody-modes.md)、[外部评审（2026-11-21）](../../reviews/2026-11-21-ssh-branch-review.md)、[SSH 远端环境参考](../../reference/ssh-remote-environments.md)。
 
@@ -56,7 +56,7 @@
 | P5 | 生命周期：撤权/复授、重试、tab 记忆 | **已完成** | `ede0ee1` |
 | P6 | 预览端口评估（fake port + 架构/安全评审） | **已完成** | `ede0ee1` |
 | P7 | 全量门禁、真实 SSH、截图与矩阵 | **已完成** | `f49139a` |
-| P8 | Helper transport 浏览准入与统一能力编辑 UX | **本地/实机 PASS；CI 矩阵待推送后复验** | 本批 HEAD 提交 |
+| P8 | Helper transport 浏览准入与统一能力编辑 UX | **已完成**（全量门禁、真实机证据与 34/34 CI 矩阵） | `19ff368` |
 
 ### P0 · 机械基线与文档（已完成）
 
