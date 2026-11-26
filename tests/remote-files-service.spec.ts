@@ -436,6 +436,23 @@ describe.skipIf(process.platform === 'win32')('remoteFiles.list admission', () =
     expect(manager.opens).toBe(0)
   })
 
+  it('rejects a listing when its channel closes during final admission', async () => {
+    await mount({ seed: { device: { '/srv/root/x.txt': 'x' } } })
+    await registerRemote(world!, 'device', 'out')
+    const token = await authorization()
+    const registry = world!.stack.registry
+    const admit = registry.withRemoteFilesRead.bind(registry)
+    let admissions = 0
+    vi.spyOn(registry, 'withRemoteFilesRead').mockImplementation(async (session, endpoint, body) => {
+      if (++admissions === 2) manager.live = false
+      return await admit(session, endpoint, body)
+    })
+
+    await expect(service!.list(request({ authorization: token }) as never)).rejects.toMatchObject({ code: 'connection-lost' })
+    expect(admissions).toBe(2)
+    expect(manager.disposals).toBe(1)
+  })
+
   it('holds the listing slot until a notification-triggered recheck unwinds', async () => {
     await mount({ seed: { device: { '/srv/root/x.txt': 'x' } } })
     const listeners = new Set<() => void>()

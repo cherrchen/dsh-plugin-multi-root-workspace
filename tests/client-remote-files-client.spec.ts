@@ -1,9 +1,9 @@
 /** Browser-side remoteFiles.list scheduling: the Host cap is a refusal, so overflow waits locally and remains cancellable. */
 import { afterEach, describe, expect, it, vi } from 'vitest'
-
-afterEach(() => { vi.useRealTimers() })
 import { createRemoteFilesClient } from '../src/client/remote-files-client.ts'
 import { REMOTE_FILES_LIMITS, type RemoteFilesListRequest } from '../src/remote/files-contract.ts'
+
+afterEach(() => { vi.useRealTimers() })
 
 const REQUEST: RemoteFilesListRequest = {
   sessionId: 'session-1',
@@ -120,6 +120,57 @@ describe('the remoteFiles client listing scheduler', () => {
     await expect(queued).resolves.toMatchObject({ entries: [] })
     for (const slot of slots) slot.finish()
     await expect(Promise.allSettled(occupants.slice(1))).resolves.toHaveLength(REMOTE_FILES_LIMITS.concurrent - 1)
-    vi.useRealTimers()
+  })
+
+  it('expires a retry waiting for a local slot without sending it', async () => {
+    vi.useFakeTimers({ toFake: ['performance', 'setTimeout', 'clearTimeout'] })
+    const accepted = { ok: true, value: { entries: [], truncated: false } }
+    const blockers = new Map<string, PromiseWithResolvers<void>>()
+    const calls: string[] = []
+    const client = createRemoteFilesClient({
+      rpc: {
+        call: async (_channel, _endpoint, payload) => {
+          const { relativePath } = payload as RemoteFilesListRequest
+          calls.push(relativePath)
+          if (relativePath === 'retry') return { ok: false, error: { code: 'resource-budget' } }
+          const blocker = Promise.withResolvers<void>()
+          blockers.set(relativePath, blocker)
+          await blocker.promise
+          return accepted
+        },
+      },
+    })
+    const signal = new AbortController().signal
+    const occupants = Array.from({ length: REMOTE_FILES_LIMITS.concurrent - 1 }, (_, index) =>
+      client.list({ ...REQUEST, relativePath: `busy-${index}` }, signal))
+    const settled = vi.fn()
+    const retry = client.list({ ...REQUEST, relativePath: 'retry' }, signal).then(settled, settled)
+    const ahead = client.list({ ...REQUEST, relativePath: 'ahead' }, signal)
+
+    await vi.advanceTimersByTimeAsync(25)
+    expect(blockers.has('ahead')).toBe(true)
+    expect(settled).not.toHaveBeenCalled()
+    await vi.advanceTimersByTimeAsync(REMOTE_FILES_LIMITS.deadlineMs - 25)
+    expect(settled).toHaveBeenCalledWith(expect.objectContaining({ code: 'resource-budget' }))
+    expect(calls.filter(path => path === 'retry')).toHaveLength(1)
+
+    for (const blocker of blockers.values()) blocker.resolve()
+    await Promise.all([...occupants, ahead, retry])
+    expect(calls.filter(path => path === 'retry')).toHaveLength(1)
+  })
+
+  it('reports caller cancellation during backoff', async () => {
+    vi.useFakeTimers()
+    const call = vi.fn(async () => ({ ok: false, error: { code: 'resource-budget' } }))
+    const client = createRemoteFilesClient({ rpc: { call } })
+    const controller = new AbortController()
+    const checked = expect(client.list(REQUEST, controller.signal)).rejects.toMatchObject({ code: 'cancelled' })
+
+    await vi.advanceTimersByTimeAsync(0)
+    expect(call).toHaveBeenCalledTimes(1)
+    controller.abort()
+    await checked
+    await vi.advanceTimersByTimeAsync(REMOTE_FILES_LIMITS.deadlineMs)
+    expect(call).toHaveBeenCalledTimes(1)
   })
 })

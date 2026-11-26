@@ -463,6 +463,7 @@ export class RemoteFilesService {
         signal.throwIfAborted()
         await this.admit(request, admitted.token)
         signal.throwIfAborted()
+        if (!env.live()) throw new RemoteFilesError('connection-lost')
         return listing
       } finally {
         done = true
