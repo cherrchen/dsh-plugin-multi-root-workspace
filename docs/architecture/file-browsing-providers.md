@@ -1,6 +1,6 @@
 # 架构文档：Files 标签页的文件浏览 Provider（本地 + SSH 远端）
 
-> 状态：**已实现**（P1–P5，见[实施计划](../plans/active/2026-11-24-provider-remote-file-tree.md)；决策记录 [ADR-0052](../decisions/ADR-0052-provider-file-browsing.md)）。尚属 Target：预览面板（preview）对远端根的扩展——其 fake-port 探针结论已记录但未接线；远端文件内容读取协议未实现。
+> 状态：**已实现**（P1–P8，其中 P6 的预览端口为 fake-port 评估、未接线；见[实施计划](../plans/completed/2026-11-24-provider-remote-file-tree.md)；决策记录 [ADR-0052](../decisions/ADR-0052-provider-file-browsing.md)）。尚属 Target：预览面板（preview）对远端根的扩展——其 fake-port 探针结论已记录但未接线；远端文件内容读取协议未实现。
 > 相关文档：宿主侧 RPC 契约与服务的实现细节见 ADR-0052 与本文件 §6；用户配置见 [SSH 远端环境使用指南](../guide/user/ssh-remote-environments.md)；Fields 树 fork 的上游对齐职责见 [FORK.md](../../src/client/files-tree/FORK.md)。
 
 ## 1. 总览

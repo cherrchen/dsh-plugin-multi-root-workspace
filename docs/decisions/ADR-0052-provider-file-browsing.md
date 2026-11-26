@@ -2,7 +2,7 @@
 
 ## 状态
 
-Proposed，2026-11-24。实施计划见[配套计划](../plans/active/2026-11-24-provider-remote-file-tree.md)；接受与否由维护者在 P1 合同评审时决定。
+Proposed，2026-11-24。实施计划见[配套计划](../plans/completed/2026-11-24-provider-remote-file-tree.md)；接受与否由维护者在 P1 合同评审时决定。实施已随 PR [#80](https://github.com/cherrchen/dsh-plugin-multi-root-workspace/pull/80)（`03762a2`）合入 `main`，并随 `v0.1.25-beta.1` 发版。
 
 ## 背景
 
@@ -94,7 +94,7 @@ Host 计划新增严格独立的 `remoteFiles.list` 端点（不复用 `workspac
 
 ## 相关
 
-- [配套实施计划](../plans/active/2026-11-24-provider-remote-file-tree.md)
+- [配套实施计划](../plans/completed/2026-11-24-provider-remote-file-tree.md)
 - [外部评审：SSH 分支增量审查（2026-11-21）](../reviews/2026-11-21-ssh-branch-review.md)
 - [ADR-0008](./ADR-0008-panel-session-derived-authority.md) — Host 推导的会话权威
 - [ADR-0015](./ADR-0015-files-tab-plugin-owned-browsing.md) / [ADR-0016](./ADR-0016-files-tab-native-tree-fork.md) — Files 页签接管与原生树 fork

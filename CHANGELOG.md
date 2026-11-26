@@ -8,6 +8,24 @@ English: [CHANGELOG.en.md](./CHANGELOG.en.md)
 - 安装方式、受支持的上游运行时与已知限制见 [README](./README.md)。
 - 每个版本的实施证据、编号口径与发布状态见[路线图 §进度总账](./docs/plans/active/2026-09-12-multi-root-workspace.md#进度总账)；GitHub Release 的正文由 `scripts/release-notes.mjs` 从 commit 历史生成，是本文件之外的完整原始清单。
 
+## [0.1.25-beta.1] - 2026-11-26
+
+本版是 `0.1.25` 线的第一个 beta：Files 页签现在可以像浏览本地附加根一样逐层浏览**已授权的 SSH 远端 Workspace Root**——按绑定开启、默认关闭，远端树只读且不做文件监视、搜索、预览或「在应用中打开」，每次列举在 SSH I/O 前后各做一次有序准入；文件树同时重构为按 Provider 分派的三类根实现，本地根的调用拼写、错误码与退化行为保持不变。另修复从 Files 根切换菜单打开的「管理工作区目录」对话框在开启远端模式时丢失远端添加入口，以及高延迟链路上 `remote_copy` 已提交的复制留下 staging 残留。没有配置格式、协议或默认行为层面的不兼容变更；SSH 仍为实验性、默认关闭，远端浏览按绑定默认关闭，精确支持合同仍为 27 个精确发布。
+
+### Added
+
+- **在 Files 页签浏览已授权的远端 Workspace Root（按绑定开启，默认关闭）**：登记成功的绑定可作为一类根出现在根切换菜单中，与主根、本地附加根共享同一棵 fork 树、接管与展开/滚动语义，菜单行形如 `out · Build Box (device) · /srv/root · SSH`。开启方式是该绑定的 **在文件中列出（稳定的 SFTP 路径）** 选项：只有同时允许 `read` 才可用，`+ → 添加远端工作目录`、绑定对话框的「添加绑定」、已有绑定的编辑表单与行尾 `…` 的「修改能力」四个入口一致呈现并说明前提——这是一项**部署断言**（浏览期间不可信进程无法替换该根、其祖先或根下目录），不是运行期证明；勾选或取消会改变绑定身份，保存后进入「待重新登记」，重新登记完成一次真实连接校验后恢复。纯 SFTP 连接与安装了 Helper 的连接都可开启：Helper 绑定在原有的对象校验之外追加一次独立的 SFTP v3 路径校验，浏览授权绝不复用 Helper 的对象（`dev:ino`）授权；Broker 没有目录流时仍 fail closed。远端树只读、按需列举：不支持打开或预览文件、工作区搜索、右键菜单、「在应用中打开」与文件内容读取，也不做文件监视或轮询；目录名（含空格、Unicode 与字面反斜杠）按字节原样展示，符号链接置换、根重定向与非规范路径在列举前被拒绝，单个目录的错误以行内错误呈现而不清空整棵树。
+- **浏览的准入、预算与生命周期**：Host 侧的 `remoteFiles.list` 由存活会话推导权威，以显式 UI 只读目的进入 Registry 有序准入，并在 SSH I/O 之前与返回字节之前各准入一次；并发 4、零排队，超额即 `resource-budget`，单次请求含准入的期限为 12 秒，错误只出固定词表（17 个稳定错误码），列举载荷受条目数与序列化字节双重限界。浏览器侧对同一 Host 的列举维持一个与 Host 上限一致的本地 FIFO 名额，排队期间可取消；授权元数据租约 `remotes.waitForAuthorizationChange` 只核对令牌与登记状态、**不产生任何远端文件 I/O**，租约 15 秒、并发 16、零排队。重新登记、令牌更换、绑定修改或删除、环境或连接断开都会立即失效并回退主根，重新选择后按新授权浏览；页签隐藏或会话切换立即结束远端接管，不保留列举结果、展开或滚动记忆。
+
+### Changed
+
+- **Files 文件树改为按 Provider 分派**：主根、本地附加根与远端根共享同一端口与同一棵 fork 树，选择记录改为 `RootRef` 判别联合，树键、搜索记录与导航记忆加入会话、tab/pane 与授权代次——同一环境重新授权后旧状态不会复活，两个环境共享同一路径拼写也互不串扰。本地 Provider 保持原有 `workspaceFiles` 调用拼写、错误码与退化行为，浏览器端不引入任何 SSH 代码；没有附加根、也没有远端登记时的行为与 `v0.1.24` 相同。
+
+### Fixed
+
+- **从 Files 根切换菜单打开的「管理工作区目录」对话框丢失远端添加入口**：该对话框此前只显式透传部分依赖，开启远端工具时页头菜单里的 `+` 退回「直接添加本地目录」，而页脚入口已按新形态显示「添加本地目录 / 添加远端工作目录」菜单。现在改为透传完整 props，两个入口在远端模式下形态一致。
+- **高延迟链路上 `remote_copy` 会把已提交的复制留成 staging 残留**：清理路径原先共享同一个从首次调用起算的 1 秒窗口，`verify` 内的句柄关闭与 `finish` 的 closeHandle 可能在 publish 的清理运行前把它耗尽；真实 WAN RTT 下 `remove()` 见到 `remaining <= 0` 即按 `transfer-timeout` 收尾，已提交的复制留下 `.dsh-staging-<id>`。现在每次清理调用各自拥有 1 秒有界窗口（清理调用在结构上有限），本地与低延迟行为不变；真实 VPS 上 11 个残留失败全部转通过，`remote-copy` 系 61 个用例保持通过。
+
 ## [0.1.24] - 2026-11-24
 
 本版是 `0.1.24` 线的首个稳定版，收束 `0.1.24-beta.1`–`0.1.24-beta.6` 的全部内容：个人 SSH 远端环境以实验性、默认关闭的形态进入发布包，含连接与 Workspace Root 绑定管理、`remote_copy` 与 `remote_bash` 两个远端工具及它们的参数校验、失败文案与输出预算、SSH 依赖修复引导与 Helper 安装诊断、随包发行的 `install-ssh-deps` 依赖安装命令与 Desktop 一键安装入口；精确支持合同推进到 DSH `0.2.3-alpha.2`（27 个精确发布），Registry/scope 身份改用 Session 原始目录，并同步客户端复刻与 Auto Review 双 cordis 根探测；另含 Workspace Folders 对话框附加根列表滚动修复、DSH Desktop 转发流的 BoringSSL PSK 回退，以及活跃 SSH 连接下卸载插件导致 Host 退出的修复。没有不兼容变更；未开启 SSH 时行为与 `v0.1.23` 相同。`0.2.3-alpha.1` 不受支持：其已发布版本无法启动。各 beta 的逐项预发布说明保留在下方条目。
@@ -468,7 +486,8 @@ English: [CHANGELOG.en.md](./CHANGELOG.en.md)
 
 - 发布前外部评审提出的 8 项发现（其中 3 项发布阻断）全部修复，每项各带一个回归测试：登记目录被替换为符号链接后授权转移（引入 `recordedPath`，**重新解析路径不等于重新授权**）、并发修改注册表丢写或复活已撤销的授权（每个主根的变更串行）、刷新不重新检查目录、手输路径被目录选择器覆盖、`reveal` 的应答契约与失败码、重复 id 未校验、主根未纳入嵌套校验、CI 先测后构建。
 
-[Unreleased]: https://github.com/cherrchen/dsh-plugin-multi-root-workspace/compare/v0.1.24...HEAD
+[Unreleased]: https://github.com/cherrchen/dsh-plugin-multi-root-workspace/compare/v0.1.25-beta.1...HEAD
+[0.1.25-beta.1]: https://github.com/cherrchen/dsh-plugin-multi-root-workspace/compare/v0.1.24...v0.1.25-beta.1
 [0.1.24]: https://github.com/cherrchen/dsh-plugin-multi-root-workspace/compare/v0.1.24-beta.6...v0.1.24
 [0.1.24-beta.6]: https://github.com/cherrchen/dsh-plugin-multi-root-workspace/compare/v0.1.24-beta.5...v0.1.24-beta.6
 [0.1.24-beta.5]: https://github.com/cherrchen/dsh-plugin-multi-root-workspace/compare/v0.1.24-beta.4...v0.1.24-beta.5

@@ -38,8 +38,6 @@ completed/
 
 active：
 
-- [2026-11-24-provider-remote-file-tree.md](./active/2026-11-24-provider-remote-file-tree.md) — Provider 化文件树与远端 Workspace Root 浏览：`RootRef` 判别联合 + 授权代次键控替代路径身份，Provider 端口分派 primary/additional/remote 三类根，Host 侧独立 `remoteFiles.list` 走 UI 只读准入与双准入；浏览统一要求显式稳定路径部署断言与 owned SFTP v3 通道，Helper object 授权不复用为路径身份，Broker 无目录流即 fail closed；P0–P8 实现与全版本 × OS 矩阵均已通过、待 PR 评审/合并，决策拟议见 [ADR-0052](../decisions/ADR-0052-provider-file-browsing.md)。
-
 
 
 
@@ -60,6 +58,8 @@ active：
 
 
 completed：
+
+- [2026-11-24-provider-remote-file-tree.md](./completed/2026-11-24-provider-remote-file-tree.md) — Provider 化文件树与远端 Workspace Root 浏览：`RootRef` 判别联合 + 授权代次键控替代路径身份，Provider 端口分派 primary/additional/remote 三类根，Host 侧独立 `remoteFiles.list` 走 UI 只读准入与双准入；浏览统一要求显式稳定路径部署断言与 owned SFTP v3 通道，Helper object 授权不复用为路径身份，Broker 无目录流即 fail closed；P0–P8 与全版本 × OS 矩阵均已通过（P8 CI run 45636794330，34/34），已合入 `main`（PR #80）并随 `v0.1.25-beta.1` 发版。
 
 - [2026-11-23-remote-tool-hardening.md](./completed/2026-11-23-remote-tool-hardening.md) — 个人 SSH 工具硬化：`remote_copy` 两端统一参数（省略 `environmentId` 才取 `local`，`null`/空串报错）、execute 边界与广告 schema 同源的 `invalid-arguments`、稳定码生成的有界 `message`/`hint` 与有界端点候选、`remote_bash` 每流 64 KiB 预览默认与 `maxOutputBytes`/`totalBytes`/`droppedBytes`，以及单普通文件、0600、不保留 mtime、拒绝覆盖的传输属性与后续扩展记录；已合入 `main`（PR #78）并随 `v0.1.24-beta.5` 发版。
 

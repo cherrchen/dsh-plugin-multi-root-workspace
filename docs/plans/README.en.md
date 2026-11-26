@@ -38,8 +38,6 @@ Plans with long-term reference value should not be deleted.
 
 active:
 
-- [2026-11-24-provider-remote-file-tree.md](./active/2026-11-24-provider-remote-file-tree.md) (Chinese) — Provider-based file tree and remote Workspace Root browsing: a `RootRef` discriminated union plus authorization-incarnation keying replaces path identity, a provider port dispatches the primary/additional/remote root kinds, and the host gains an independent `remoteFiles.list` under a UI-read-only admission with dual ordering around network I/O; browsing uniformly requires the explicit stable-path deployment assertion and an owned SFTP v3 channel, Helper object authorization is never reinterpreted as path identity, and Broker fails closed without a directory stream; the P0–P8 implementation and full version × OS matrix have passed, while the branch awaits PR review/merge, with the decision proposed in [ADR-0052](../decisions/ADR-0052-provider-file-browsing.md).
-
 
 
 
@@ -60,6 +58,8 @@ active:
 
 
 completed:
+
+- [2026-11-24-provider-remote-file-tree.md](./completed/2026-11-24-provider-remote-file-tree.md) (Chinese) — Provider-based file tree and remote Workspace Root browsing: a `RootRef` discriminated union plus authorization-incarnation keying replaces path identity, a provider port dispatches the primary/additional/remote root kinds, and the host gains an independent `remoteFiles.list` under a UI-read-only admission with dual ordering around network I/O; browsing uniformly requires the explicit stable-path deployment assertion and an owned SFTP v3 channel, Helper object authorization is never reinterpreted as path identity, and Broker fails closed without a directory stream; P0–P8 and the full version × OS matrix have passed (P8 CI run 45636794330, 34/34), merged into `main` (PR #80) and released with `v0.1.25-beta.1`.
 
 - [2026-11-23-remote-tool-hardening.md](./completed/2026-11-23-remote-tool-hardening.md) (Chinese) — personal SSH tool hardening: one endpoint definition for both `remote_copy` sides (only an omitted `environmentId` defaults to `local`; `null`/empty is rejected), execute-boundary `invalid-arguments` from the same declaration the tool advertises, bounded `message`/`hint` and bounded endpoint candidates generated from stable codes, a 64 KiB per-stream `remote_bash` preview default with `maxOutputBytes`/`totalBytes`/`droppedBytes`, and the transfer properties (single regular file, 0600, no mtime preservation, no overwrite) plus recorded follow-ups; merged into `main` (PR #78) and released with `v0.1.24-beta.5`.
 

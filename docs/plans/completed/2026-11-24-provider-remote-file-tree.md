@@ -1,6 +1,6 @@
 # Provider 化文件树与远端 Workspace Root 浏览（2026-11-24）
 
-> 状态：**active — P0–P8 的实现、真实机证据与全版本 × OS CI 矩阵均已通过；Draft PR [#80](https://github.com/cherrchen/dsh-plugin-multi-root-workspace/pull/80) 待评审/合并与后续发布。** P7 检查点 `f49139a`；P8 检查点 `19ff368`；P8 CI run `45636794330` 为 success，34/34 jobs 通过。分支已合并 `origin/main` 的 `bcae51b`（#79），冲突只在抽取后的测试 harness，解析后 PR 首个提交为 `dc73fa8`。设计取舍见 [ADR-0052](../../decisions/ADR-0052-provider-file-browsing.md)（Proposed）。
+> 状态：**已完成——P0–P8 的实现、真实机证据与全版本 × OS CI 矩阵均已通过；已合入 `main`（PR [#80](https://github.com/cherrchen/dsh-plugin-multi-root-workspace/pull/80)，`03762a2`）并随 `v0.1.25-beta.1` 发版。** P7 检查点 `f49139a`；P8 检查点 `19ff368`；P8 CI run `45636794330` 为 success，34/34 jobs 通过。分支曾合并 `origin/main` 的 `bcae51b`（#79），冲突只在抽取后的测试 harness，解析后 PR 首个提交为 `dc73fa8`。设计取舍见 [ADR-0052](../../decisions/ADR-0052-provider-file-browsing.md)（Proposed；转 Accepted 由维护者决定）。
 >
 > 关联：[ADR-0052](../../decisions/ADR-0052-provider-file-browsing.md)、[ADR-0015](../../decisions/ADR-0015-files-tab-plugin-owned-browsing.md)、[ADR-0016](../../decisions/ADR-0016-files-tab-native-tree-fork.md)、[ADR-0030](../../decisions/ADR-0030-environment-and-root-identity.md)、[ADR-0031](../../decisions/ADR-0031-filesystem-routing.md)、[ADR-0041](../../decisions/ADR-0041-additional-root-workspace-search.md)、[ADR-0049](../../decisions/ADR-0049-ssh-custody-modes.md)、[外部评审（2026-11-21）](../../reviews/2026-11-21-ssh-branch-review.md)、[SSH 远端环境参考](../../reference/ssh-remote-environments.md)。
 
@@ -272,8 +272,8 @@
 - **live e2e 环境口径**：旧专用 VPS（`64.118.149.252`）SSH 层失联，本次以 `~/.dsh` 的 `ali` 环境承载 `remote-ssh.live.e2e.ts`（`live-ali.json` + `~/.dsh-ssh-test/ssh_config` 的 `dsh-ali`/`Host *` 块——均为测试环境文件，`~/.dsh` 本体未写）。四个 helper/sftp 环境共用一个 `root` 账号与同一台主机，账户/主机隔离语义弱于原双账号双别名夹具；`xfer` 的「托管 SFTP 账户」语义以同机同用户近似。旧 VPS 恢复后可用原 `live.json` 复跑。
 - **GUI 截图局限**：真实宿主 GUI 证据已由 `live-remote-gui` 驱动补齐（真实 `dsh web` + 真实 Chrome + 真实 VPS，见上表）；此前的 Chromium 替身截图仍只作行为证据。真实桌面壳（非 `dsh web` 浏览器面）未截图。
 - 既有 `require-yield` warning ×2（`face.ts`/`local.ts` 的 parked-forever 迭代器为契约所需）保持不变。
-- CHANGELOG 无 Unreleased 节且用户禁止发版动作——本批变更的发布叙述留在本文件，不写入已发布节、不 bump 版本。
+- 本批实施期间 CHANGELOG 无 Unreleased 节且发版动作被明确禁止，发布叙述当时留在本文件；随 `v0.1.25-beta.1` 发版时用户可见变更已写入 [CHANGELOG](../../../CHANGELOG.md) 的 `0.1.25-beta.1` 条目。
 
 ### 最终结论
 
-**P7 PASS；P8 PASS（分支验证完成）。** P7 的全部强制门禁已在 `f49139a` 补齐：全量脚本、真实 DSH↔SSH 端到端、真实宿主 GUI 与 34/34 全版本×OS CI 矩阵均通过。P8（Helper transport 浏览准入与统一能力编辑 UX）已在 `19ff368` 完成并通过全量测试、lint/typecheck/docs、compat/pack/smoke、真实 `ali` SSH live e2e 20/20、真实宿主 GUI 10/10，以及 34/34 全版本×OS CI 矩阵。计划暂保留 active 仅因为分支尚未经过 PR 评审/合并，且用户明确要求本阶段不执行发布动作；这不表示实现或矩阵证据仍有缺口。
+**P7 PASS；P8 PASS（分支验证完成）。** P7 的全部强制门禁已在 `f49139a` 补齐：全量脚本、真实 DSH↔SSH 端到端、真实宿主 GUI 与 34/34 全版本×OS CI 矩阵均通过。P8（Helper transport 浏览准入与统一能力编辑 UX）已在 `19ff368` 完成并通过全量测试、lint/typecheck/docs、compat/pack/smoke、真实 `ali` SSH live e2e 20/20、真实宿主 GUI 10/10，以及 34/34 全版本×OS CI 矩阵。计划在实施期间保留 active 仅因为分支尚未经过 PR 评审/合并、且用户当时明确要求不执行发布动作，这不表示实现或矩阵证据曾有缺口；PR #80 已合入 `main`（`03762a2`）、计划归档并随 `v0.1.25-beta.1` 发版。
