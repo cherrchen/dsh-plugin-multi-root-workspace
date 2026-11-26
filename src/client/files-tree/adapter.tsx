@@ -25,23 +25,30 @@
  */
 
 import type { Context as ClientContext } from '@deepseek-ai/cordis'
+import type {} from '@deepseek-ai/dsh-client-locale/client'
 import type { ClientRemote } from '@deepseek-ai/dsh-api-remotes/client'
 import { createSnapshotStore, type BoundActions, type SnapshotSelectorHook } from '@deepseek-ai/dsh-client-store'
 import type { HostObservable } from '@deepseek-ai/dsh-client-ui-slots'
 import type { TabId } from '@deepseek-ai/dsh-client-ui-dockkit'
 import type { SessionId } from '@deepseek-ai/dsh-session/types'
 import { RemoteError, type RemoteFailure } from '@deepseek-ai/dsh-typert-protocol'
-import { createList, createWatch, filesFace, type FilesInjected } from './face.ts'
+import { filesFace, type FilesInjected } from './face.ts'
+import type { WorkspaceFilesProvider } from './provider.ts'
+import { createList, createLocalWorkspaceProvider, createWatch, type ListWorkspaceDirectory, type WatchWorkspaceDirectory } from './providers/local.ts'
+import { createSshWorkspaceProvider, REMOTE_FILES_FAILURE_GROUPS } from './providers/ssh.ts'
+import { resolveWorkspaceFilesProvider, type FilesRootSelection, type RemoteRootSelection } from './providers/resolver.ts'
+import type { RemoteFilesClient } from '../remote-files-client.ts'
+import type { RemoteFilesFailureCode } from '../../remote/files-contract.ts'
 import { createFilesStore } from './store.ts'
 import { filesTreeSurfaceSupported } from './primitives.ts'
 import { filesMenuHookOf, filesMenuSeat, type FilesMenuKinds, type FilesMenuSeat } from './context-menu.ts'
 import type { PanelClient } from '../panel-client.ts'
 import type { FilesSearchRun } from './search-client.ts'
 import type { WorkspaceSearchPreferenceBook } from './search-preferences.ts'
-import { createSearchPaneStore, type SearchPaneStates, type SearchPaneStore } from './search-state.ts'
+import { createSearchPaneStore, searchStateKey, type SearchPaneStates, type SearchPaneStore } from './search-state.ts'
 import type { FilesTreeProps } from './FilesTree.tsx'
-import type { RootView } from '../../contract.ts'
 import { NS } from './locales.ts'
+import { NS as PLUGIN_NS } from '../locales.ts'
 
 /** The `sidebarRight` face the fork uses to open a file resource. */
 interface SidebarRightOpen {
@@ -65,9 +72,11 @@ interface ClientMenuRegistry {
 
 /**
  * One session's per-tab additional-root selections, keyed by the pane's
- * dockkit tab id. An absent entry means the primary root.
+ * dockkit tab id. An absent entry means the primary root. Each entry is the
+ * selection record — discriminated ref, incarnation, and display metadata —
+ * never a bare view: the provider the pane browses with resolves from it.
  */
-export type TreeSelection = Readonly<Record<string, RootView>>
+export type TreeSelection = Readonly<Record<string, FilesRootSelection>>
 
 /**
  * The lifetimes a selection runs under, keyed by tab like the store bucket:
@@ -85,8 +94,8 @@ export type TreeSelection = Readonly<Record<string, RootView>>
  * root's memory apart.
  */
 export interface FilesTreeSaved {
-  /** The root this snapshot belongs to; a stale snapshot never crosses roots. */
-  readonly root: string
+  /** The provider this snapshot belongs to; a stale snapshot never crosses providers. */
+  readonly providerKey: string
   /** Expansion preferences at the moment the owner closed. */
   readonly expanded?: readonly string[]
   /** The body's scroll offset at the moment it closed. */
@@ -113,7 +122,7 @@ export interface FilesTreeTakeover {
    *   the saved memory even after the body that mounted it is gone.
    * @returns the signal the forked tree lives under.
    */
-  readonly signal: (key: TabId, root: string, section?: Element | (() => boolean)) => AbortSignal
+  readonly signal: (key: TabId, provider: string, section?: Element | (() => boolean)) => AbortSignal
   /**
    * Abort and drop one owner's record: the owner died, the selection moved to
    * another root, or a body with no pane carrier closed. A normal navigator
@@ -124,20 +133,31 @@ export interface FilesTreeTakeover {
    */
   readonly end: (key: TabId) => void
   /**
-   * The tree-view memory kept for (key, root) — `undefined` before the
+   * The tree-view memory kept for (key, provider) — `undefined` before the
    * first close or after the owner's section died.
    * @param key - the owner's dockkit identity.
-   * @param root - absolute path of the root the memory belongs to.
+   * @param provider - `providerKey` of the provider the memory belongs to.
    */
-  readonly saved: (key: TabId, root: string) => FilesTreeSaved | undefined
+  readonly saved: (key: TabId, provider: string) => FilesTreeSaved | undefined
   /**
-   * Merge memory for (key, snapshot.root): fields present in the snapshot
-   * overwrite, fields absent keep what was saved before — so a settle-time
-   * `revealed` write survives the close-time `expanded`/`scrollTop` write.
+   * Merge memory for (key, snapshot.providerKey): fields present in the
+   * snapshot overwrite, fields absent keep what was saved before — so a
+   * settle-time `revealed` write survives the close-time `expanded`/
+   * `scrollTop` write.
    * @param key - the owner's dockkit identity.
    * @param snapshot - the memory fields to record.
    */
   readonly save: (key: TabId, snapshot: FilesTreeSaved) => void
+  /**
+   * End one owner's record AND drop everything it cached — the authorization
+   * behind a remote grant died: the hold aborts (which releases the store
+   * bucket and its listings), the saved memory and the pane's search records
+   * go with it. A no-op unless the live record still belongs to `provider`,
+   * so a late callback can never tear down a newer selection's takeover.
+   * @param key - the owner's dockkit identity.
+   * @param provider - `providerKey` the caller believes is live.
+   */
+  readonly invalidate: (key: TabId, provider: string) => void
 }
 
 /** The inject face the registration composes onto the occupant's props. */
@@ -184,9 +204,10 @@ export interface FilesTreeInjected {
    * Persist one pane's selected root; `'primary'` drops its entry. The
    * session-scoped snapshot survives the body remount a file open causes.
    * @param tabId - the pane's dockkit tab id.
-   * @param root - the selected root, or `'primary'` to browse the session root.
+   * @param next - the selection record (identity + display metadata), or
+   *   `'primary'` to browse the session root.
    */
-  readonly selectRoot: (tabId: TabId, root: RootView | 'primary') => void
+  readonly selectRoot: (tabId: TabId, next: FilesRootSelection | 'primary') => void
   /** The forked tree's lifetimes; see {@link FilesTreeTakeover}. */
   readonly takeover: FilesTreeTakeover
 }
@@ -242,6 +263,21 @@ export interface FilesTreeSurface {
   readonly useCanOpen: SnapshotSelectorHook<number>
   /** The workspace search seat, or `undefined` where this host has no search. */
   readonly search: FilesTreeSearchSeat | undefined
+  /**
+   * Resolve the provider one selection browses with — the single composition
+   * slot (see `providers/resolver.ts`). RootSwitcher and the preview
+   * navigator are its only callers. `undefined` when the selection's kind
+   * has no factory in this composition — the owners then cannot take over.
+   */
+  readonly resolveProvider: (root: FilesRootSelection, onInvalidated?: (reason: RemoteFilesFailureCode) => void) => WorkspaceFilesProvider | undefined
+  /**
+   * One authorization lease for a remote selection: resolves when the host's
+   * window expires unchanged (the owner then opens the next lease) and
+   * rejects with the fixed `remoteFiles` vocabulary when the grant's
+   * identity stops matching. This is a metadata wait — NEVER a filesystem
+   * watch, poll or auto-relist. Absent without a `remoteFiles` channel.
+   */
+  readonly observeAuthority?: ((root: RemoteRootSelection, signal: AbortSignal) => Promise<void>) | undefined
 }
 
 /** The failure every lazy-remote path reports when the carrier is absent. */
@@ -339,6 +375,8 @@ export function createFilesTreeSeats(
   deps: {
     /** The plugin's channel client; absent when this composition has no host Connection. */
     readonly panel?: PanelClient | undefined
+    /** The `remoteFiles` channel client; absent when this composition has no browse backend. */
+    readonly remoteFiles?: RemoteFilesClient | undefined
     /** The workspace search preferences, shared by every pane and session. */
     readonly preferences: WorkspaceSearchPreferenceBook
   },
@@ -351,10 +389,22 @@ export function createFilesTreeSeats(
   readonly canOpenViewer: () => ((address: string) => boolean) | undefined
   /** Whether this host exposes the search the endpoint wraps (`0.2.2-rc.2+`). */
   readonly searchSupported: () => boolean
+  /** The lazily remote-bound `workspaceFiles.list` the local provider lists through. */
+  readonly list: ListWorkspaceDirectory
+  /** The lazily remote-bound `workspaceFiles.changes` stream the local provider watches through. */
+  readonly watch: WatchWorkspaceDirectory
+  /** The `remoteFiles` channel client the SSH provider lists and leases through. */
+  readonly remoteFiles: RemoteFilesClient | undefined
+  /** Code → localized message for the fixed `remoteFiles` vocabulary (plugin dictionary). */
+  readonly remoteFilesLocalize: ((code: RemoteFilesFailureCode) => string) | undefined
 } {
   const store = createFilesStore()
   const remote = lazyFilesRemote(ctx)
-  const face = filesFace(createList(remote), createWatch(remote))
+  // The wire ports the local provider binds, resolved lazily through the
+  // same remote stand-in the face used to close over: the provider, not the
+  // face, now owns the remote dependency.
+  const list = createList(remote)
+  const watch = createWatch(remote)
   // The two optional host registries behind the tree-parity inputs. Both are
   // read through `ctx.get` because neither may gate this row: the tree exists
   // (legacy rows) on hosts that never had them.
@@ -402,7 +452,7 @@ export function createFilesTreeSeats(
     const searchStore = createSearchPaneStore()
     interface Held {
       readonly controller: AbortController
-      readonly root: string
+      readonly provider: string
     }
     const takeovers = new Map<TabId, Held>()
     // The pane-record memory: a hold ending keeps it, the owner dying drops
@@ -434,6 +484,13 @@ export function createFilesTreeSeats(
           // the difference between a body remount (which keeps them) and a
           // closed pane (which must not accumulate for the plugin's lifetime).
           searchStore.forgetTab(key)
+          // The persisted selection goes too: a dead owner's stored root
+          // must never greet the next owner of a recycled id.
+          if (selection.getSnapshot()[key] !== undefined) {
+            const next = { ...selection.getSnapshot() }
+            delete next[key]
+            selection.set(next)
+          }
         }
       }
       if (watchers.size === 0) {
@@ -459,7 +516,7 @@ export function createFilesTreeSeats(
       dropDeadOwners()
     }
     return {
-      face: face(sessionId, actions),
+      face: filesFace(actions),
       openFile: (address: string) => {
         const sidebar = (ctx as unknown as { get(key: string): unknown }).get('sidebarRight') as SidebarRightOpen | undefined
         sidebar?.openResourceIn?.(sessionId, address)
@@ -490,18 +547,18 @@ export function createFilesTreeSeats(
       },
       searchPreferences: deps.preferences,
       hooks: { treeSelection: selection, canOpen: canOpenEpoch, searchState: searchStore.snapshot },
-      selectRoot: (tabId, root) => {
-        const next: Record<string, RootView> = { ...selection.getSnapshot() }
-        if (root === 'primary') delete next[tabId]
-        else next[tabId] = root
-        selection.set(next)
+      selectRoot: (tabId, next) => {
+        const updated: Record<string, FilesRootSelection> = { ...selection.getSnapshot() }
+        if (next === 'primary') delete updated[tabId]
+        else updated[tabId] = next
+        selection.set(updated)
       },
       takeover: {
-        signal: (key, root, section) => {
+        signal: (key, provider, section) => {
           let held = takeovers.get(key)
-          if (held === undefined || held.root !== root || held.controller.signal.aborted) {
+          if (held === undefined || held.provider !== provider || held.controller.signal.aborted) {
             held?.controller.abort()
-            held = { controller: new AbortController(), root }
+            held = { controller: new AbortController(), provider }
             takeovers.set(key, held)
           }
           if (section !== undefined) {
@@ -515,28 +572,43 @@ export function createFilesTreeSeats(
           return held.controller.signal
         },
         end: key => { endTakeover(key) },
-        saved: (key, root) => savedTrees.get(key)?.get(root),
+        invalidate: (key, provider) => {
+          const held = takeovers.get(key)
+          // Only the record the caller actually saw dies: a key that already
+          // moved to a newer provider is somebody else's takeover.
+          if (held === undefined || held.provider !== provider) return
+          endTakeover(key, true)
+          searchStore.forget(searchStateKey(key, provider))
+        },
+        saved: (key, provider) => savedTrees.get(key)?.get(provider),
         save: (key, snapshot) => {
           // A dead owner takes no writes: once the hold AND the watch are
           // both gone, nothing live remains that could still report a value,
           // and a cleanup racing the drop must not resurrect the record.
           if (!takeovers.has(key) && !watchers.has(key)) return
-          let perRoot = savedTrees.get(key)
-          if (perRoot === undefined) savedTrees.set(key, perRoot = new Map())
-          const previous = perRoot.get(snapshot.root)
-          const merged: { -readonly [P in keyof FilesTreeSaved]: FilesTreeSaved[P] } = { root: snapshot.root }
+          let perProvider = savedTrees.get(key)
+          if (perProvider === undefined) savedTrees.set(key, perProvider = new Map())
+          const previous = perProvider.get(snapshot.providerKey)
+          const merged: { -readonly [P in keyof FilesTreeSaved]: FilesTreeSaved[P] } = { providerKey: snapshot.providerKey }
           const expanded = snapshot.expanded ?? previous?.expanded
           const scrollTop = snapshot.scrollTop ?? previous?.scrollTop
           const revealed = snapshot.revealed ?? previous?.revealed
           if (expanded !== undefined) merged.expanded = expanded
           if (scrollTop !== undefined) merged.scrollTop = scrollTop
           if (revealed !== undefined) merged.revealed = revealed
-          perRoot.set(snapshot.root, merged)
+          perProvider.set(snapshot.providerKey, merged)
         },
       },
     }
   }
-  return { store, inject, menuKinds, canOpenViewer: () => canOpenViewer, searchSupported }
+  // Remote failure copy lives in this plugin's own namespace: `sidebarFiles`
+  // is upstream's dictionary and cannot be extended, so the SSH provider's
+  // group messages bind `multiRootWorkspace` instead of the tree's `t`.
+  const remoteT = deps.remoteFiles === undefined ? undefined : ctx.locale.bind(PLUGIN_NS)
+  const remoteFilesLocalize = remoteT === undefined
+    ? undefined
+    : (code: RemoteFilesFailureCode): string => remoteT(`remoteFiles.error.${REMOTE_FILES_FAILURE_GROUPS[code]}`)
+  return { store, inject, menuKinds, canOpenViewer: () => canOpenViewer, searchSupported, list, watch, remoteFiles: deps.remoteFiles, remoteFilesLocalize }
 }
 
 /**
@@ -556,6 +628,14 @@ export interface FilesTreeSurfaceDeps {
   readonly canOpenViewer: () => ((address: string) => boolean) | undefined
   /** Whether this host exposes the workspace search the endpoint wraps. */
   readonly searchSupported: () => boolean
+  /** The lazily remote-bound `workspaceFiles.list` the local provider lists through. */
+  readonly list: ListWorkspaceDirectory
+  /** The lazily remote-bound `workspaceFiles.changes` stream the local provider watches through. */
+  readonly watch: WatchWorkspaceDirectory
+  /** The `remoteFiles` channel client; absent disables remote selections entirely. */
+  readonly remoteFiles?: RemoteFilesClient | undefined
+  /** Code → localized message for the fixed `remoteFiles` failure groups (plugin dictionary). */
+  readonly remoteFilesLocalize?: ((code: RemoteFilesFailureCode) => string) | undefined
 }
 
 /** Selector hook stand-in for a composition without the viewer registry: a constant zero. */
@@ -598,12 +678,61 @@ export function createFilesTreeSurface(
       run: props.searchFiles,
     } satisfies FilesTreeSearchSeat
     : undefined
+  const menu = filesMenuSeat(filesMenuHookOf(props), sessionId, deps.menuKinds)
+  const searchRun = search !== undefined && props.searchFiles !== undefined ? props.searchFiles : undefined
   return {
     sessionId, useStore, actions, face, openFile, openFileIn, useTreeSelection, selectRoot, takeover, t,
-    menu: filesMenuSeat(filesMenuHookOf(props), sessionId, deps.menuKinds),
+    menu,
     canOpen: deps.canOpenViewer(),
     useCanOpen: props.useCanOpen ?? noViewerSource,
     search,
+    // The provider is created per selection: the surface's session-bound
+    // ports close over it, and the owners (RootSwitcher, the preview
+    // navigator) memoize the product against their selection so the
+    // takeover identity cannot drift between a new provider and an old
+    // record. The remote branch resolves to `undefined` without a channel —
+    // the owners then cannot take that selection over.
+    resolveProvider: (root: FilesRootSelection, onInvalidated?: (reason: RemoteFilesFailureCode) => void): WorkspaceFilesProvider | undefined =>
+      resolveWorkspaceFilesProvider(root, {
+        local: selection => createLocalWorkspaceProvider(
+          { sessionId, root: selection.ref, incarnation: selection.incarnation },
+          selection.path,
+          {
+            list: deps.list,
+            watch: deps.watch,
+            ...(searchRun === undefined ? {} : { search: searchRun }),
+            open: (address, options) => {
+              if (options?.replaceTab === undefined) openFile(address)
+              else openFileIn(options.replaceTab, address)
+            },
+            // Re-read the registry verdict per call: the provider lives longer
+            // than the epoch hook's re-render, so a boot-time predicate would
+            // freeze whatever the registry answered first.
+            canOpen: address => deps.canOpenViewer()?.(address) ?? true,
+            ...(menu === undefined ? {} : { menu }),
+          },
+        ),
+        ...(deps.remoteFiles === undefined ? {} : {
+          ssh: selection => createSshWorkspaceProvider(
+            { sessionId, root: selection.ref, incarnation: selection.incarnation },
+            deps.remoteFiles!,
+            deps.remoteFilesLocalize ?? (code => `remoteFiles.error.${REMOTE_FILES_FAILURE_GROUPS[code]}`),
+            reason => { onInvalidated?.(reason) },
+          ),
+        }),
+      }),
+    // One authorization lease per remote selection — the metadata wait the
+    // owner loops, never a filesystem watch. Absent without the channel.
+    ...(deps.remoteFiles === undefined ? {} : {
+      observeAuthority: async (root: RemoteRootSelection, signal: AbortSignal): Promise<void> => {
+        await deps.remoteFiles!.wait({
+          sessionId,
+          environmentId: root.ref.environmentId,
+          rootId: root.ref.rootId,
+          authorization: root.incarnation,
+        }, signal)
+      },
+    }),
   }
 }
 

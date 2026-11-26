@@ -31,6 +31,7 @@ English: [README.en.md](./README.en.md)
   - 已实现（M1/M2/M3/M4）：§3 组合结构、§4 scope 解析、§5 两个 provider、§6 拓扑快照与 parity 矩阵、§7 Root 注册表 / 命令 / 面板（主根由 session cwd 推导，ADR-0008） / 跨进程 Authority Lease。
   - 仍为 Target：§8 的长期形态（上游 seam）与 §9 附录为备忘。
 - [registry-authority-service.md](./registry-authority-service.md) — 多 Host 共享 Registry：有序准入、内核认证 IPC、全消费者接缝、保守故障处理与接管（已实现；平台证据见路线账本）。
+- [file-browsing-providers.md](./file-browsing-providers.md) — Files 标签页的本地/SSH 远端浏览 Provider：组件依赖、选择/身份/权威/传输分层、能力矩阵、元数据租约（非文件监视）与有界安全姿态（已实现 P1–P5；远端预览扩展仍为 Target）。
 
 ## 推荐命名
 

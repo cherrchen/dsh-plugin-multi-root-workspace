@@ -11,6 +11,7 @@ import { dirname, isAbsolute } from 'node:path'
 import { z } from 'zod'
 import { canonicalPath } from '@deepseek-ai/dsh-sandbox'
 import { isCanonicallyUnder, primaryKey } from '../roots.ts'
+import { REMOTE_FILES_LIMITS } from './files-contract.ts'
 
 export class ManifestError extends Error {
   constructor(readonly code: string, message: string) {
@@ -79,6 +80,16 @@ export const bindingSchema = z.object({
   /** Personal binding incarnation. Recreating a removed binding cannot revive its old grant. */
   bindingId: z.uuid().optional(),
   path: z.string().min(1).max(4096),
+  /**
+   * Operator opt-in to Host-side directory listing (ADR-0052 P3): the
+   * deployment asserts that no untrusted remote process can replace this
+   * workspace's ancestor or descendant directories — or change mount/symlink
+   * resolution — while the Host browses. A deployment assertion, not a
+   * runtime proof. Helper transports may declare it too: browsing then uses
+   * a separate SFTP path admission and never weakens the Helper object grant
+   * used by exec/copy.
+   */
+  directoryListing: z.literal('stable-path').optional(),
   actions: z.array(z.enum(['read', 'write', 'exec'])).min(1),
   transfers: z.array(z.object({
     direction: z.enum(['import', 'export']),
@@ -228,6 +239,17 @@ export function parseDeploymentManifest(text: string, manifestPath: string, opti
     seen.add(key)
     if (new Set(binding.actions).size !== binding.actions.length) {
       throw new ManifestError('invalid-manifest', `binding "${binding.rootId}" repeats an action`)
+    }
+    if (binding.directoryListing !== undefined && !binding.actions.includes('read')) {
+      throw new ManifestError('invalid-manifest', `binding "${binding.rootId}" declares directoryListing without read`)
+    }
+    // The listing contract bounds the absolute lookup path: an opt-in root
+    // already past the byte floor is refused HERE, at declaration time —
+    // bindings without the opt-in are untouched (existing grants keep
+    // working; they simply never reach the listing service).
+    if (binding.directoryListing === 'stable-path'
+      && Buffer.byteLength(binding.path, 'utf8') > REMOTE_FILES_LIMITS.pathBytes) {
+      throw new ManifestError('invalid-manifest', `binding "${binding.rootId}" declares directoryListing but its root path exceeds ${REMOTE_FILES_LIMITS.pathBytes} bytes`)
     }
     const primary = primaryKey(binding.primary)
     const list = byPrimary.get(primary) ?? []

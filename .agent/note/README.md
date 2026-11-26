@@ -22,6 +22,7 @@ English: [README.en.md](./README.en.md)
 
 - [dsh-compat-contract.md](./dsh-compat-contract.md) — DSH 兼容性契约：allowlist 的唯一真源、`multiRootCompat` 门禁对测试的影响、`confine` 同步/异步保形、`src/compat/` 适配层规则、升级车道用法与两处曾踩过的安静坑。
 - [windows-deny-broker-packaged-child.md](./windows-deny-broker-packaged-child.md) — B9 Windows deny broker 的 MSIX 别名陷阱：Store 版 `pwsh.exe` 经执行别名激活后令牌带包身份，`NtCompareTokens` fail-closed；含最小复现矩阵与修复方向。
+- [remote-binding-capability-checklist.md](./remote-binding-capability-checklist.md) — SSH 远端绑定能力新增清单：动作/配对/部署断言的分类方法、从 strict wire schema 到 manifest/digest/verifier/runtime admission/全部编辑表面的完整改动地图，以及 `directoryListing` 案例和反复出现的漏改坑。
 
 ## 不应该存放什么
 

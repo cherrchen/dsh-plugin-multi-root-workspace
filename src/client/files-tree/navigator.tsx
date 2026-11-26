@@ -70,14 +70,16 @@
  * @module @dsh-electron/dsh-plugin-multi-root-workspace/client/files-tree/navigator
  */
 
-import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { createPortal } from 'react-dom'
 import type { TabId } from '@deepseek-ai/dsh-client-ui-dockkit'
 import { parseFileAddress } from '@deepseek-ai/dsh-util-workspace-path'
 import type { RootView } from '../../contract.ts'
 import type { NativeTreeRenderer } from '../../compat/files-tree.ts'
 import type { PanelClient } from '../panel-client.ts'
-import { FilesTree, type FilesTreeSurface } from './adapter.tsx'
+import type { FilesTreeSurface } from './adapter.tsx'
+import { providerKey, treeBucketId, type WorkspaceFilesProvider } from './provider.ts'
+import { localRootSelection } from './providers/resolver.ts'
 import type { SearchFailureDescriber } from './describe-failure.ts'
 import { rootForPath } from './locate.ts'
 import { FilesPane } from './pane.tsx'
@@ -115,16 +117,14 @@ export interface NavigatorRetargetProps {
 interface Takeover {
   /** Lifetime handed to the tree's face: aborting forgets the bucket and closes the watch tree. */
   readonly signal: AbortSignal
-  /** The store bucket's key — the dockkit pane id where the hook exists, else a generated one. */
-  readonly paneId: TabId
-  /** The root the tree lists. */
-  readonly root: string
-  /**
-   * The same root's registry id — what the search endpoint takes. It lands in
-   * the same state commit as `root`, so the pane's search record key and the
-   * root its requests name can never come from two different states.
-   */
-  readonly rootId: string
+  /** The owner — the dockkit pane id where the hook exists, else a generated one. */
+  readonly owner: TabId
+  /** The store bucket's key — `treeBucketId(owner, provider.identity)`. */
+  readonly bucketId: TabId
+  /** The provider the tree browses with, snapshotted with the signal. */
+  readonly provider: WorkspaceFilesProvider
+  /** `providerKey(provider.identity)` — what the reveal gate compares. */
+  readonly providerKey: string
 }
 
 /** One `list` answer resolved against the previewed path. */
@@ -305,16 +305,34 @@ export function NavigatorRetarget(props: NavigatorRetargetProps): ReactNode {
   // and nothing a cleanup writes can resurrect a dropped record.
   // Both fields of the one `ResolvedRoot` record: paired by construction.
   const root = resolved?.root
-  const rootPath = root?.path
-  const rootId = root?.id
   const resolvedPath = resolved?.path
   const takeoverCtl = filesTree.takeover
-  const bucket = filesTree.useStore(store => (paneId === undefined ? undefined : store.byTab[paneId]))
+  // The selection's provider, cached by identity key for the same reason the
+  // switcher caches it: the surface rebuilds per render, and the takeover
+  // effect's deps need a provider that stays referentially stable while the
+  // key does. A re-registered root (new `addedAt`) keys fresh on purpose.
+  const providerCache = useRef(new Map<string, WorkspaceFilesProvider>())
+  const provider = useMemo(() => {
+    if (root === undefined) return undefined
+    const selection = localRootSelection(root)
+    const key = providerKey({ sessionId: filesTree.sessionId, root: selection.ref, incarnation: selection.incarnation })
+    const known = providerCache.current.get(key)
+    if (known !== undefined) return known
+    const created = filesTree.resolveProvider(selection)
+    // A remote-kind selection can resolve to `undefined` (no browse channel);
+    // this navigator only ever passes local selections, but the type no
+    // longer promises a provider — cache only a real one.
+    if (created !== undefined) providerCache.current.set(key, created)
+    return created
+  }, [root, filesTree])
+  const pKey = provider === undefined ? undefined : providerKey(provider.identity)
+  const bucketId = paneId === undefined || provider === undefined ? undefined : treeBucketId(paneId, provider.identity)
+  const bucket = filesTree.useStore(store => (bucketId === undefined ? undefined : store.byTab[bucketId]))
   useEffect(() => {
-    if (bucket !== undefined && takeover !== null && takeover.paneId === paneId && takeover.root === rootPath) {
-      takeoverCtl.save(takeover.paneId, { root: takeover.root, expanded: bucket.expanded })
+    if (bucket !== undefined && takeover !== null && takeover.owner === paneId && takeover.providerKey === pKey) {
+      takeoverCtl.save(takeover.owner, { providerKey: takeover.providerKey, expanded: bucket.expanded })
     }
-  }, [bucket, takeover, paneId, rootPath, takeoverCtl])
+  }, [bucket, takeover, paneId, pKey, takeoverCtl])
 
   // The body's live scroll offset, reported by the fork itself through
   // `onScrollOffset` — the fork's store only hears the offset on body
@@ -324,7 +342,7 @@ export function NavigatorRetarget(props: NavigatorRetargetProps): ReactNode {
   // a switch still in flight — and the adapter refuses it entirely once
   // the owner is dead.
   const onScrollOffset = useCallback((offset: number): void => {
-    if (takeover !== null) takeoverCtl.save(takeover.paneId, { root: takeover.root, scrollTop: offset })
+    if (takeover !== null) takeoverCtl.save(takeover.owner, { providerKey: takeover.providerKey, scrollTop: offset })
   }, [takeover, takeoverCtl])
 
   // The hold: while the aside exists AND the file belongs to an additional
@@ -341,17 +359,18 @@ export function NavigatorRetarget(props: NavigatorRetargetProps): ReactNode {
   // one: while a root switch is in flight the body still draws the old tree,
   // and handing it the new root's memory would pair one root's expansion set
   // with the other root's bucket.
-  const savedTree = takeover === null ? undefined : takeoverCtl.saved(takeover.paneId, takeover.root)
+  const savedTree = takeover === null ? undefined : takeoverCtl.saved(takeover.owner, takeover.providerKey)
   useEffect(() => {
-    if (aside === null || rootPath === undefined || rootId === undefined || paneId === undefined || takeoverCtl === undefined) {
+    if (aside === null || provider === undefined || pKey === undefined || bucketId === undefined || paneId === undefined || takeoverCtl === undefined) {
       setTakeover(null)
       return
     }
     setTakeover({
-      signal: takeoverCtl.signal(paneId, rootPath, paneIdentified.current ? () => paneAlive(paneId) : undefined),
-      paneId,
-      root: rootPath,
-      rootId,
+      signal: takeoverCtl.signal(paneId, pKey, paneIdentified.current ? () => paneAlive(paneId) : undefined),
+      owner: paneId,
+      bucketId,
+      provider,
+      providerKey: pKey,
     })
     aside.setAttribute('data-mrfw-navigator', '')
     const capturedPaneId = paneId
@@ -362,10 +381,10 @@ export function NavigatorRetarget(props: NavigatorRetargetProps): ReactNode {
       aside.removeAttribute('data-mrfw-navigator')
       if (!identified) takeoverCtl.end(capturedPaneId)
     }
-  }, [aside, rootPath, rootId, paneId, takeoverCtl])
+  }, [aside, provider, pKey, bucketId, paneId, takeoverCtl])
 
   const onRevealSettled = useCallback((path: string): void => {
-    if (takeover !== null) takeoverCtl.save(takeover.paneId, { root: takeover.root, revealed: path })
+    if (takeover !== null) takeoverCtl.save(takeover.owner, { providerKey: takeover.providerKey, revealed: path })
   }, [takeover, takeoverCtl])
 
   // The reveal is handed over only for the path the current root was
@@ -375,17 +394,9 @@ export function NavigatorRetarget(props: NavigatorRetargetProps): ReactNode {
   // address in the old root's tree and overwrite its `revealed` memory.
   // Waiting is invisible: the body keeps drawing the old root until the hold
   // re-keys, then the new root's own snapshot seeds.
-  const revealLive = takeover !== null && rootPath !== undefined
-    && resolvedPath === absolutePath && takeover.root === rootPath
+  const revealLive = takeover !== null && pKey !== undefined
+    && resolvedPath === absolutePath && takeover.providerKey === pKey
 
-  // A tree row's open replaces the preview's own tab — the native navigator's
-  // `openResource(address, { replaceTab: true })` spelled `openFileIn`. A
-  // composition without the dockkit content hook has no tab to replace, so the
-  // row degrades to the plain open route like any other consumer.
-  const openTreeFile = (address: string): void => {
-    if (openTabId === undefined) filesTree.openFile(address)
-    else filesTree.openFileIn(openTabId, address)
-  }
 
   return (
     <>
@@ -396,59 +407,31 @@ export function NavigatorRetarget(props: NavigatorRetargetProps): ReactNode {
       <span ref={anchorRef} data-mrfw-navigator-anchor style={{ display: 'none' }} />
       {aside !== null && takeover !== null
         ? createPortal(
-            // The search seat decides the preview's form: with one the pane
-            // draws the same bar/results/settings the Files page uses (its
-            // form is the preview's), without one the tree is portaled exactly
-            // as before — the behavior of every host before `0.2.2-rc.2`.
-            filesTree.search === undefined
-              ? (
-                <FilesTree
-                  tabId={takeover.paneId}
-                  sessionId={filesTree.sessionId}
-                  root={takeover.root}
-                  signal={takeover.signal}
-                  useStore={filesTree.useStore}
-                  actions={filesTree.actions}
-                  hold={filesTree.face.hold}
-                  release={filesTree.face.release}
-                  toggle={filesTree.face.toggle}
-                  onOpen={openTreeFile}
-                  t={filesTree.t}
-                  nativeTree={props.nativeTree}
-                  menu={filesTree.menu}
-                  canOpen={filesTree.canOpen}
-                  useCanOpen={filesTree.useCanOpen}
-                  onScrollOffset={onScrollOffset}
-                  reveal={revealLive
-                    ? { path: absolutePath, revealed: savedTree?.revealed, onSettled: onRevealSettled }
-                    : undefined}
-                  saved={savedTree}
-                />
-              )
-              : (
-                <FilesPane
-                  filesTree={filesTree}
-                  mode="preview"
-                  // Every root-dependent field comes from the takeover record:
-                  // it is the only place where a root and its id commit together.
-                  stateKey={searchStateKey(takeover.paneId, takeover.root)}
-                  rootId={takeover.rootId}
-                  tabId={takeover.paneId}
-                  root={takeover.root}
-                  signal={takeover.signal}
-                  useStore={filesTree.useStore}
-                  actions={filesTree.actions}
-                  onOpenFile={openTreeFile}
-                  nativeTree={props.nativeTree}
-                  reveal={revealLive
-                    ? { path: absolutePath, revealed: savedTree?.revealed, onSettled: onRevealSettled }
-                    : undefined}
-                  saved={savedTree}
-                  onScrollOffset={onScrollOffset}
-                  previewPath={absolutePath}
-                  describeFailure={props.describeFailure}
-                />
-              ),
+            // One pane for both forms: a provider without the `search` port
+            // makes FilesPane return the bare FilesTree — the behavior of
+            // every host before `0.2.2-rc.2` — while a search-capable
+            // provider draws the preview's bar/results/settings. Every
+            // root-dependent field comes from the takeover record: it is the
+            // only place where a provider and its key commit together.
+            <FilesPane
+              filesTree={filesTree}
+              mode="preview"
+              stateKey={searchStateKey(takeover.owner, takeover.providerKey)}
+              provider={takeover.provider}
+              tabId={takeover.bucketId}
+              signal={takeover.signal}
+              replaceTab={openTabId}
+              useStore={filesTree.useStore}
+              actions={filesTree.actions}
+              nativeTree={props.nativeTree}
+              reveal={revealLive
+                ? { path: absolutePath, revealed: savedTree?.revealed, onSettled: onRevealSettled }
+                : undefined}
+              saved={savedTree}
+              onScrollOffset={onScrollOffset}
+              previewPath={absolutePath}
+              describeFailure={props.describeFailure}
+            />,
             aside,
           )
         : null}

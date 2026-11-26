@@ -15,7 +15,7 @@
  */
 
 import type { RootView, RootsView } from '../../contract.ts'
-import { childPath } from './face.ts'
+import { childPath, type JoinTreeChild } from './resource-path.ts'
 import type { FilesTabState } from './store.ts'
 
 /**
@@ -105,10 +105,11 @@ export interface FileLocation {
  * `pending: false` like a settled native one.
  * @param tree - the tab's tree.
  * @param relativePath - the file's path under the tree's root, `/`-separated.
+ * @param joinChild - the provider's child-key join (the local default here).
  * @returns the ancestors found so far, the file's tree key, and whether a
  *   level is pending.
  */
-export function locateFile(tree: Pick<FilesTabState, 'root' | 'levels'>, relativePath: string): FileLocation {
+export function locateFile(tree: Pick<FilesTabState, 'root' | 'levels'>, relativePath: string, joinChild: JoinTreeChild = childPath): FileLocation {
   const caseless = windowsRoot(tree.root)
   const parts = relativePath.split('/')
   const ancestors: { readonly parent: string; readonly path: string }[] = []
@@ -123,7 +124,7 @@ export function locateFile(tree: Pick<FilesTabState, 'root' | 'levels'>, relativ
     const entry = candidates.find(candidate => candidate.name === part)
       ?? (caseless ? candidates.find(candidate => candidate.name.toLowerCase() === part.toLowerCase()) : undefined)
     if (entry === undefined) return { ancestors, current: undefined, pending: false }
-    const path = childPath(parent, entry.name)
+    const path = joinChild(parent, entry.name)
     if (type === 'directory') ancestors.push({ parent, path })
     parent = path
   }

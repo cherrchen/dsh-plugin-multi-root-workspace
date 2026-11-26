@@ -148,3 +148,107 @@ it.skipIf(process.platform === 'win32' || sftpServer === undefined)('creates pri
     expect(statSync(path).mode & 0o777).toBe(permissions ?? 0o644)
   }
 })
+
+/** P3: `readdirBounded` — strict reply types, name validation, and the three budgets. */
+describe.skipIf(process.platform === 'win32')('SFTP bounded readdir', () => {
+  const utf8 = (text: string) => [...Buffer.from(text, 'utf8')]
+  const handle = (id: number, bytes: number[] = [1]) => frame([102, ...be32(id), ...be32(bytes.length), ...bytes])
+  const statusCode = (id: number, code: number) => frame([101, ...be32(id), ...be32(code), ...be32(0), ...be32(0)])
+  const attrs = (perms: number) => [...be32(4), ...be32(perms)]
+  const entry = (name: string, perms: number, longname = '') =>
+    [...be32(name.length), ...utf8(name), ...be32(longname.length), ...utf8(longname), ...attrs(perms)]
+  const nameReply = (id: number, entries: number[][]) => frame([104, ...be32(id), ...be32(entries.length), ...entries.flat()])
+  const signal = () => new AbortController().signal
+
+  /** A fake `ssh` answering each complete request with the next queued reply frame. */
+  async function scriptedSsh(replies: number[][]) {
+    const script = join(dir, 'emit.mjs')
+    writeFileSync(script, `
+      const replies = ${JSON.stringify(replies.map(r => Buffer.from(r).toString('base64')))}
+      let input = Buffer.alloc(0); let next = 0
+      process.stdin.on('data', chunk => {
+        input = Buffer.concat([input, chunk])
+        while (input.length >= 4 && input.length >= input.readUInt32BE(0) + 4) {
+          input = input.subarray(input.readUInt32BE(0) + 4)
+          if (next < replies.length) process.stdout.write(Buffer.from(replies[next++], 'base64'))
+        }
+      })
+    `)
+    const wrapper = join(dir, 'fake-ssh.sh')
+    writeFileSync(wrapper, `#!/bin/sh\nexec "${process.execPath}" "${script}" "$@"\n`)
+    chmodSync(wrapper, 0o755)
+    const client = SftpClient.connect('fake-alias', { ssh: wrapper })
+    clients.push(client)
+    return client
+  }
+  const listing = (names: number[][]) => scriptedSsh([version(), handle(1), nameReply(2, names), statusCode(3, 1), statusCode(4, 0)])
+
+  it('lists entries with mode-derived types and skips . and ..', async () => {
+    const client = await listing([
+      entry('.', 0o040755), entry('..', 0o040755),
+      entry('dir', 0o040755), entry('file.txt', 0o100644), entry('link', 0o120777), entry('fifo', 0o010644),
+    ])
+    await client.init()
+    const result = await client.readdirBounded('/root', signal())
+    expect(result.truncated).toBe(false)
+    expect(result.entries).toEqual([
+      { name: 'dir', type: 'directory' }, { name: 'file.txt', type: 'file' },
+      { name: 'link', type: 'symlink' }, { name: 'fifo', type: 'other' },
+    ])
+  })
+
+  it('keeps literal backslashes and JSON-escapable names verbatim', async () => {
+    const client = await listing([entry('a\\b', 0o100644), entry('q"q', 0o100644), entry('with space', 0o040755)])
+    await client.init()
+    const result = await client.readdirBounded('/root', signal())
+    expect(result.entries.map(e => e.name)).toEqual(['a\\b', 'q"q', 'with space'])
+  })
+
+  it('rejects a slash-carrying name, an empty NAME frame, and wrong reply types', async () => {
+    for (const reply of [
+      nameReply(2, [entry('a/b', 0o100644)]),
+      nameReply(2, []),
+      statusCode(2, 0),
+      frame([105, ...be32(2), ...attrs(0o100644)]),
+    ]) {
+      const client = await scriptedSsh([version(), handle(1), reply, statusCode(3, 0)])
+      await client.init()
+      await expect(client.readdirBounded('/root', signal())).rejects.toMatchObject({ name: 'SftpStatusError', message: 'invalid-listing' })
+    }
+  })
+
+  it('rejects duplicate names and undecodable names as invalid-listing', async () => {
+    const dup = await scriptedSsh([version(), handle(1), nameReply(2, [entry('x', 0o100644), entry('x', 0o100644)]), statusCode(3, 0)])
+    await dup.init()
+    await expect(dup.readdirBounded('/root', signal())).rejects.toMatchObject({ message: 'invalid-listing' })
+    const badUtf8 = [...be32(1), 0xff, ...be32(0), ...attrs(0o100644)]
+    const client = await scriptedSsh([version(), handle(1), nameReply(2, [badUtf8]), statusCode(3, 0)])
+    await client.init()
+    await expect(client.readdirBounded('/root', signal())).rejects.toMatchObject({ message: 'invalid-listing' })
+  })
+
+  it('marks a listing truncated when the incoming wire budget is exceeded', async () => {
+    // Three ~260KB NAME frames: the third pushes cumulative wire bytes over 512KiB.
+    const big = 'x'.repeat(260_000)
+    const client = await scriptedSsh([
+      version(), handle(1),
+      nameReply(2, [entry('a', 0o100644, big)]),
+      nameReply(3, [entry('b', 0o100644, big)]),
+      nameReply(4, [entry('c', 0o100644, big)]),
+      statusCode(5, 0),
+    ])
+    await client.init()
+    const result = await client.readdirBounded('/root', signal())
+    expect(result.truncated).toBe(true)
+    expect(result.entries.length).toBeLessThanOrEqual(2)
+  })
+
+  it('enforces strict reply types on realpath and lstat', async () => {
+    const client = await scriptedSsh([version(), frame([105, ...be32(1), ...attrs(0o100644)])])
+    await client.init()
+    await expect(client.realpath('/root')).rejects.toMatchObject({ name: 'SftpStatusError' })
+    const second = await scriptedSsh([version(), nameReply(1, [entry('/root', 0o040755)])])
+    await second.init()
+    await expect(second.lstat('/root')).rejects.toMatchObject({ name: 'SftpStatusError' })
+  })
+})

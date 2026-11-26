@@ -6,6 +6,7 @@
  * loss and no request is ever retried.
  */
 import { spawn } from 'node:child_process'
+import { REMOTE_FILES_LIMITS, validRemoteName, type RemoteEntry, type RemoteFilesListing } from './files-contract.ts'
 
 export class SftpStatusError extends Error {
   constructor(readonly code: number, message: string) {
@@ -292,13 +293,20 @@ export class SftpClient {
   async realpath(path: string): Promise<string> {
     const reply = await this.send(16, 'realpath', sfStr(path))
     if (reply.type === 101) await this.status(reply)
+    if (reply.type !== 104) throw new SftpStatusError(SSH_FX_FAILURE, `realpath: unexpected reply type ${reply.type}`)
     const count = reply.body.readUInt32BE(0)
     if (count === 0) throw new SftpStatusError(SSH_FX_FAILURE, 'realpath returned no names')
-    return reply.body.toString('utf8', 8, 8 + reply.body.readUInt32BE(4))
+    const decoder = new TextDecoder('utf-8', { fatal: true, ignoreBOM: true })
+    try {
+      return decoder.decode(reply.body.subarray(8, 8 + reply.body.readUInt32BE(4)))
+    } catch {
+      throw new SftpStatusError(SSH_FX_FAILURE, 'realpath returned undecodable name')
+    }
   }
   async lstat(path: string): Promise<Attrs> {
     const reply = await this.send(7, 'lstat', sfStr(path))
     if (reply.type === 101) await this.status(reply)
+    if (reply.type !== 105) throw new SftpStatusError(SSH_FX_FAILURE, `lstat: unexpected reply type ${reply.type}`)
     return decodeAttrs(reply.body).attrs
   }
   async readdir(path: string): Promise<SftpDirEntry[]> {
@@ -326,6 +334,97 @@ export class SftpClient {
     } finally { await this.close(handle).catch(() => {}) }
     return entries
   }
+
+  /**
+   * The browse-side listing port (ADR-0052 P3): OPENDIR + bounded READDIR
+   * rounds that produce a `RemoteFilesListing` directly. Unlike {@link readdir}
+   * it never trusts the wire: strict reply types, fatal UTF-8 names, no
+   * longname decode, `.`/`..` skipped, names validated and deduplicated, and
+   * three independent budgets — entry count, cumulative JSON bytes and total
+   * incoming wire bytes. A listing that cannot honor the wire contract fails
+   * `invalid-listing` rather than returning partial trust; a listing that is
+   * merely large returns `truncated` with a well-formed prefix.
+   *
+   * Wire accounting counts every incoming reply body plus its 9-byte frame
+   * overhead; the overshoot is bounded by the one MAX_FRAME packet already in
+   * memory, never by materializing a NAME array beyond the limits.
+   */
+  async readdirBounded(path: string, signal: AbortSignal): Promise<RemoteFilesListing> {
+    const invalid = () => new SftpStatusError(SSH_FX_FAILURE, 'invalid-listing')
+    signal.throwIfAborted()
+    const opened = await this.send(11, 'opendir', sfStr(path))
+    if (opened.type === 101) await this.status(opened)
+    if (opened.type !== 102) throw invalid()
+    const hl = opened.body.readUInt32BE(0)
+    if (hl === 0 || hl > 256 || 4 + hl > opened.body.length) throw invalid()
+    const handle = opened.body.subarray(4, 4 + hl)
+    const decoder = new TextDecoder('utf-8', { fatal: true, ignoreBOM: true })
+    const entries: RemoteEntry[] = []
+    const seen = new Set<string>()
+    let truncated = false
+    // The reply frame carries len(4)+type(1)+id(4) overhead on top of the body.
+    // The terminating STATUS/EOF frame is counted the same way: its bytes
+    // already crossed the wire, so the overshoot stays at most one packet.
+    let wireBytes = opened.body.length + 9
+    let jsonBytes = Buffer.byteLength('{"entries":[],"truncated":false}')
+    try {
+      for (;;) {
+        signal.throwIfAborted()
+        const reply = await this.send(12, 'readdir', sfData(handle))
+        wireBytes += reply.body.length + 9
+        if (reply.type === 101) {
+          if (reply.body.length >= 4 && reply.body.readUInt32BE(0) === SSH_FX_EOF) break
+          await this.status(reply)
+        }
+        if (reply.type !== 104) throw invalid()
+        if (wireBytes > REMOTE_FILES_LIMITS.wireBytes) { truncated = true; break }
+        if (reply.body.length < 4) throw invalid()
+        const count = reply.body.readUInt32BE(0)
+        if (count === 0) throw invalid() // a zero-entry NAME would spin forever
+        let o = 4
+        for (let i = 0; i < count; i++) {
+          // Rough in-read bounds: every field read must fit the frame body
+          // (wellFormedReply already bound the whole packet).
+          if (o + 4 > reply.body.length) throw invalid()
+          const nl = reply.body.readUInt32BE(o); o += 4
+          if (nl > reply.body.length - o) throw invalid()
+          let name: string
+          try { name = decoder.decode(reply.body.subarray(o, o + nl)) } catch { throw invalid() }
+          o += nl
+          if (o + 4 > reply.body.length) throw invalid()
+          const ll = reply.body.readUInt32BE(o); o += 4
+          if (ll > reply.body.length - o) throw invalid()
+          o += ll // longname is decoration; never decoded
+          if (o >= reply.body.length) throw invalid()
+          let parsed: ReturnType<typeof decodeAttrs>
+          try { parsed = decodeAttrs(reply.body.subarray(o)) } catch { throw invalid() }
+          if (parsed.end > reply.body.length - o) throw invalid()
+          o += parsed.end
+          if (name === '.' || name === '..') continue
+          if (!validRemoteName(name) || seen.has(name)) throw invalid()
+          const permissions = parsed.attrs.permissions ?? 0
+          const kind = permissions & 0o170000
+          const entry: RemoteEntry = {
+            name,
+            type: kind === 0o120000 ? 'symlink' : kind === 0o040000 ? 'directory' : kind === 0o100000 ? 'file' : 'other',
+          }
+          const entryBytes = Buffer.byteLength(JSON.stringify(entry)) + (entries.length === 0 ? 0 : 1)
+          if (entries.length >= REMOTE_FILES_LIMITS.entries || jsonBytes + entryBytes > REMOTE_FILES_LIMITS.responseBytes) {
+            // A valid entry did not fit: the listing returns the prefix
+            // already accepted — later, shorter entries are NOT admitted.
+            truncated = true
+            break
+          }
+          jsonBytes += entryBytes
+          seen.add(name)
+          entries.push(entry)
+        }
+        if (truncated) break
+      }
+    } finally { await this.close(handle).catch(() => {}) }
+    return { entries, truncated }
+  }
+
   async extended(name: string, ...parts: Buffer[]): Promise<void> {
     const reply = await this.send(200, `extended:${name}`, sfStr(name), ...parts)
     if (reply.type === 101) await this.status(reply)

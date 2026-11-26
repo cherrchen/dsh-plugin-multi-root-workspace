@@ -67,6 +67,13 @@ export interface RemoteEndpointView {
   readonly actions: readonly RemoteAction[]
   readonly transfers: readonly RemoteTransferView[]
   readonly capabilities: RemoteCapabilitiesView
+  /**
+   * Opaque `remoteFiles.list` authorization (ADR-0052 P3): present only while
+   * the endpoint is registered, path-verified, opted in, and the listing
+   * service is mounted. Hash of the grant's live identity — it carries no
+   * path, digest, or secret the client could reuse elsewhere.
+   */
+  readonly browseAuthorization?: string | undefined
   /** Why the endpoint is not usable; a code the panel localizes. */
   readonly reason?: string | undefined
 }
@@ -102,6 +109,7 @@ const endpointViewSchema = z.object({
   capabilities: z.object({
     read: z.boolean(), write: z.boolean(), exec: z.boolean(), receive: z.boolean(), send: z.boolean(),
   }),
+  browseAuthorization: z.string().regex(/^[0-9a-f]{64}$/).optional(),
   reason: z.string().optional(),
 })
 

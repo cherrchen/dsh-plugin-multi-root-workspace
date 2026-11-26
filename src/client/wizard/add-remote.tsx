@@ -45,10 +45,12 @@ interface BindingForm {
   exec: boolean
   imports: ReadonlySet<string>
   exports: ReadonlySet<string>
+  /** The stable-SFTP-path Files browsing opt-in (ADR-0052); off by default. */
+  directoryListing: boolean
 }
 
 const blankBinding = (): BindingForm => ({
-  path: '', read: true, write: false, exec: false, imports: new Set(), exports: new Set(),
+  path: '', read: true, write: false, exec: false, imports: new Set(), exports: new Set(), directoryListing: false,
 })
 
 /** The SFTP directory picker, restyled on the wizard kit. */
@@ -246,7 +248,9 @@ export function RemoteWizard(props: RemoteWizardProps): ReactNode {
     && view?.credentials.find(credential => credential.id === (selected.credential as { credentialId: string }).credentialId)?.kind === 'password'
     && (selected.credential as { accessKeyId?: string }).accessKeyId === undefined
   const needsLink = selected?.credential.kind === 'managed' && !linked
-  const environmentReady = selected !== undefined && selected.helper !== null && !needsLink
+  // Helper is required only for exec. A Helper-less connection is a valid
+  // SFTP endpoint for read/write/copy and for the explicit browse opt-in.
+  const environmentReady = selected !== undefined && !needsLink
   const select = (id: string): void => {
     setSelectedId(id)
     setTestResult(undefined)
@@ -377,6 +381,7 @@ export function RemoteWizard(props: RemoteWizardProps): ReactNode {
     ]
     const draftBinding: SshBindingDraft = {
       environmentId: selected.environmentId, path: binding.path.trim(), actions,
+      ...(binding.directoryListing ? { directoryListing: 'stable-path' as const } : {}),
       ...(transfers.length === 0 ? {} : { transfers }),
     }
     const state = await submitState('binding', signal => ssh!.bindingSave(sessionId, view.revision, draftBinding, signal))
@@ -574,9 +579,17 @@ export function RemoteWizard(props: RemoteWizardProps): ReactNode {
               <WizardCheckbox key={action} checked={binding[action]}
                 disabled={busy || (action === 'exec' && !binding.exec && selected.exec === undefined)}
                 label={t(`remote.capability.${action}`)}
-                onChange={next => setBinding({ ...binding, [action]: next })} />
+                onChange={next => setBinding({ ...binding, [action]: next, ...(action === 'read' && !next ? { directoryListing: false } : {}) })} />
             ))}
           </div>
+        </section>
+        <section className="mrfw-wizSection" aria-label={t('ssh.binding.directoryListing')}>
+          <div className="mrfw-wizCheckRow">
+            <WizardCheckbox checked={binding.directoryListing} disabled={busy || !binding.read}
+              label={t('ssh.binding.directoryListing')}
+              onChange={next => setBinding({ ...binding, directoryListing: next })} />
+          </div>
+          <p className="mrfw-note">{t('ssh.binding.directoryListingHint')}</p>
         </section>
         {localPeers.length === 0 ? null : (
           <section className="mrfw-wizSection" aria-label={t('ssh.binding.transfers')}>
@@ -622,6 +635,10 @@ export function RemoteWizard(props: RemoteWizardProps): ReactNode {
         <div className="mrfw-wizSummaryRow">
           <dt>{t('wizard.summaryActions')}</dt>
           <dd>{actions.map(action => t(`remote.capability.${action}`)).join(', ') || t('wizard.summaryNone')}</dd>
+        </div>
+        <div className="mrfw-wizSummaryRow">
+          <dt>{t('ssh.binding.directoryListing')}</dt>
+          <dd>{binding.directoryListing ? t('wizard.summaryEnabled') : t('wizard.summaryNone')}</dd>
         </div>
         <div className="mrfw-wizSummaryRow">
           <dt>{t('wizard.summaryTransfers')}</dt>

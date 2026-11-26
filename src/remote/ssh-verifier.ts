@@ -8,10 +8,12 @@ import type { RemoteEndpointVerifier } from './contract.ts'
 import { environmentDigest, type RemoteBinding, type RemoteEnvironment } from './manifest.ts'
 import type { SshEnvironment, SftpEnvironment } from './ssh-environment.ts'
 
-/** The two connection openings verification needs; the SSH manager implements it. */
+/** The connection openings verification needs; the SSH manager implements it. */
 export interface SshEndpointManager {
   open(environmentId: string, workspace?: string, expectedDigest?: string): Promise<SshEnvironment>
   openSftp(environmentId: string, signal?: AbortSignal, expectedDigest?: string): Promise<SftpEnvironment>
+  /** An owned browse channel (ADR-0052 P3); a broker or test manager may not have one. */
+  openFilesSftp?(environmentId: string, signal: AbortSignal, expectedDigest: string): Promise<SftpEnvironment & { live(): boolean }>
 }
 
 /** Verification errors keep the registry's RemoteAdmissionError codes. */
@@ -25,7 +27,7 @@ export class EndpointVerifyError extends Error {
 export class SshEndpointVerifier implements RemoteEndpointVerifier {
   constructor(private readonly manager: SshEndpointManager) {}
 
-  async verify(environment: RemoteEnvironment, binding: Pick<RemoteBinding, 'path'>, signal: AbortSignal, workspace = binding.path): Promise<{ platform: 'linux' | 'darwin'; target: { kind: 'object' | 'path'; value: string } }> {
+  async verify(environment: RemoteEnvironment, binding: Pick<RemoteBinding, 'path' | 'directoryListing'>, signal: AbortSignal, workspace = binding.path): Promise<{ platform: 'linux' | 'darwin'; target: { kind: 'object' | 'path'; value: string } }> {
     if (environment.transport === 'sftp') return await this.verifySftp(environment, binding, signal)
     if (signal.aborted) throw new EndpointVerifyError('endpoint-unverifiable', 'verification aborted')
     const env = await this.manager.open(environment.environmentId, workspace, environmentDigest(environment))
@@ -59,6 +61,13 @@ export class SshEndpointVerifier implements RemoteEndpointVerifier {
       const probe = JSON.parse(collected.stdout!.readFrom(0).text) as { real: string; dev: string; ino: string; isDirectory: boolean }
       if (!probe.isDirectory) throw new EndpointVerifyError('endpoint-unverifiable', `${binding.path} is not a directory`)
       if (probe.real !== binding.path) throw new EndpointVerifyError('endpoint-redirected', `${binding.path} resolves to "${probe.real}"`)
+      // Directory browsing is a separate path-identity admission. A Helper
+      // grant remains object-targeted for exec/copy; when the binding opts in,
+      // registration additionally proves the declared path through the same
+      // owned SFTP v3 channel shape a Helper-less endpoint uses. Browsing never
+      // reinterprets dev:ino as a path grant — it relies on this second check
+      // plus the binding's explicit stable-path deployment assertion.
+      if (binding.directoryListing === 'stable-path') await this.verifySftp(environment, binding, signal)
       return { platform: env.hello.platform as 'linux' | 'darwin', target: { kind: 'object', value: `${probe.dev}:${probe.ino}` } }
     } finally {
       if (timer !== undefined) clearTimeout(timer)
@@ -75,22 +84,64 @@ export class SshEndpointVerifier implements RemoteEndpointVerifier {
   }
 
   /**
-   * SFTP endpoints carry no helper handshake: realpath must equal the declared
-   * path and lstat must name a directory. Identity is path-only — SFTP v3 has
-   * no inode, so a same-name swap at publish time cannot be detected here; the
-   * manifest's declared platform stands in for the absent remote handshake.
+   * The SFTP path probe: realpath must equal the declared path and lstat must
+   * name a directory. Helper-less endpoints use it as their registration
+   * identity; Helper endpoints use it only as the additional browse admission
+   * for an opted-in binding. Path-only identity cannot detect a same-name swap
+   * at publish time — SFTP v3 has no inode — which is why browsing remains an
+   * explicit stable-path deployment assertion.
    */
-  private async verifySftp(environment: RemoteEnvironment, binding: Pick<RemoteBinding, 'path'>, signal: AbortSignal): Promise<{ platform: 'linux' | 'darwin'; target: { kind: 'object' | 'path'; value: string } }> {
-    const env = await this.manager.openSftp(environment.environmentId, signal, environmentDigest(environment))
-    if (signal.aborted) throw new EndpointVerifyError('endpoint-unverifiable', 'verification aborted')
-    const real = await env.client.realpath(binding.path).catch((error: unknown) => {
-      throw new EndpointVerifyError('endpoint-unverifiable', `realpath failed: ${error instanceof Error ? error.message : String(error)}`)
-    })
-    if (real !== binding.path) throw new EndpointVerifyError('endpoint-redirected', `${binding.path} resolves to "${real}"`)
-    const attrs = await env.client.lstat(binding.path).catch((error: unknown) => {
-      throw new EndpointVerifyError('endpoint-unverifiable', `lstat failed: ${error instanceof Error ? error.message : String(error)}`)
-    })
-    if ((attrs.permissions! & 0o170000) !== 0o040000) throw new EndpointVerifyError('endpoint-unverifiable', `${binding.path} is not a directory`)
-    return { platform: environment.platform as 'linux' | 'darwin', target: { kind: 'path', value: binding.path } }
+  private async verifySftp(environment: RemoteEnvironment, binding: Pick<RemoteBinding, 'path' | 'directoryListing'>, signal: AbortSignal): Promise<{ platform: 'linux' | 'darwin'; target: { kind: 'object' | 'path'; value: string } }> {
+    // An opt-in binding verifies through an OWNED files channel: a listing
+    // abort closes only this channel, never the shared or a copy's session.
+    const owned = binding.directoryListing === 'stable-path' && typeof this.manager.openFilesSftp === 'function'
+    const deadline = new AbortController()
+    const timer = setTimeout(() => deadline.abort(), 30_000)
+    timer.unref()
+    const combined = AbortSignal.any([signal, deadline.signal])
+    const env = owned
+      ? await this.manager.openFilesSftp!(environment.environmentId, combined, environmentDigest(environment))
+      : await this.manager.openSftp(environment.environmentId, combined, environmentDigest(environment))
+    const abortError = (): EndpointVerifyError => new EndpointVerifyError(
+      'endpoint-unverifiable',
+      deadline.signal.aborted ? 'verification timed out' : 'verification aborted',
+    )
+    const aborted = Promise.withResolvers<never>()
+    let disposal: Promise<void> | undefined
+    const disposeOwned = (): Promise<void> => disposal ??= env.dispose().catch(() => {})
+    const onAbort = (): void => {
+      aborted.reject(abortError())
+      // SFTP v3 has no request cancellation: closing the OWNED channel is the
+      // only way to make a silent realpath/lstat settle. A shared registration
+      // channel is never sacrificed for one probe; its race below still ends
+      // the verification instead of parking the registry write forever.
+      if (owned) void disposeOwned()
+    }
+    combined.addEventListener('abort', onAbort, { once: true })
+    if (combined.aborted) onAbort()
+    try {
+      const probing = (async () => {
+        if (combined.aborted) throw abortError()
+        const real = await env.client.realpath(binding.path).catch((error: unknown) => {
+          throw new EndpointVerifyError('endpoint-unverifiable', `realpath failed: ${error instanceof Error ? error.message : String(error)}`)
+        })
+        if (real !== binding.path) throw new EndpointVerifyError('endpoint-redirected', `${binding.path} resolves to "${real}"`)
+        const attrs = await env.client.lstat(binding.path).catch((error: unknown) => {
+          throw new EndpointVerifyError('endpoint-unverifiable', `lstat failed: ${error instanceof Error ? error.message : String(error)}`)
+        })
+        if ((attrs.permissions! & 0o170000) !== 0o040000) throw new EndpointVerifyError('endpoint-unverifiable', `${binding.path} is not a directory`)
+        if (combined.aborted) throw abortError()
+        return { platform: environment.platform as 'linux' | 'darwin', target: { kind: 'path' as const, value: binding.path } }
+      })()
+      // A probe that loses this race is still awaited by nobody, so consume
+      // its late settlement; the owned channel's disposal is what makes that
+      // settlement happen on the real transport.
+      void probing.catch(() => {})
+      return await Promise.race([probing, aborted.promise])
+    } finally {
+      clearTimeout(timer)
+      combined.removeEventListener('abort', onAbort)
+      if (owned) await disposeOwned()
+    }
   }
 }

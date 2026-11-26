@@ -18,7 +18,9 @@ import type { SessionId } from '@deepseek-ai/dsh-session/types'
 import type { TabId } from '@deepseek-ai/dsh-client-ui-dockkit'
 import type { SnapshotSelectorHook } from '@deepseek-ai/dsh-client-store'
 import { createFilesStore, type FilesState } from '../src/client/files-tree/store.ts'
-import { createList, createWatch, filesFace } from '../src/client/files-tree/face.ts'
+import { filesFace } from '../src/client/files-tree/face.ts'
+import { providerKey, treeBucketId, type WorkspaceFilesProvider } from '../src/client/files-tree/provider.ts'
+import { createList, createLocalWorkspaceProvider, createWatch } from '../src/client/files-tree/providers/local.ts'
 import { createSearchPaneStore, searchStateKey, type SearchPaneStates } from '../src/client/files-tree/search-state.ts'
 import { createSearchPreferenceBook } from '../src/client/files-tree/search-preferences.ts'
 import { FilesPane } from '../src/client/files-tree/pane.tsx'
@@ -30,8 +32,11 @@ import { defaultRules, enabledPaths } from '../src/client/files-tree/search-rule
 const SESSION = 'session-1' as SessionId
 const TAB = 'tab-1' as TabId
 const ROOT = '/repos/payments'
-const KEY = searchStateKey(TAB, ROOT)
 const ROOT_ID = 'root-a'
+/** The provider identity the default mount browses with — the pane's record keys derive from it. */
+const IDENTITY = { sessionId: SESSION, root: { kind: 'additional' as const, rootId: ROOT_ID }, incarnation: '2026-09-12T00:00:00.000Z' }
+const KEY = searchStateKey(TAB, providerKey(IDENTITY))
+const BUCKET = treeBucketId(TAB, IDENTITY)
 
 /** The exclusion paths the default preferences send. */
 function defaultExcluded(): readonly string[] {
@@ -90,6 +95,8 @@ interface Harness {
   readonly preferences: ReturnType<typeof createSearchPreferenceBook>
   /** The element a fresh mount draws (the same surface and stores). */
   readonly element: () => ReactElement
+  /** A provider for another root, bound to the same stubs — the root switch's composition. */
+  readonly providerFor: (rootId: string, absoluteRoot: string) => WorkspaceFilesProvider
   /** Re-render in place with another root record — the same pane, another stateKey. */
   readonly update: (patch: Partial<PaneInputs>) => void
   readonly unmount: () => void
@@ -98,8 +105,8 @@ interface Harness {
 /** The root-record props one render uses; a root switch changes these, not the mount. */
 interface PaneInputs {
   readonly stateKey: string
-  readonly root: string
-  readonly rootId: string
+  readonly provider: WorkspaceFilesProvider
+  readonly tabId: TabId
   readonly mode: 'page' | 'preview'
   readonly previewPath: string | undefined
 }
@@ -141,7 +148,7 @@ function mount(options: {
   }
   const handle = createFilesStore()
   const instance = handle.create('spec')
-  const face = filesFace(createList(remote as never), createWatch(remote as never))(SESSION, instance.actions)
+  const face = filesFace(instance.actions)
   const useStore = <S,>(selector: (state: FilesState) => S): S => useSyncExternalStore(
     notify => instance.subscribe(notify),
     () => selector(instance.getSnapshot()),
@@ -156,6 +163,19 @@ function mount(options: {
     return { root: ROOT, matches: matchesFor(request.query), truncated: false, incomplete: false }
   })
   const search: FilesTreeSearchSeat = { useSearchState, store: searchStore, preferences, run }
+  const onOpenFile = vi.fn<(address: string) => void>()
+  /** One local provider bound to this mount's stubs — the composition slot a root switch re-runs. */
+  const providerFor = (rootId: string, absoluteRoot: string): WorkspaceFilesProvider =>
+    createLocalWorkspaceProvider(
+      { sessionId: SESSION, root: { kind: 'additional' as const, rootId }, incarnation: IDENTITY.incarnation },
+      absoluteRoot,
+      {
+        list: createList(remote as never),
+        watch: createWatch(remote as never),
+        ...(options.withSearch === false ? {} : { search: run }),
+        open: (address) => { onOpenFile(address) },
+      },
+    )
   const surface: FilesTreeSurface = {
     sessionId: SESSION,
     useStore,
@@ -171,13 +191,12 @@ function mount(options: {
     canOpen: undefined,
     useCanOpen: () => 0,
     search: options.withSearch === false ? undefined : search,
-  }
+  } as FilesTreeSurface
   const controller = new AbortController()
-  const onOpenFile = vi.fn<(address: string) => void>()
   const inputs: PaneInputs = {
     stateKey: KEY,
-    root: ROOT,
-    rootId: ROOT_ID,
+    provider: providerFor(ROOT_ID, ROOT),
+    tabId: BUCKET,
     mode: options.mode ?? 'page',
     previewPath: options.previewPath,
   }
@@ -185,13 +204,11 @@ function mount(options: {
     <FilesPane
       filesTree={surface}
       stateKey={inputs.stateKey}
-      rootId={inputs.rootId}
-      tabId={TAB}
-      root={inputs.root}
+      provider={inputs.provider}
+      tabId={inputs.tabId}
       signal={controller.signal}
       useStore={useStore}
       actions={instance.actions}
-      onOpenFile={onOpenFile}
       mode={inputs.mode}
       previewPath={inputs.previewPath}
     />
@@ -205,6 +222,7 @@ function mount(options: {
     onOpenFile,
     preferences,
     element,
+    providerFor,
     update: (patch) => {
       Object.assign(inputs, patch)
       mounted.rerender(element())
@@ -540,8 +558,13 @@ describe('the additional-root search pane in preview mode', () => {
     // Same pane mount (component state survives), another root record: the
     // draft must close uncommitted instead of landing in the new root's
     // preferences — or leaking back into the old root's.
+    const docsProvider = harness.providerFor('root-b', '/repos/docs')
     act(() => {
-      harness.update({ stateKey: searchStateKey(TAB, '/repos/docs'), root: '/repos/docs', rootId: 'root-b' })
+      harness.update({
+        stateKey: searchStateKey(TAB, providerKey(docsProvider.identity)),
+        provider: docsProvider,
+        tabId: treeBucketId(TAB, docsProvider.identity),
+      })
     })
     await waitFor(() => { expect(document.querySelector('[data-files-search-settings]')).toBeNull() })
     expect(harness.preferences.source('/repos/docs').getSnapshot().rules.some(rule => rule.path === 'scratch-dir')).toBe(false)

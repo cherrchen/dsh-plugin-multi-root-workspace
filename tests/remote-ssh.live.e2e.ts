@@ -16,7 +16,8 @@ import { runRemoteCopy, type RemoteCopyDeps } from '../src/remote/transfer.ts'
 import { SshEnvironmentManager } from '../src/remote/ssh-environment.ts'
 import { sshExecBackend } from '../src/remote/ssh-exec-backend.ts'
 import { SshEndpointVerifier } from '../src/remote/ssh-verifier.ts'
-import type { DeploymentManifest } from '../src/remote/manifest.ts'
+import { RemoteFilesService, remoteFilesAuthorization } from '../src/remote/files-service.ts'
+import { environmentDigest, type DeploymentManifest } from '../src/remote/manifest.ts'
 import { mountRegistryStack, type RegistryStack } from './support/registry-stack.ts'
 import { createFixtureWorkspace, type FixtureWorkspace } from './support/temp-workspace.ts'
 
@@ -92,8 +93,15 @@ function manifestFile(manifest: DeploymentManifest) {
   return path
 }
 
-async function mount(overrides?: (env: Record<string, unknown>) => Record<string, unknown>) {
-  const manifest = liveManifest(overrides)
+async function mount(
+  overrides?: (env: Record<string, unknown>) => Record<string, unknown>,
+  mutateManifest: (manifest: DeploymentManifest) => DeploymentManifest = manifest => manifest,
+) {
+  const manifest = mutateManifest(liveManifest(overrides))
+  // The manager and the registry must digest the same binding objects: the
+  // file copy below also names this fixture as primary, so normalize the
+  // in-memory manifest before either side can derive a binding digest.
+  for (const binding of manifest.bindings) binding.primary = fixture.workspace
   const manager = new SshEnvironmentManager({ manifest, logger, allowUnattestedForTesting: true })
   managers.push(manager)
   const stack = await mountRegistryStack(join(fixture.base, `store-${stacks.length}`), {
@@ -180,6 +188,35 @@ liveDescribe('the real SSH stack behind the registry seams', () => {
     }, 'remote_bash', new AbortController().signal)).resolves.toMatchObject({ status: 'scope-exited', stdout: expect.stringContaining('ok') })
     await run(m, { command: 'rm -f inside.txt' })
   }, 240_000)
+
+
+  it('browses an opted-in Helper root through its independent SFTP path admission', async () => {
+    const m = await mount(undefined, manifest => {
+      const binding = manifest.bindings.find(entry => entry.environmentId === 'vps-app' && entry.rootId === 'app')!
+      ;(binding as { directoryListing?: 'stable-path' }).directoryListing = 'stable-path'
+      return manifest
+    })
+    await m.stack.registry.addRemote(fixture.workspace, { environmentId: 'vps-app', rootId: 'app' })
+    await m.openBackend('vps-app')
+    const marker = `browse-helper-${Date.now()}.txt`
+    await run(m, { command: `echo helper-browse > ${marker}` })
+    const service = new RemoteFilesService(m.stack.registry, m.manager, logger)
+    try {
+      const snapshot = await m.stack.registry.remoteList(fixture.workspace)
+      const grant = snapshot.grants.find(entry => entry.environmentId === 'vps-app' && entry.rootId === 'app')!
+      expect(grant.verifiedTarget.kind).toBe('object')
+      const environment = m.manifest.environments.find(entry => entry.environmentId === 'vps-app')!
+      const authorization = remoteFilesAuthorization(snapshot.epoch, grant.grantId ?? grant.addedAt, grant.bindingDigest!, environmentDigest(environment))
+      const listing = await service.list({
+        sessionId: sessionOf(m.stack).id,
+        environmentId: 'vps-app', rootId: 'app', relativePath: '', authorization,
+      })
+      expect(listing.entries.map(entry => entry.name)).toContain(marker)
+    } finally {
+      await service.dispose()
+      await run(m, { command: `rm -f ${marker}` }).catch(() => undefined)
+    }
+  }, 180_000)
 
   it('denies a mid-admission revocation on the real backend with zero spawns', async () => {
     const m = await mount()

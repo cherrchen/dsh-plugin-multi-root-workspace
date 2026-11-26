@@ -41,7 +41,9 @@ import { searchAdditionalRoot } from './files-search.ts'
 import type { CommandInvocation, CommandResult } from '@deepseek-ai/dsh-commands'
 import { effectiveRootAccess } from './contract.ts'
 import { RemoteAdmissionError } from './remote/contract.ts'
-import { ManifestError, type RemoteEnvironment } from './remote/manifest.ts'
+import { REMOTE_FILES_AUTHORIZATION_WAIT, REMOTE_FILES_FAILURES, REMOTE_FILES_LIST, RemoteFilesError, remoteFilesAuthorizationRequest, remoteFilesListRequest, remoteFilesListing } from './remote/files-contract.ts'
+import { remoteFilesAuthorization } from './remote/files-authorization.ts'
+import { environmentDigest, ManifestError, type RemoteEnvironment } from './remote/manifest.ts'
 import { CredentialError } from './remote/personal/credentials.ts'
 import { loadPersonalConfig, type PersonalEnvironment } from './remote/personal/config.ts'
 import { RemoteOperationError } from './remote/personal/operations.ts'
@@ -794,8 +796,10 @@ async function remotesViewOf(
     primaryRoot: canonicalRoot(primaryRoot), mode, custodyMode: registry.remoteMode, status,
     ...(registry.remoteEnabled && registry.remoteMode === 'personal' ? { dependencies: inspectSshProfile(ctx).view } : {}),
   }
-  const manifest = registry.remoteManifest
-  if (manifest === undefined || status.state !== 'ready') {
+  // Availability is checked BEFORE the async list, but the manifest itself
+  // is re-read AFTER it: a rebind landing during remoteList would otherwise
+  // mint browse tokens against bindings the live manifest no longer holds.
+  if (registry.remoteManifest === undefined || status.state !== 'ready') {
     return { ...base, endpoints: [] }
   }
   const key = primaryKey(primaryRoot)
@@ -805,6 +809,15 @@ async function remotesViewOf(
     if (error instanceof RemoteAdmissionError) throw error
     throw new RemoteAdmissionError('remote-unavailable', error instanceof Error ? error.message : String(error))
   })
+  // The snapshot and the manifest must describe the same moment: a manifest
+  // rebind landing after remoteList makes any minted token stale, so nothing
+  // in this view is browsable.
+  const manifest = registry.remoteManifest
+  const browsable = manifest !== undefined && snapshot.manifestDigest === registry.remoteManifestDigest
+    ? registry.remoteFilesService : undefined
+  if (manifest === undefined) {
+    return { ...base, endpoints: [] }
+  }
   // Personal environments keep the resolved user@host:port in their own
   // config; the converted manifest only carries the managed alias. Read it
   // after remoteList refreshed the file, and fall back to the manifest's
@@ -825,6 +838,18 @@ async function remotesViewOf(
       const transfers: RemoteTransferView[] = (binding.transfers ?? []).map(transfer => ({
         direction: transfer.direction, environmentId: transfer.peer.environmentId, rootId: transfer.peer.rootId,
       }))
+      const capabilities = remoteCapabilitiesOf(state, binding.actions, transfers, mode, capped)
+      const browseTargetMatches = grant !== undefined && (
+        grant.verifiedTarget.kind === 'path'
+          ? grant.verifiedTarget.value === grant.displayPath && grant.displayPath === binding.path
+          : environment.transport === 'helper'
+      )
+      const browseAuthorization = browsable !== undefined
+        && state === 'registered' && grant !== undefined && capabilities.read
+        && browseTargetMatches
+        && browsable.supports(binding.environmentId, binding)
+        ? remoteFilesAuthorization(snapshot.epoch, grant.grantId ?? grant.addedAt, grant.bindingDigest, environmentDigest(environment))
+        : undefined
       return {
         environmentId: binding.environmentId,
         rootId: binding.rootId,
@@ -835,7 +860,8 @@ async function remotesViewOf(
         state,
         actions: [...new Set(binding.actions)],
         transfers,
-        capabilities: remoteCapabilitiesOf(state, binding.actions, transfers, mode, capped),
+        capabilities,
+        ...(browseAuthorization === undefined ? {} : { browseAuthorization }),
         ...(state === 'unregistered' ? { reason: 'remote-unregistered' }
           : state === 'withheld' ? { reason: 'remote-withheld' }
           : state === 'revoked' ? { reason: 'remote-revoked' } : {}),
@@ -944,6 +970,68 @@ async function dispatchPanelRequest(
       panelSessionId = parsedSsh.value.sessionId
       const primaryRoot = resolvePanelPrimaryRoot(ctx, parsedSsh.value.sessionId)
       return { ok: true, value: await handlePersonalEndpoint(ctx, ctx.multiRootRegistry, primaryRoot, parsedSsh.value) }
+    }
+    // The browse listing endpoint is its own strict contract: it precedes the
+    // remote view endpoints, shares their authenticated channel, and the raw
+    // request is schema-checked before anything is resolved or admitted.
+    if (endpoint === REMOTE_FILES_LIST) {
+      const parsedFiles = remoteFilesListRequest.safeParse(payload)
+      if (!parsedFiles.success) {
+        return { ok: false, error: { code: 'panel/bad-request', message: 'invalid remoteFiles.list request', details: {} } }
+      }
+      panelSessionId = parsedFiles.data.sessionId
+      const service = ctx.multiRootRegistry.remoteFilesService
+      if (service === undefined) {
+        return {
+          ok: false,
+          error: { code: 'provider-unavailable', message: 'the remote listing service is not mounted', details: { retryable: true } },
+        }
+      }
+      try {
+        const listed = remoteFilesListing.safeParse(await service.list(parsedFiles.data, signal))
+        // A listing that fails the wire contract is a coded failure, never
+        // a raw payload handed to the browser.
+        if (!listed.success) {
+          return {
+            ok: false,
+            error: { code: 'invalid-listing', message: REMOTE_FILES_FAILURES['invalid-listing'].message, details: { retryable: REMOTE_FILES_FAILURES['invalid-listing'].retryable } },
+          }
+        }
+        return { ok: true, value: listed.data }
+      } catch (error: unknown) {
+        // Only vocabulary entries reach the browser — never raw error text
+        // or SSH facts; anything else rethrows through the channel.
+        if (error instanceof RemoteFilesError) {
+          return { ok: false, error: { code: error.code, message: error.message, details: { retryable: error.retryable } } }
+        }
+        throw error
+      }
+    }
+    // The authorization lease is its own read-only endpoint beside the
+    // listing: an authenticated metadata wait (never a filesystem watch),
+    // same strict-before-touch discipline and the same fixed vocabulary.
+    if (endpoint === REMOTE_FILES_AUTHORIZATION_WAIT) {
+      const parsedWait = remoteFilesAuthorizationRequest.safeParse(payload)
+      if (!parsedWait.success) {
+        return { ok: false, error: { code: 'panel/bad-request', message: 'invalid remotes.waitForAuthorizationChange request', details: {} } }
+      }
+      panelSessionId = parsedWait.data.sessionId
+      const service = ctx.multiRootRegistry.remoteFilesService
+      if (service === undefined) {
+        return {
+          ok: false,
+          error: { code: 'provider-unavailable', message: 'the remote listing service is not mounted', details: { retryable: true } },
+        }
+      }
+      try {
+        await service.waitForAuthorizationChange(parsedWait.data, signal)
+        return { ok: true, value: { unchanged: true } }
+      } catch (error: unknown) {
+        if (error instanceof RemoteFilesError) {
+          return { ok: false, error: { code: error.code, message: error.message, details: { retryable: error.retryable } } }
+        }
+        throw error
+      }
     }
     if ((REMOTE_ENDPOINTS as readonly string[]).includes(endpoint)) {
       const parsedRemote = parseRemoteRequest(payload)

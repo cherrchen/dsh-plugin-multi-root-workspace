@@ -14,7 +14,7 @@
  *
  * @module @dsh-electron/dsh-plugin-multi-root-workspace/client/files-tree/hidden
  */
-import { childPath } from './face.ts'
+import { childPath, type JoinTreeChild } from './resource-path.ts'
 import { isHiddenEntry } from './search-rules.ts'
 import type { FilesTabState } from './store.ts'
 
@@ -35,16 +35,17 @@ export interface DrawnTree {
  * reopened tree cannot draw them through a hidden ancestor.
  * @param state - the tab's listed tree.
  * @param showHidden - whether hidden entries are drawn unchanged.
+ * @param joinChild - the provider's child-key join (the local default here).
  * @returns the tree to draw and the directories whose entries are all hidden.
  */
-export function drawnTree(state: FilesTabState, showHidden: boolean): DrawnTree {
+export function drawnTree(state: FilesTabState, showHidden: boolean, joinChild: JoinTreeChild = childPath): DrawnTree {
   if (showHidden) return { state, hiddenOnly: new Set() }
   const hiddenPrefixes: string[] = []
   for (const [path, level] of Object.entries(state.levels)) {
     if (level.kind !== 'ready') continue
     for (const entry of level.level.entries) {
       if (entry.type === 'directory' && isHiddenEntry(entry)) {
-        hiddenPrefixes.push(childPath(childPath(path, entry.name), ''))
+        hiddenPrefixes.push(joinChild(joinChild(path, entry.name), ''))
       }
     }
   }

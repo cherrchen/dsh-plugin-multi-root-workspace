@@ -38,6 +38,7 @@ completed/
 
 active：
 
+- [2026-11-24-provider-remote-file-tree.md](./active/2026-11-24-provider-remote-file-tree.md) — Provider 化文件树与远端 Workspace Root 浏览：`RootRef` 判别联合 + 授权代次键控替代路径身份，Provider 端口分派 primary/additional/remote 三类根，Host 侧独立 `remoteFiles.list` 走 UI 只读准入与双准入；浏览统一要求显式稳定路径部署断言与 owned SFTP v3 通道，Helper object 授权不复用为路径身份，Broker 无目录流即 fail closed；P0–P8 实现与全版本 × OS 矩阵均已通过、待 PR 评审/合并，决策拟议见 [ADR-0052](../decisions/ADR-0052-provider-file-browsing.md)。
 
 
 

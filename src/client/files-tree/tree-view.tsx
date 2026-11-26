@@ -18,11 +18,9 @@ import type { ReactNode } from 'react'
 import clsx from 'clsx'
 import type { RemoteFailure } from '@deepseek-ai/dsh-api-remotes/client'
 import type { TranslateNS } from '@deepseek-ai/dsh-client-ui-slots'
-import type { SessionId } from '@deepseek-ai/dsh-session/types'
-import { fileAddressFor } from '@deepseek-ai/dsh-util-workspace-path'
 import { nativeTreeInput, type NativeTreeEntry, type NativeTreeRenderer } from '../../compat/files-tree.ts'
 import type { WorkspaceDirectoryEntry } from '@deepseek-ai/dsh-api-workspace-files/types'
-import { childPath } from './face.ts'
+import { childPath, type JoinTreeChild } from './resource-path.ts'
 import type { FilesMenuSeat } from './context-menu.ts'
 import { FileTypeIcon, IconFolderCloseRegular, IconFolderOpenRegular, classifyFileType } from './primitives.ts'
 import { matchRanges } from './search-tree.ts'
@@ -82,7 +80,12 @@ function Name({ name, highlight }: { name: string; highlight: string | undefined
 interface TreeContext {
   readonly state: FilesTabState
   readonly onToggle: (parent: string, path: string) => void
-  readonly onOpen: (path: string) => void
+  /**
+   * Open a file row, or `undefined` when the provider cannot open at all:
+   * the legacy rows then draw every file disabled — no mouse or keyboard
+   * activation — and the Factory's open is a no-op.
+   */
+  readonly onOpen: ((path: string) => void) | undefined
   readonly t: TranslateNS<'sidebarFiles'>
   /** The revealed file's tree key while its row is the current one. */
   readonly current: string | undefined
@@ -96,11 +99,13 @@ interface TreeContext {
   readonly hiddenOnly: ReadonlySet<string> | undefined
   /** The entries are a selection (search results): an empty level draws no line. */
   readonly unmatched: boolean
+  /** The provider's child-key join (the local mixed-separator default here). */
+  readonly joinChild: JoinTreeChild
 }
 
 /** One entry's row, and its children when it is an expanded directory. */
 function Entry({ parent, entry, tree }: { parent: string; entry: WorkspaceDirectoryEntry; tree: TreeContext }): ReactNode {
-  const path = childPath(parent, entry.name)
+  const path = tree.joinChild(parent, entry.name)
   const label = <Name name={entry.name} highlight={tree.highlight} />
   if (entry.type === 'directory') {
     const expanded = tree.state.expanded.includes(path)
@@ -122,12 +127,17 @@ function Entry({ parent, entry, tree }: { parent: string; entry: WorkspaceDirect
     // `aria-current` — `data-files-current` is the fork's spelling of it, and
     // the button carries the scroll target ref like upstream's `currentRef`.
     const current = tree.current === path
+    const openable = tree.onOpen !== undefined
     return (
       <li className={css.item} data-files-entry="file" data-files-path={path}>
         <button
           type="button"
           className={css.row}
-          onClick={() => { tree.onOpen(path) }}
+          // A provider without a preview port draws the row inert: `disabled`
+          // keeps it out of the keyboard order AND swallows the click, so the
+          // row cannot activate by either hand.
+          {...(openable ? {} : { disabled: true, 'aria-disabled': true as const })}
+          onClick={openable ? () => { tree.onOpen?.(path) } : undefined}
           ref={current ? tree.currentRef as ((row: unknown) => void) | undefined : undefined}
           data-files-current={current ? '' : undefined}
           aria-current={current ? true : undefined}
@@ -183,14 +193,15 @@ export interface TreeViewProps {
   /** The drawn tree: root, level states, and expansion. Every entry is already filtered. */
   readonly state: FilesTabState
   readonly t: TranslateNS<'sidebarFiles'>
-  /** Session the row addresses belong to. */
-  readonly sessionId: SessionId
   /** The host `sidebar.files.tree` Factory, or `undefined` on a release without it. */
   readonly nativeTree: NativeTreeRenderer | undefined
-  /** Row context menus, or `undefined` where the host has none. */
+  /** Row context menus, or `undefined` where the provider has none. */
   readonly menu: FilesMenuSeat | undefined
-  /** Whether a host viewer claims one file address (`0.2.2-alpha.3+`). */
-  readonly canOpen: ((address: string) => boolean) | undefined
+  /**
+   * Whether a file row opens at all, resolved per tree key (`0.2.2-alpha.3+`
+   * Factory input; `false` covers a provider with no preview port).
+   */
+  readonly canOpen: ((path: string) => boolean) | undefined
   /** Search text to mark inside each name. */
   readonly highlight?: string | undefined
   /** The entries are search matches: an empty level draws no line. */
@@ -201,8 +212,14 @@ export interface TreeViewProps {
   readonly current?: { readonly path: string; readonly ref?: ((row: unknown) => void) | undefined } | undefined
   /** A directory row asked to open or close. */
   readonly onToggle: (parent: string, path: string) => void
-  /** A file row asked to open. */
-  readonly onOpen: (path: string) => void
+  /**
+   * A file row asked to open, or `undefined` when the provider has no preview
+   * port: the legacy rows then draw every file disabled and the Factory's
+   * `onOpen` is a no-op.
+   */
+  readonly onOpen?: ((path: string) => void) | undefined
+  /** The provider's child-key join; defaults to the local spelling. */
+  readonly joinChild?: JoinTreeChild | undefined
 }
 
 /**
@@ -214,7 +231,7 @@ export interface TreeViewProps {
  */
 export function TreeView(props: TreeViewProps): ReactNode {
   const {
-    state, t, sessionId, nativeTree, menu, canOpen, highlight, unmatched = false, hiddenOnly, current, onToggle, onOpen,
+    state, t, nativeTree, menu, canOpen, highlight, unmatched = false, hiddenOnly, current, onToggle, onOpen, joinChild = childPath,
   } = props
   const tree: TreeContext = {
     state,
@@ -227,6 +244,7 @@ export function TreeView(props: TreeViewProps): ReactNode {
     highlight,
     hiddenOnly,
     unmatched,
+    joinChild,
   }
   const legacy = <ul className={css.level}><Level path={state.root} tree={tree} /></ul>
   if (nativeTree === undefined) return legacy
@@ -235,16 +253,17 @@ export function TreeView(props: TreeViewProps): ReactNode {
     : (entry: NativeTreeEntry, kind: 'file' | 'directory') => menu.trigger(entry.path, kind)
   const canOpenEntry = canOpen === undefined
     ? undefined
-    : (entry: NativeTreeEntry) => canOpen(fileAddressFor(sessionId, undefined, entry.path))
+    : (entry: NativeTreeEntry) => canOpen(entry.path)
   return nativeTree(
     'sidebar.files.tree',
-    nativeTreeInput(state, failure => failureLine(t, failure), onToggle, onOpen, {
+    nativeTreeInput(state, failure => failureLine(t, failure), onToggle, (path) => { onOpen?.(path) }, {
       ...(current === undefined ? {} : { current }),
       ...(rowTriggerProps === undefined ? {} : { rowTriggerProps }),
       ...(canOpenEntry === undefined ? {} : { canOpen: canOpenEntry }),
       ...(highlight === undefined || highlight === '' ? {} : { highlight }),
       ...(unmatched ? { omitted: 'unmatched' as const } : {}),
       ...(hiddenOnly === undefined || hiddenOnly.size === 0 ? {} : { hiddenOnly }),
+      joinChild,
     }),
     { fallback: legacy },
   ) as ReactNode

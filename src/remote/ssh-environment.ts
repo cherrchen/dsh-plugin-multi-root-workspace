@@ -184,6 +184,7 @@ export class SshEnvironmentManager {
   private readonly sftpOpenings = new Map<string, Promise<SftpEnvironment>>()
   private readonly sftpResolved = new Map<string, SftpEnvironment>()
   private readonly transferSessions = new Map<AbortController, { readonly environmentId: string; readonly settled: Promise<void> }>()
+  private readonly directorySessions = new Map<AbortController, { readonly environmentId: string; readonly settled: Promise<void> }>()
   private readonly helperDisposals = new Map<string, { readonly opening: Promise<SshEnvironment> | undefined; readonly disposal: Promise<void> }>()
   private readonly sftpDisposals = new Map<string, { readonly opening: Promise<SftpEnvironment> | undefined; readonly disposal: Promise<void> }>()
   private readonly cleanups = new Set<Promise<void>>()
@@ -223,7 +224,9 @@ export class SshEnvironmentManager {
       if (changed.has(id) || !scopes.has(key)) void this.disposeHelper(key, true).catch(() => {})
     }
     for (const id of changed) this.markSftpStale(id)
-    for (const [session, record] of this.transferSessions) if (changed.has(record.environmentId)) session.abort()
+    for (const sessions of [this.transferSessions, this.directorySessions]) {
+      for (const [session, record] of sessions) if (changed.has(record.environmentId)) session.abort()
+    }
   }
 
   /** The current verified deployment manifest. */
@@ -375,7 +378,7 @@ export class SshEnvironmentManager {
   }
 
   private async settleTransfers(): Promise<void> {
-    const sessions = [...this.transferSessions.entries()]
+    const sessions = [...this.transferSessions.entries(), ...this.directorySessions.entries()]
     for (const [session] of sessions) session.abort()
     await Promise.allSettled(sessions.map(([, record]) => record.settled))
   }
@@ -463,19 +466,40 @@ export class SshEnvironmentManager {
 
   /** A copy owns its SFTP channel; interrupted requests cannot close a sibling's. */
   async openTransferSftp(environmentId: string, signal: AbortSignal, expectedDigest?: string): Promise<SftpEnvironment & { live(): boolean }> {
+    return await this.openOwnedSftp(environmentId, signal, expectedDigest, this.transferSessions, 'transfer', 32)
+  }
+
+  /**
+   * A directory listing owns its SFTP channel (ADR-0052 P3): the same
+   * ownership machinery as a copy, on an independent session map and safety
+   * cap, so a cancelled or stale browse closes only its own channel and can
+   * never starve or close a copy's.
+   */
+  async openFilesSftp(environmentId: string, signal: AbortSignal, expectedDigest: string): Promise<SftpEnvironment & { live(): boolean }> {
+    return await this.openOwnedSftp(environmentId, signal, expectedDigest, this.directorySessions, 'files', 8)
+  }
+
+  private async openOwnedSftp(
+    environmentId: string,
+    signal: AbortSignal,
+    expectedDigest: string | undefined,
+    sessions: Map<AbortController, { readonly environmentId: string; readonly settled: Promise<void> }>,
+    purpose: 'transfer' | 'files',
+    cap: number,
+  ): Promise<SftpEnvironment & { live(): boolean }> {
     this.assertOpen()
     signal.throwIfAborted()
     this.requireEnvironmentDigest(environmentId, expectedDigest)
-    if (this.transferSessions.size >= 32) throw new SshEnvironmentError('transfer-unavailable', 'too many active SFTP endpoints')
+    if (sessions.size >= cap) throw new SshEnvironmentError(`${purpose}-unavailable`, 'too many active SFTP endpoints')
     const session = new AbortController()
     const settled = Promise.withResolvers<void>()
     const record = { environmentId, settled: settled.promise }
-    this.transferSessions.set(session, record)
-    const disown = () => { this.transferSessions.delete(session) }
+    sessions.set(session, record)
+    const disown = () => { sessions.delete(session) }
     const openingSignal = AbortSignal.any([session.signal, signal])
     let disposal: Promise<void> | undefined
     try {
-      const env = await this.openSftpFresh(environmentId, disown, openingSignal)
+      const env = await this.openSftpFresh(environmentId, disown, openingSignal, purpose, expectedDigest)
       const dispose = (): Promise<void> => disposal ??= (async () => {
         session.signal.removeEventListener('abort', close)
         disown()
@@ -483,7 +507,7 @@ export class SshEnvironmentManager {
           await env.dispose()
         } catch (error) {
           const detail = error instanceof Error ? error.message : String(error)
-          this.logger.warn(`multi-root remote: transfer ${environmentId} cleanup failed: ${detail}`)
+          this.logger.warn(`multi-root remote: ${purpose} ${environmentId} cleanup failed: ${detail}`)
           throw error
         } finally { settled.resolve() }
       })()
@@ -494,7 +518,7 @@ export class SshEnvironmentManager {
         if (this.closed) throw new SshEnvironmentError('remote-unavailable', 'the SSH environment manager is closed')
         openingSignal.throwIfAborted()
       }
-      return { ...env, live: () => this.transferSessions.has(session), dispose }
+      return { ...env, live: () => sessions.has(session), dispose }
     } catch (error) {
       disown()
       settled.resolve()
@@ -503,7 +527,13 @@ export class SshEnvironmentManager {
   }
 
   /** Same ordered refusals as open(), then the SFTP handshake + publish extensions. */
-  private async openSftpFresh(environmentId: string, onLoss: () => void, signal?: AbortSignal): Promise<SftpEnvironment> {
+  private async openSftpFresh(
+    environmentId: string,
+    onLoss: () => void,
+    signal?: AbortSignal,
+    purpose: 'transfer' | 'files' = 'transfer',
+    expectedDigest?: string,
+  ): Promise<SftpEnvironment> {
     this.assertOpen()
     const environment = this.manifest.environments.find(entry => entry.environmentId === environmentId)
     if (environment === undefined) throw new SshEnvironmentError('unknown-environment', `no manifest environment "${environmentId}"`)
@@ -514,9 +544,14 @@ export class SshEnvironmentManager {
     if (environment.credentialIsolation !== 'attested' && !this.allowUnattested && !this.brokerCustody) {
       throw new SshEnvironmentError('credential-isolation-unattested', `environment "${environmentId}" is declared unattested; connections require an attested deployment`)
     }
-    if (environment.transfer === undefined) throw new SshEnvironmentError('transfer-unavailable', `environment "${environmentId}" declares no transfer block`)
+    if (purpose === 'transfer' && environment.transfer === undefined) {
+      throw new SshEnvironmentError('transfer-unavailable', `environment "${environmentId}" declares no transfer block`)
+    }
     await this.verifyHostIdentity(environment)
     signal?.throwIfAborted()
+    // Host verification is async: a personal rebind may have landed while it
+    // ran, so a browse re-pins the digest before spawning any transport.
+    if (purpose === 'files') this.requireEnvironmentDigest(environmentId, expectedDigest)
     const client = SftpClient.connect(environment.connection.host, { onLoss })
     const cancel = () => client.dispose()
     signal?.addEventListener('abort', cancel, { once: true })
@@ -524,9 +559,14 @@ export class SshEnvironmentManager {
     timeout.unref()
     try {
       const version = await client.init()
-      if (version.extensions['hardlink@openssh.com'] === undefined || version.extensions['fsync@openssh.com'] === undefined) {
+      if (purpose === 'transfer'
+        && (version.extensions['hardlink@openssh.com'] === undefined || version.extensions['fsync@openssh.com'] === undefined)) {
         client.dispose()
         throw new SshEnvironmentError('publish-unsupported', `environment "${environmentId}" lacks hardlink/fsync extensions`)
+      }
+      if (purpose === 'files' && version.version !== 3) {
+        client.dispose()
+        throw new SshEnvironmentError('capability-unsupported', `environment "${environmentId}" negotiated SFTP v${version.version}`)
       }
       if (this.closed) {
         client.dispose()

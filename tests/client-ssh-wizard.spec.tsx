@@ -167,6 +167,7 @@ describe('the add-remote wizard', () => {
     const path = await screen.findByLabelText('ssh.binding.path')
     fireEvent.change(path, { target: { value: '/srv/app' } })
     fireEvent.click(screen.getByRole('checkbox', { name: 'remote.capability.write' }))
+    fireEvent.click(screen.getByRole('checkbox', { name: 'ssh.binding.directoryListing' }))
     const bindingNext = screen.getByRole('button', { name: 'ssh.step.next' })
     expect(bindingNext).toHaveProperty('disabled', false)
     fireEvent.click(bindingNext)
@@ -178,6 +179,7 @@ describe('the add-remote wizard', () => {
       environmentId: 'env-prod',
       path: '/srv/app',
       actions: ['read', 'write'],
+      directoryListing: 'stable-path',
     })
 
     // Step three registers the root the binding answer assigned.
@@ -188,7 +190,7 @@ describe('the add-remote wizard', () => {
     await screen.findByText('wizard.done')
   })
 
-  it('gates a helper-less environment until the readiness repair succeeds', async () => {
+  it('allows a helper-less SFTP environment while still offering the helper repair inline', async () => {
     const ssh = fakeSsh(sshState({ environments: [ENV_BARE] }))
     const remotes = fakeRemotes()
     renderWizard(ssh, remotes)
@@ -196,13 +198,11 @@ describe('the add-remote wizard', () => {
     const card = await screen.findByRole('radio', { name: /Staging/ })
     fireEvent.click(card)
     const next = screen.getByRole('button', { name: 'ssh.step.next' })
-    expect(next).toHaveProperty('disabled', true)
+    expect(next).toHaveProperty('disabled', false)
+    expect(screen.getByRole('button', { name: 'ssh.helperInstall' })).toBeTruthy()
 
-    // The readiness list offers the repair inline; once the helper lands the
-    // same environment may advance without a round trip through the dialog.
-    fireEvent.click(screen.getByRole('button', { name: 'ssh.helperInstall' }))
-    await waitFor(() => { expect(next).toHaveProperty('disabled', false) })
-    expect(ssh.calls.some(call => call.method === 'helperInstall'
-      && call.args[2] === 'env-bare')).toBe(true)
+    fireEvent.click(next)
+    await screen.findByLabelText('ssh.binding.path')
+    expect(ssh.calls.some(call => call.method === 'helperInstall')).toBe(false)
   })
 })

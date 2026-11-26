@@ -13,7 +13,7 @@
  *
  * @module @dsh-electron/dsh-plugin-multi-root-workspace/client/files-tree/search-tree
  */
-import { childPath } from './face.ts'
+import { childPath } from './resource-path.ts'
 import type { DirLevel, FilesTabState } from './store.ts'
 
 /** One entry a search matched. */

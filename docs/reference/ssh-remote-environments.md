@@ -122,7 +122,7 @@ Registry 的 owner 是唯一打开远程域和 `remote-2` 监听的 Host。若�
 GUI 入口有两处：
 
 - **插件详情设置卡**：开启 SSH 远端环境后，第一行显示「SSH 远端」和「管理」按钮，进入与工作区面板共用的管理对话框。实验开关仍负责启用风险确认；开关关闭时隐藏该设置入口。
-- **Workspace Folders 的「远端工作目录」**（`src/client/WorkspaceFoldersAction.tsx`）与「主要工作目录」「附属工作目录」并列，标题行同时提供「管理 SSH 远端…」与个人模式的「管理远端 Root 绑定」。远端目录列表与主要/附属工作目录共用 `WorkspaceRow`。首行依次显示末级文件夹名、SSH 环境名标签、当前会话的有效能力。第二行为可复制地址，使用 `ssh://user@host:port/path`。IPv6 主机加方括号，路径按 URI 规则转义。行尾「…」可登记；personal 模式且远端状态就绪时，菜单首项「编辑」直接打开「本项目绑定」对话框并落在该绑定的内联编辑表单上（与绑定列表行尾的铅笔入口等价）。personal 模式还在所有状态下提供「移除」——对已登记行先撤销登记再以当前 revision 的 CAS 解除绑定，对未登记/待重新登记/已撤销行只解除绑定，确认文案说明两处一起移除，因此「待绑定」行也可以从这里清掉。该菜单同样用于修改读取、写入、执行及本地传输对端，保存沿用绑定的 CAS 校验；对已登记目录修改能力后，通过同一菜单重新登记。解除绑定也可在绑定对话框中完成。
+- **Workspace Folders 的「远端工作目录」**（`src/client/WorkspaceFoldersAction.tsx`）与「主要工作目录」「附属工作目录」并列，标题行同时提供「管理 SSH 远端…」与个人模式的「管理远端 Root 绑定」。远端目录列表与主要/附属工作目录共用 `WorkspaceRow`。首行依次显示末级文件夹名、SSH 环境名标签、当前会话的有效能力。第二行为可复制地址，使用 `ssh://user@host:port/path`。IPv6 主机加方括号，路径按 URI 规则转义。行尾「…」可登记；personal 模式且远端状态就绪时，菜单首项「编辑」直接打开「本项目绑定」对话框并落在该绑定的内联编辑表单上（与绑定列表行尾的铅笔入口等价）。personal 模式还在所有状态下提供「移除」——对已登记行先撤销登记再以当前 revision 的 CAS 解除绑定，对未登记/待重新登记/已撤销行只解除绑定，确认文案说明两处一起移除，因此「待绑定」行也可以从这里清掉。该菜单同样用于修改读取、写入、执行、Files 稳定路径列举断言及本地传输对端，保存沿用绑定的 CAS 校验；对已登记目录修改能力后，通过同一菜单重新登记。解除绑定也可在绑定对话框中完成。
 
 ### SSH 远端管理对话框
 
@@ -142,7 +142,7 @@ GUI 入口有两处：
 
 ### Workspace Root 绑定对话框
 
-从 Workspace Folders 打开 `SshWorkspaceBindingsDialog`。「添加绑定」打开 `AddBindingWizard`（`src/client/wizard/add-binding.tsx`），与「添加远端工作目录」向导共用 `WizardShell` 的绑定、登记两步：第一步在整页表单中选择已有连接、指定远端路径（只读 SFTP 浏览或手动输入规范化的 POSIX 绝对路径）、勾选允许动作与本地传输对端（`primary` 和可用附加根的 `aliasId`），「下一步」经 revision CAS 保存（草稿携带已保存的 `rootId`，「上一步→下一步」的重复保存编辑同一绑定而非重复登记）；第二步展示环境、路径、动作与传输摘要并调用 `remotes.add` 登记，成功后进入完成页。已有绑定仍在对话框内联编辑或解除，其他绑定和 SSH 连接独立保留；编辑权限或更新部署后状态变为「待重新登记」的目录，从 Workspace Folders 行尾「…」菜单重新登记。
+从 Workspace Folders 打开 `SshWorkspaceBindingsDialog`。「添加绑定」打开 `AddBindingWizard`（`src/client/wizard/add-binding.tsx`），与「添加远端工作目录」向导共用 `WizardShell` 的绑定、登记两步：第一步在整页表单中选择已有连接、指定远端路径（只读 SFTP 浏览或手动输入规范化的 POSIX 绝对路径）、勾选允许动作、可选的 Files 稳定路径列举断言与本地传输对端（`primary` 和可用附加根的 `aliasId`），「下一步」经 revision CAS 保存（草稿携带已保存的 `rootId`，「上一步→下一步」的重复保存编辑同一绑定而非重复登记）；第二步展示环境、路径、动作与传输摘要并调用 `remotes.add` 登记，成功后进入完成页。已有绑定仍在对话框内联编辑或解除，其他绑定和 SSH 连接独立保留；编辑权限或更新部署后状态变为「待重新登记」的目录，从 Workspace Folders 行尾「…」菜单重新登记。
 
 新建绑定时，Host 将路径的末级目录名转换为最多 63 字符的小写标识。转换结果为空，或同一项目和 SSH 环境已有同名标识时，改用 UUID 的前 8 位，并保证该标识在当前范围内唯一。编辑已有绑定时沿用原标识。
 
@@ -189,3 +189,7 @@ exec 与 transfer 独立授权：执行前用 helper 的只读受限 stat/realpa
 ## 传输截止时间
 
 `transfer.timeoutMs` 是一次复制的总 I/O 预算，涵盖准入、握手、读写、校验和发布。个人模式每个复制端点独占 SFTP 通道，取消或超时只影响该次复制。传输清理使用独立的一秒预算，清理结束后回收通道。CREATE 或 LINK 缺少应答时返回 unknown 和 reconcileId。LINK 已确认时，清理失败仍返回 committed 与残留状态。
+
+## Files 标签页目录浏览
+
+绑定声明 `directoryListing: 'stable-path'`（纯 SFTP 与 Helper 连接均可勾选，且必须同时允许 `read`；Helper 登记在对象核验后追加独立的 SFTP v3 路径核验，见[使用指南](../guide/user/ssh-remote-environments.md#在-files-标签页浏览远端目录可选)）后，宿主在面板通道上提供两个端点：`remoteFiles.list`（受限目录列举，17 个固定错误码）与 `remotes.waitForAuthorizationChange`（授权元数据租约，非文件监视）。二者与上面传输端点共用同一套会话/登记/令牌权威。组件依赖、时序、生命周期与安全姿态的唯一真源见 [file-browsing-providers.md](../architecture/file-browsing-providers.md)，决策见 [ADR-0052](../decisions/ADR-0052-provider-file-browsing.md)。

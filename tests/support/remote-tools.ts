@@ -6,7 +6,7 @@
  * remote experiment default-off in every shipped profile.
  */
 import { writeFileSync } from 'node:fs'
-import { join } from 'node:path'
+import { basename, join } from 'node:path'
 import type { Context } from '@deepseek-ai/cordis'
 import type { Agent } from '@deepseek-ai/dsh-agent'
 import Sessions, { SessionId } from '@deepseek-ai/dsh-session'
@@ -69,10 +69,18 @@ export interface RemoteToolsWorldOptions {
   readonly remote?: { readonly enabled?: boolean; readonly personalPath?: string; readonly credentialRoot?: string }
   /** Per-environment extra files, keyed by environment and absolute path. */
   readonly seed?: Readonly<Record<string, Readonly<Record<string, string>> | undefined>>
+  /** Opt the device binding into `directoryListing: 'stable-path'`. */
+  readonly deviceListing?: boolean
+  /** Opt the Helper-backed build binding into `directoryListing: 'stable-path'`. */
+  readonly buildListing?: boolean
+  /** Session sandbox policy mode; default `workspace-write`. */
+  readonly policyMode?: 'read-only' | 'workspace-write'
 }
 
 function manifestFile(fixture: FixtureWorkspace, options: RemoteToolsWorldOptions): string {
   const manifest = fakeManifest({
+    deviceListing: options.deviceListing,
+    buildListing: options.buildListing,
     primary: fixture.workspace,
     localRootIds: options.localRootIds ?? ['primary'],
     ...(options.deviceActions === undefined ? {} : { deviceActions: options.deviceActions }),
@@ -124,7 +132,7 @@ export async function mountRemoteTools(fixture: FixtureWorkspace, options: Remot
     beforeGate: async ctx => {
       await ctx.plugin(Projections)
       await ctx.plugin(Sessions)
-      await ctx.plugin(Policy, { mode: 'workspace-write', workspaceRoot: fixture.workspace })
+      await ctx.plugin(Policy, { mode: options.policyMode ?? 'workspace-write', workspaceRoot: fixture.workspace })
     },
   })
   await stack.ctx.plugin(SystemPrompt)
@@ -163,7 +171,7 @@ export async function mountRemoteTools(fixture: FixtureWorkspace, options: Remot
     } as never)
     await stack.ctx.plugin(CommandModule, {})
   }
-  const session = stack.ctx.sessions.create(SessionId(`g5-${fixture.base.split('/').pop()}`), { meta: { cwd: fixture.workspace } })
+  const session = stack.ctx.sessions.create(SessionId(`g5-${basename(fixture.base)}`), { meta: { cwd: fixture.workspace } })
   const agent = { id: session.id, session } as Agent
   let sequence = 0
   return {

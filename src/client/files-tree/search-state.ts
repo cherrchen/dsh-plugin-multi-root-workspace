@@ -87,7 +87,7 @@ const EMPTY: SearchPaneState = {
 
 /** Everything that makes one search request distinct from another. */
 export interface SearchRequestKeyInput {
-  /** The selected root's registry id. */
+  /** The browsed root's key — the provider key since the provider migration (the slot name is kept). */
   readonly rootId: string
   /** The trimmed query. */
   readonly query: string
@@ -122,10 +122,11 @@ export function searchRequestKey(input: SearchRequestKeyInput): string {
 /**
  * The state key of one pane root.
  *
- * The separator cannot appear in a dockkit tab id and is unlikely in a path;
- * even if a path contained it, the key is only ever compared with itself.
+ * The separator cannot appear in a dockkit tab id; even if the root half
+ * contained it, the key is only ever compared with itself.
  * @param tabId - the pane's dockkit identity.
- * @param root - the absolute additional root being browsed.
+ * @param root - the browsed root's key — the provider key since the provider
+ *   migration (`providerKey(identity)`), never a display path.
  * @returns the record's key.
  */
 export function searchStateKey(tabId: TabId, root: string): string {

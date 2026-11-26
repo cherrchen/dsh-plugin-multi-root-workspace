@@ -1200,6 +1200,7 @@ export function SshWorkspaceBindingsDialog(props: SshWorkspaceBindingsDialogProp
       read: binding.actions.includes('read'), write: binding.actions.includes('write'), exec: binding.actions.includes('exec'),
       imports: new Set(binding.transfers?.filter(transfer => transfer.direction === 'import').map(transfer => transfer.peer.rootId)),
       exports: new Set(binding.transfers?.filter(transfer => transfer.direction === 'export').map(transfer => transfer.peer.rootId)),
+      directoryListing: binding.directoryListing === 'stable-path',
     })
   }
   const save = async (value: BindingDraft): Promise<BindingSaveResult> =>
@@ -1306,7 +1307,8 @@ export function SshWorkspaceBindingsDialog(props: SshWorkspaceBindingsDialogProp
                 {(['read', 'write', 'exec'] as const).map(action => (
                   <WizardCheckbox key={action} checked={draft[action]}
                     disabled={busy || (action === 'exec' && !draft.exec && environment?.exec === undefined)}
-                    label={t(`remote.capability.${action}`)} onChange={next => setDraft({ ...draft, [action]: next })} />
+                    label={t(`remote.capability.${action}`)}
+                    onChange={next => setDraft({ ...draft, [action]: next, ...(action === 'read' && !next ? { directoryListing: false } : {}) })} />
                 ))}
               </div>
             </section>
@@ -1323,6 +1325,21 @@ export function SshWorkspaceBindingsDialog(props: SshWorkspaceBindingsDialogProp
                       onChange={() => setDraft({ ...draft, exports: togglePeer(draft.exports, peer.id) })} />
                   </div>
                 ))}
+              </section>
+            )}
+            {/* The stable-SFTP-path Files browsing opt-in (ADR-0052): a
+                binding-level read-only permission independent of the exec
+                transport. It requires read, stays off by default, and changing
+                it changes binding identity, so the existing re-registration
+                flow applies after saving. */}
+            {environment === undefined ? null : (
+              <section className="mrfw-wizSection" aria-label={t('ssh.binding.directoryListing')}>
+                <div className="mrfw-wizCheckRow">
+                  <WizardCheckbox checked={draft.directoryListing} disabled={busy || !draft.read}
+                    label={t('ssh.binding.directoryListing')}
+                    onChange={next => setDraft({ ...draft, directoryListing: next })} />
+                </div>
+                <p className="mrfw-note">{t('ssh.binding.directoryListingHint')}</p>
               </section>
             )}
             {pending?.kind === 'save' ? <StatusLine state="ongoing">{t('ssh.pending.bindingSave')}</StatusLine> : null}

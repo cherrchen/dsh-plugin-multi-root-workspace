@@ -78,6 +78,11 @@ describe('deployment manifest', () => {
     ['bad environmentId', { environments: [env({ environmentId: 'UPPER' })] }, 'invalid-manifest'],
     ['bad hostKey', { environments: [env({ hostKey: 'SHA256:short' })] }, 'invalid-manifest'],
     ['dup actions', { bindings: [binding({ actions: ['read', 'read'] })] }, 'invalid-manifest'],
+    ['directory listing without read', { bindings: [binding({ actions: ['write'], directoryListing: 'stable-path' })] }, 'invalid-manifest'],
+    ['helper directory listing with read', {
+      environments: [env({ transport: 'helper', helper: { sha256: 'a'.repeat(64), protocol: 1 }, connection: { host: 'vps', nodePath: '/opt/n/bin/node', helperPath: '/opt/h/helper.js', workspace: '/w' } })],
+      bindings: [binding({ actions: ['read'], directoryListing: 'stable-path' })],
+    }, null],
   ])('rejects %s', (_name, over, code) => {
     const merged = { environments: [env()], bindings: [binding()], ...over }
     const run = () => parseDeploymentManifest(JSON.stringify({ schemaVersion: 1, configVersion: 'cfg-1', ...merged }), '/m.json')

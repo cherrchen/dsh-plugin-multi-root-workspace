@@ -4,8 +4,9 @@
  * rendering/linking, relaxed parseSshConfig, and personal-mode RPC refusals.
  * POSIX-only: the file-protection checks require a POSIX uid.
  */
-import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, realpathSync, rmSync, statSync, symlinkSync, writeFileSync } from 'node:fs'
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, realpathSync, renameSync, rmSync, statSync, symlinkSync, writeFileSync } from 'node:fs'
 import { spawn, execFileSync } from 'node:child_process'
+import { randomUUID } from 'node:crypto'
 import { fileURLToPath } from 'node:url'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -45,7 +46,11 @@ const CONFIG = (revision = 0): PersonalConfig => ({
 })
 
 const writeConfig = (path: string, config: PersonalConfig): void => {
-  writeFileSync(path, `${JSON.stringify({ ...config, schemaVersion: 1, environments: config.environments.map(environment => ({ ...environment, workspace: '/' })) })}\n`, { mode: 0o600 })
+  // Match the store's atomic replacement: a same-size in-place rewrite can
+  // share the stat identity and leave readSnapshot serving the old fixture.
+  const temp = `${path}.tmp-${randomUUID()}`
+  writeFileSync(temp, `${JSON.stringify({ ...config, schemaVersion: 1, environments: config.environments.map(environment => ({ ...environment, workspace: '/' })) })}\n`, { mode: 0o600 })
+  renameSync(temp, path)
 }
 
 describe.skipIf(process.platform === 'win32')('personal config store', () => {
