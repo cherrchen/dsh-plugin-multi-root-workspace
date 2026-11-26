@@ -769,16 +769,7 @@ export function RootSwitcher(props: RootSwitcherProps): ReactNode {
         : null}
       {dialogOpen ? (
         <WorkspaceFoldersDialog
-          panel={props.panel}
-          {...(props.remotes === undefined ? {} : { remotes: props.remotes })}
-          {...(props.ssh === undefined ? {} : { ssh: props.ssh })}
-          subscribeRemoteSettings={props.subscribeRemoteSettings}
-          pickDirectory={props.pickDirectory}
-          {...(props.sessionId === undefined ? {} : { sessionId: props.sessionId })}
-          {...(props.subscribeSession === undefined ? {} : { subscribeSession: props.subscribeSession })}
-          t={t}
-          worktrees={props.worktrees}
-          worktreePromptEnabled={props.worktreePromptEnabled}
+          {...props}
           onClose={() => {
             setDialogOpen(false)
             // The manager may have removed or invalidated the selected root;

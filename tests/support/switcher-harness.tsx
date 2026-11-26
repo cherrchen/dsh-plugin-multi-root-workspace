@@ -137,6 +137,8 @@ export interface Harness {
   readonly holdSearch: () => () => void
   /** Make the search endpoint reject with a panel code, or answer normally when undefined. */
   setSearchFailure: (code: string | undefined) => void
+  /** Flip the composed remote-tools settings form. */
+  setRemoteEnabled: (enabled: boolean) => void
   /** The `remoteFiles.list` RPCs, in order (relativePath + authorization used). */
   readonly remoteListCalls: RemoteListCall[]
   /** The `remotes.waitForAuthorizationChange` RPCs, in order. */
@@ -178,6 +180,8 @@ export interface MountOptions {
   readonly workspaceSearch?: boolean
   /** A live remote-plane stub; absent means the legacy "no remote feature" composition. */
   readonly remotes?: RemoteStub
+  /** Compose the modern remote-tools settings form, initially switched off. */
+  readonly remoteForm?: boolean
 }
 
 /** Apply the real client entry to a recording stub context. */
@@ -192,6 +196,13 @@ export function mount(withConnection = true, services: HostServices = {}, option
   let listFails = false
   let searchFailure: string | undefined
   let searchGate: Promise<void> | undefined
+  let remoteEnabledFlag = false
+  const remoteListeners = new Set<() => void>()
+  const remoteForm = {
+    getSnapshot: () => ({ status: 'ready', writable: true, revision: 0, value: { enabled: remoteEnabledFlag } }),
+    subscribe: (listener: () => void) => { remoteListeners.add(listener); return () => { remoteListeners.delete(listener) } },
+    mutate: async () => true,
+  }
   const remoteListCalls: RemoteListCall[] = []
   const remoteWaitCalls: { readonly authorization: string }[] = []
   const waitReleases: (() => void)[] = []
@@ -281,8 +292,16 @@ export function mount(withConnection = true, services: HostServices = {}, option
       const dispose = callback()
       return typeof dispose === 'function' ? dispose : () => {}
     },
-    // The Files-pane switcher spec does not exercise the workspace menu.
-    inject: () => () => {},
+    // The Files-pane switcher spec does not exercise the workspace menu. The
+    // settings card's dynamic injection resolves immediately only when this
+    // harness is asked to compose the modern remote-tools form.
+    inject: (services: readonly string[], callback: (scope: unknown) => unknown) => {
+      if (options.remoteForm === true && services.includes('configForms')) {
+        const out = callback(ctx)
+        return typeof out === 'function' ? out : () => {}
+      }
+      return () => {}
+    },
     locale: {
       register: () => () => {},
       bind: (ns: string) => (key: string) => `${ns}.${key}`,
@@ -305,6 +324,9 @@ export function mount(withConnection = true, services: HostServices = {}, option
       }
       if (name === 'contextMenus') return services.contextMenus
       if (name === 'sidebarRightTabs') return services.sidebarRightTabs
+      if (name === 'configForms') return options.remoteForm === true
+        ? { get: (entryId: string) => entryId === 'multi-root-remote-tools' ? remoteForm : undefined }
+        : undefined
       if (name === 'sessions') {
         return {
           list: {
@@ -391,6 +413,10 @@ export function mount(withConnection = true, services: HostServices = {}, option
       }
     },
     setSearchFailure: next => { searchFailure = next },
+    setRemoteEnabled: next => {
+      remoteEnabledFlag = next
+      for (const listener of remoteListeners) listener()
+    },
     remoteListCalls,
     remoteWaitCalls,
     releaseWaits: () => { for (const release of waitReleases.splice(0)) release() },

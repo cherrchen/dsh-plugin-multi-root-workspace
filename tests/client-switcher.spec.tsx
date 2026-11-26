@@ -268,6 +268,33 @@ describe('the Files-tab root switcher', () => {
     expect(harness.calls.every(call => call.payload.sessionId === 'session-1')).toBe(true)
   })
 
+  it('keeps the remote-enabled add menu in the dialog opened from the trailing manage item', async () => {
+    const harness = mount(true, {}, { remoteForm: true })
+    renderInPane(harness)
+    await waitFor(() => { expect(harness.calls.length).toBeGreaterThanOrEqual(1) })
+    act(() => { harness.setRemoteEnabled(true) })
+
+    await openMenu()
+    fireEvent.click(screen.getByRole('button', { name: `${NS}.switcher.manage` }))
+    await waitFor(() => { expect(screen.getByRole('dialog')).toBeTruthy() })
+
+    // ADR-0050's ON shape must reach this locally owned dialog too: `+` is a
+    // menu opener with the local and remote entries, not the OFF shape's
+    // direct local-add action. The footer already shares the same dependency
+    // bundle; this pins the RootSwitcher pass-through that used to drop it.
+    const wrap = await waitFor(() => {
+      const element = document.querySelector('.mrfw-addWrap') as HTMLElement | null
+      expect(element).not.toBeNull()
+      return element as HTMLElement
+    })
+    const trigger = wrap.querySelector('button')
+    expect(trigger?.getAttribute('aria-haspopup')).toBe('menu')
+    fireEvent.click(trigger!)
+    await screen.findByText(`${NS}.panel.addLocal`)
+    const remoteItem = screen.getByText(`${NS}.panel.addRemote`).closest('button')
+    expect(remoteItem).toHaveProperty('disabled', false)
+  })
+
   it('degrades to a menu-only switcher without a data-files-root ancestor', async () => {
     const harness = mount()
     render(harness.occupant({ absolutePath: '/repos/primary' }) as ReactElement)
