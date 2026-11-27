@@ -45,8 +45,8 @@ RootSwitcher/FilesPane → SSH WorkspaceFilesProvider.preview
 - 预览设置变更走正常的绑定摘要重登记/重选语义；`browse` 能力独立。
 - 范围仅个人托管（SFTP 直连与带独立 SFTP 路径授予的 Helper；其余 transport/custody 一律 fail closed）。
 - `RemoteEndpointView.preview?: 'sftp-binary-v1'` 仅为发现提示：只在 `browseAuthorization` 与 Host 服务/transport/标志门禁全部通过后设置；未知或缺失值只丢预览。服务/Host 处理器内部同样有 API 门禁，旧 Host 保持 list-only 兼容。
-- 客户端额外要求 RPC 服务与活的 Viewer candidates；初版仅限 `0.2.3-alpha.2`，其余 exact peer 支持不变。扩大预览支持前须给对应版本补生产内容链路证据。
-- 不维护第二份版本真值表：版本门只有 `src/compat/remote-file-preview.ts` 一处。
+- 客户端额外要求 RPC 服务与活的 Viewer candidates；宿主版本范围与 SSH 远端浏览相同，即完整 `SUPPORTED_SSH_RELEASES`。低于 SSH 浏览地板的宿主本来就不能选择远端根，保持 list-only/无远端根语义。
+- 不维护第二份版本真值表：`src/compat/remote-file-preview.ts` 直接读取 `SUPPORTED_SSH_RELEASES`，没有独立的预览 release 列表。
 
 ## 4. `remoteFiles.read` 线协议
 

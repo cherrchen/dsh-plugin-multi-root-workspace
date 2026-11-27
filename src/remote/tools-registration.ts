@@ -87,8 +87,9 @@ export function mountRemoteTools(
       opening as unknown as RemoteFilesManager,
       ctx.logger,
       // The live preview gate (ADR-0053): personal custody only, and only on
-      // the release the binary carrier is evidenced for — consulted on every
-      // supportsPreview and every read admission, never snapshotted.
+      // a release inside the same SSH support matrix that may browse remote
+      // roots — consulted on every supportsPreview and every read admission,
+      // never snapshotted.
       () => registry.remoteMode === 'personal'
         && remoteFilePreviewTransport(ctx.get('multiRootCompat')?.release) !== undefined,
     )

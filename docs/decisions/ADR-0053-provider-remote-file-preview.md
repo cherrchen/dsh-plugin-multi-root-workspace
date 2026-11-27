@@ -10,7 +10,7 @@ ADR-0052 交付了 SSH 远端根的只读目录浏览，并在 `WorkspaceFilesPr
 
 ## 决策
 
-按 Provider 分派远端文件预览：SSH provider 的可选 `preview` 端口把普通文件行路由到插件自有的不透明 Resource（`dsh-resource://mrfw-remote/<uuid v4>`）与 capability-gated 只读 Viewer；内容经单一严格 `remoteFiles.read` 操作（Connection binary attachment，一次完整读取，无 stat/range）；授权是独立的 `filePreview:'stable-path'` opt-in；范围只覆盖个人托管 SFTP 路径，初版仅限 `0.2.3-alpha.2`。逐节合同以 [remote-file-preview](../architecture/remote-file-preview.md) 为唯一规范来源。
+按 Provider 分派远端文件预览：SSH provider 的可选 `preview` 端口把普通文件行路由到插件自有的不透明 Resource（`dsh-resource://mrfw-remote/<uuid v4>`）与 capability-gated 只读 Viewer；内容经单一严格 `remoteFiles.read` 操作（Connection binary attachment，一次完整读取，无 stat/range）；授权是独立的 `filePreview:'stable-path'` opt-in；范围只覆盖个人托管 SFTP 路径。宿主版本范围与 SSH 远端浏览相同：`remoteFilePreviewTransport()` 直接采用完整 `SUPPORTED_SSH_RELEASES`，不维护第二份预览 release 表。逐节合同以 [remote-file-preview](../architecture/remote-file-preview.md) 为唯一规范来源。
 
 要点：
 

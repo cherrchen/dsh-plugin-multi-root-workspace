@@ -1,12 +1,12 @@
 /**
  * P2: the frozen `remoteFiles.read` wire contract, the opaque preview resource
- * address codec, and the exact-release transport gate. The read request is
+ * address codec, and the SSH-matrix transport gate. The read request is
  * the listing identity PLUS a nonempty file path; the content envelope is one
  * strict metadata object whose single binary field arrives decoded — never a
  * JSON array, base64, or foreign typed array; the address is an opaque
  * lowercase UUID v4 token that cannot smuggle session, grant or path facts;
- * and the `sftp-binary-v1` carrier answers only for the release the P0 real
- * transport evidence covers.
+ * and the `sftp-binary-v1` carrier follows the exact SSH support matrix —
+ * the same version floor as remote browsing rather than a second release list.
  */
 import { describe, expect, it } from 'vitest'
 import {
@@ -23,6 +23,7 @@ import {
   remoteFileId,
 } from '../src/client/file-preview/resource-address.ts'
 import { remoteFilePreviewTransport } from '../src/compat/remote-file-preview.ts'
+import { SUPPORTED_SSH_RELEASES } from '../src/compat/dsh-version.ts'
 
 const validRequest = {
   sessionId: 'session',
@@ -133,12 +134,12 @@ describe('remote preview resource address', () => {
 })
 
 describe('remoteFilePreviewTransport', () => {
-  it('answers the carrier only for the evidenced release', () => {
-    expect(remoteFilePreviewTransport('0.2.3-alpha.2')).toBe(REMOTE_FILE_PREVIEW_TRANSPORT)
+  it.each([...SUPPORTED_SSH_RELEASES])('answers the carrier for every SSH-browsing release (%s)', release => {
+    expect(remoteFilePreviewTransport(release)).toBe(REMOTE_FILE_PREVIEW_TRANSPORT)
   })
 
-  it.each([undefined, '0.2.2-rc.1', '0.2.2-rc.2', '0.2.2-rc.5', '0.2.3-alpha.1', '0.2.3'])(
-    'stays disabled for %s',
+  it.each([undefined, '0.2.1-rc.5', '0.2.2-alpha.3', '0.2.3-alpha.1', '0.2.3'])(
+    'stays disabled outside the SSH support matrix for %s',
     release => {
       expect(remoteFilePreviewTransport(release)).toBeUndefined()
     },

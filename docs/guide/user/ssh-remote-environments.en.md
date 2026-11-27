@@ -116,7 +116,7 @@ With browsing enabled, the same binding can also tick **Preview files (stable SF
 
 The preview is read-only and follows the regular file viewer's interaction model: the tab carries the same colored file-type icon as the host, the header shows the path, Markdown/code/plain-text views can be selected, source view supports line numbers, copying and line wrapping, and the refresh and folder navigator controls sit at the right. The navigator can be resized like the host one and moves between wide, overlay and narrow layouts. Markdown is still a bounded subset (no images, links or arbitrary markup); anything larger than the size limit or not text shows "cannot be previewed". The host's open-in-app handoff is intentionally absent. The folder navigator inside the preview is read-only too — it does not watch the remote and never caches beyond the grant; when authorization lapses the preview expires immediately and the file must be reopened from Files.
 
-Like browsing, this is a **deployment assertion** — saving moves the binding to `withheld` and it takes effect only after re-registration. On an older DSH host without the preview transport, the setting can be saved but the host never issues the preview capability, so file rows stay inert; upgrading later needs no re-ticking.
+Like browsing, this is a **deployment assertion** — saving moves the binding to `withheld` and it takes effect only after re-registration. The preview transport covers the same host versions as SSH remote browsing; on a host outside the SSH support matrix the setting can be saved but the host never issues the preview capability, so file rows stay inert, and upgrading later needs no re-ticking.
 
 ## Using the remote tools
 
