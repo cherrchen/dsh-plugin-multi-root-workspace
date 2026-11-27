@@ -21,6 +21,7 @@ import { createElement, type ReactNode } from 'react'
 import type { Context as ClientContext } from '@deepseek-ai/cordis'
 import type { TabId } from '@deepseek-ai/dsh-client-ui-dockkit'
 import type { TranslateNS } from '@deepseek-ai/dsh-client-ui-slots'
+import { FileTypeIcon, classifyFileType } from '@deepseek-ai/dsh-client-ui-primitives'
 import { RemoteFilesError, type RemoteFilesFailureCode } from '../../remote/files-contract.ts'
 import { REMOTE_PREVIEW_KIND, REMOTE_PREVIEW_RESOURCE_TYPE, remoteFileAddress, remoteFileId } from './resource-address.ts'
 import type { RemotePreviewBook, RemotePreviewRecord } from './resource-book.ts'
@@ -43,6 +44,8 @@ export interface PreviewTabInfo {
   readonly tab: {
     readonly id: TabId
     readonly contentId: string
+    /** The registry-captured chip title when the framework exposes it. */
+    readonly title?: string | undefined
     readonly visible: boolean
     readonly signal: AbortSignal
     readonly actions: { bindCommands(commands: { refresh?: () => void }): () => void }
@@ -167,6 +170,25 @@ export function installRemotePreview(ctx: ClientContext, deps: RemotePreviewDeps
     (scope as unknown as { get(key: string): unknown }).get(name) as T | undefined
   const scopeEffect = (scope: ClientContext, body: () => () => void, label: string): void => {
     (scope as unknown as { effect(body: () => () => void, label: string): void }).effect(body, label)
+  }
+
+  /**
+   * The chip title, closed over the book so a framework whose tab object does
+   * not expose the captured title can still classify the record's basename.
+   * It uses only lifetime metadata and never reads file bytes.
+   */
+  const previewTitle = function RemotePreviewTitle(props: PreviewBodyProps): ReactNode {
+    const useTabInfo = typeof props.useTabInfo === 'function' ? props.useTabInfo : fallbackUseTabInfo
+    const { tab } = useTabInfo()
+    const sessionId = props.sessionId ?? deps.currentSession()
+    const record = sessionId === undefined ? undefined : book.get(tab.contentId, sessionId)
+    const title = tab.title ?? (record === undefined ? t('preview.title') : basenameOf(record.relativePath))
+    return (
+      <>
+        <FileTypeIcon kind={classifyFileType(title)} size={16} className="mrfw-previewTitleIcon" />
+        {title}
+      </>
+    )
   }
 
   // The provider: pin the record for the stream's lifetime, emit the
@@ -296,6 +318,24 @@ export function installRemotePreview(ctx: ClientContext, deps: RemotePreviewDeps
       return () => {
         bodyReady = false
         dispose()
+      }
+    })
+  })
+
+  // The chip title seat is independent of the body: a composition without it
+  // keeps the fully functional preview and merely shows the registry's bare
+  // title, exactly as upstream's optional title-slot pattern does.
+  injectServices.inject(['sidebarRightTabs'], scope => {
+    const slots = (scope as unknown as { readonly slots?: SlotsSlice }).slots
+    if (slots === undefined || typeof slots.inject !== 'function' || typeof slots.register !== 'function') return
+    slots.inject('sidebar.right.pane.tab.title', () => {
+      try {
+        return slots.register(
+          { name: 'sidebar.right.pane.tab.title', key: DEFINITION_ID },
+          previewTitle,
+        )
+      } catch {
+        return () => {}
       }
     })
   })

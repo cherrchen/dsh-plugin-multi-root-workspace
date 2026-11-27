@@ -2,7 +2,7 @@
 
 > 状态：**已实现，待维护者审查，未发布**。实测组合、旧宿主降级与未验证场景见[验收报告](../plans/completed/2026-11-27-provider-remote-file-preview.md#最终验收报告)；决策见 [ADR-0053](../decisions/ADR-0053-provider-remote-file-preview.md)，承接 [ADR-0052 的远端浏览分层](file-browsing-providers.md)。
 
-远端文件预览让 Files 页签里的 SSH 远端**普通文件行**经插件自有的 Resource/Viewer 打开只读内容，并复用同一棵 `FilesPane` 做远端 Navigator。全部路径都建在既有构件上：DSH Tab/Dockkit、`resources`/`sidebarRightTabs`、Connection binary attachment、托管的 SFTP v3 通道与 Registry 逐次有序准入。**不引入**编辑、落盘、回写、watch、轮询、搜索、LSP、diff、下载、挂载、同步、新 transport/凭据或上游修改/原生 Viewer fork。
+远端文件预览让 Files 页签里的 SSH 远端**普通文件行**经插件自有的 Resource/Viewer 打开只读内容，并复用同一棵 `FilesPane` 做远端 Navigator。Viewer 的外层视觉与基础交互对齐宿主文档预览（38px 路径头、查看器选择、换行/刷新/目录树工具、居中状态、源码/Markdown 排版、可拖宽的 push/overlay/fill Navigator），但这是插件独立实现的**视觉适配**，不是复制或挂载上游 Viewer 内部组件树；远端授权、一次性完整读取、安全子集与无 `open-in-app` 的合同不变。全部路径都建在既有构件上：DSH Tab/Dockkit、`resources`/`sidebarRightTabs`、Connection binary attachment、托管的 SFTP v3 通道与 Registry 逐次有序准入。**不引入**编辑、落盘、回写、watch、轮询、搜索、LSP、diff、下载、挂载、同步、新 transport/凭据或上游修改/原生 Viewer fork。
 
 ## 1. 数据通路与复用端口
 
@@ -32,7 +32,7 @@ RootSwitcher/FilesPane → SSH WorkspaceFilesProvider.preview
 - 生命周期：条目在最后一次 DSH 资源 pin（occurrence 生命周期）释放；打开失败、失效、被替换、dispose 的条目移除；总数有界。
 - 资源流只承载**元数据与生命周期**（地址/身份/标签/失效信号），不承载内容快照——上游 resource 语义在失败时保留上一次成功值，故字节帧绝不经过 `ctx.resources`；内容读取走独立的 content-view 端口并经 generation+signal 围栅。
 - 语法兼容陈旧地址：过期地址仍是合法拼写，Viewer 可以渲染显式失效态；**无持久化身份查找、凭据、权威摘要或内容**——reload 后已释放记录不可复活，fail closed。
-- 展示只含环境标签、root ID 与安全路径元数据；绝不显示原始 SSH target。
+- 头部路径沿用宿主 `PathLabel` 的目录/文件名排版，但目录部分只由环境标签、root ID 与相对路径组成；绝不显示原始 SSH target 或远端绝对路径。
 - Viewer 在 occurrence pin 到位前只显示加载状态，不启动读取；pin/lease 与 Body 分开管理。`keepMounted:false` 允许卸载非活跃 Body；隐藏时丢弃内容，关闭/替换经 tab signal 中止，活跃 session、Viewer 本地 signal 与请求 generation 围栅迟到读取。
 
 ## 3. 授权：`filePreview:'stable-path'`
@@ -75,5 +75,5 @@ RootSwitcher/FilesPane → SSH WorkspaceFilesProvider.preview
 
 - 每个 `session/env/root/incarnation` 一份共享引用计数元数据租约，供树/Viewer/Navigator 三方；只在最后观察者释放；disposal 后不再续租；待决租约提交有界（沿用 Host 16 上限）；避免 cancel/resubmit 洪泛；权威不可判定时 fail closed；无轮询、无陈旧文件系统内容。
 - 客户端预算：至多 8 个活资源记录、4 个保留 Viewer 内容、2 个在途读取；关闭/卸载/取消即释放；无共享文件缓存、无 Blob、无落盘；上限是逻辑载荷/呈现预算，不是进程堆承诺。
-- 渲染：Markdown ≤128 KiB / ≤4096 节点，按安全白名单文本 AST 渲染——无图片、HTML、链接、网络或远端内嵌；语法类与主动格式（HTML/SVG 等）一律源码回退；致命 UTF-8 校验（BOM 剥离），拒绝 NUL/二进制控制；空文件与无扩展名接受；PDF/Office/其他二进制只报元数据/不支持；无位图图片；超限 Markdown 回退源码。
-- 资源 tab 标题/图标只用宿主已有的简单原语（可用即用，无深导入）；无本地 API/编辑/watch；布局 token 直接继承，无新应用界面。
+- 渲染：Markdown ≤128 KiB / ≤4096 节点，按安全白名单文本 AST 渲染；标题、段落、列表、引用、围栏代码与粗体/斜体/行内代码可呈排版样式，但仍无图片、HTML、链接、网络或远端内嵌，链接/图片语法只作为文本而非活动对象。语法类与主动格式（HTML/SVG 等）一律源码回退；致命 UTF-8 校验（BOM 剥离），拒绝 NUL/二进制控制；空文件与无扩展名接受；PDF/Office/其他二进制只报元数据/不支持；无位图图片；超限 Markdown 回退源码。
+- 资源 tab 标题/图标只用宿主已有的简单原语（可用即用，无深导入）；无本地 API/编辑/watch；布局 token 直接继承。源码类内容优先经宿主公开 primitives 的 `CodeBlock` 呈现（行号、复制、换行与语法高亮）， primitive 缺席时回退为逐字节纯文本；这不改变读取面，也不引入对上游 Viewer 内部状态机的依赖。

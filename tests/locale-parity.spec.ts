@@ -70,14 +70,14 @@ describe('panel dictionaries', () => {
   it('actually translates instead of copying the Chinese text into English', () => {
     // OS product names are proper nouns and stay identical in both languages;
     // every other identical value is untranslated copy.
-    const languageNeutral = new Set(['ssh.platform.linux', 'ssh.platform.darwin', 'ssh.step.helper'])
+    const languageNeutral = new Set(['ssh.platform.linux', 'ssh.platform.darwin', 'ssh.step.helper', 'preview.viewer.markdown'])
     const identical = Object.keys(zh).filter(key =>
       !languageNeutral.has(key) && zh[key as keyof typeof zh] === en[key as keyof typeof en])
     expect(identical).toEqual([])
   })
 
   it('allows identical English technical labels only in the languages that use them', () => {
-    const shared = ['ssh.platform.linux', 'ssh.platform.darwin', 'ssh.step.helper'] as const
+    const shared = ['ssh.platform.linux', 'ssh.platform.darwin', 'ssh.step.helper', 'preview.viewer.markdown'] as const
     const experimental = ['autoReview.experimental', 'ops.experimental', 'worktree.experimental', 'remote.experimental'] as const
     const workspace = ['panel.accessEffective', 'ssh.errorField'] as const
     const checkout = ['effective.full-access', 'worktree.kind.main-checkout'] as const
@@ -86,7 +86,7 @@ describe('panel dictionaries', () => {
       ja: shared,
       es: [...shared, ...experimental, ...workspace],
       fr: [...shared, 'panel.accessEffective', 'ssh.field.port', 'ssh.tab.keys'],
-      de: [...shared, ...workspace, ...checkout, 'remote.mode.team', 'ssh.field.hostname', 'ssh.field.port'],
+      de: [...shared, ...workspace, ...checkout, 'remote.mode.team', 'ssh.field.hostname', 'ssh.field.port', 'preview.viewer.code', 'preview.codeBlock.title'],
       ru: [...shared, ...workspace],
       pt: [...shared, ...experimental, ...workspace, ...checkout],
     } satisfies Record<Exclude<(typeof LOCALES)[number], 'en'>, readonly (keyof typeof en)[]>

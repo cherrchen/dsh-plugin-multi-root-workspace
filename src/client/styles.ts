@@ -3550,128 +3550,147 @@ button.mrfw-sshButton {
   }
 }
 
-/* Remote file preview (ADR-0053 P5): a compact read-only inspection
- * surface — one muted toolbar over a scrollable source/markdown region.
- * Token-only; inherits the host font and its code-font fallback. */
+/* Remote file preview (ADR-0053 P5): the host document preview's shell,
+   adapted to global class names. The measurements come from upstream
+   ui-sidebar-documentpreview TextPreview.module.css and ui-sidebar-files
+   FilesBody.module.css at 0.2.3-alpha.2: a 38px path header, 28px tool
+   buttons, a source-oriented scrollport, and the navigator card beside it.
+   Remote-only differences are semantic, not visual: no Host handoff control
+   (open-in-app) and no active Markdown objects. */
 .mrfw-preview {
   display: flex;
+  flex: 1 1 auto;
   flex-direction: column;
-  block-size: 100%;
-  min-block-size: 0;
-  container-type: inline-size;
-  font-family: inherit;
+  min-width: 0;
+  height: 100%;
+  min-height: 0;
   color: var(--dsw-alias-label-primary);
+  font-size: var(--dsh-content-font-size-secondary, 13px);
+  line-height: 1.5;
   background: var(--dsw-alias-bg-base);
 }
 
+/* The file type's 16px sheet before the chip text; the dockkit title row
+   centres and spaces it exactly as upstream's titleIcon. */
+.mrfw-previewTitleIcon {
+  flex: none;
+}
+
 .mrfw-previewHead {
-  flex: none;
   display: flex;
-  flex-wrap: wrap;
+  flex: 0 0 auto;
+  gap: 4px;
   align-items: center;
-  gap: 6px;
-  padding: 8px 12px;
-  border-block-end: 1px solid var(--dsw-alias-border-l2);
-  font: var(--dsw-font-xxs-12);
-}
-
-.mrfw-previewBadge {
-  flex: none;
-  padding: 1px 6px;
-  border: 1px solid var(--dsw-alias-border-l2);
-  border-radius: 4px;
-  color: var(--dsw-alias-label-tertiary);
-}
-
-.mrfw-previewLabel {
-  flex: none;
-  max-inline-size: 100%;
-  overflow-wrap: anywhere;
-  user-select: text;
-  color: var(--dsw-alias-label-secondary);
-}
-
-.mrfw-previewRoot {
-  flex: none;
-  color: var(--dsw-alias-label-tertiary);
-  overflow-wrap: anywhere;
-  user-select: text;
-}
-
-.mrfw-previewSize {
-  flex: none;
-  color: var(--dsw-alias-label-tertiary);
+  box-sizing: border-box;
+  height: 38px;
+  padding: 0 6px 0 16px;
+  border-bottom: 0.5px solid var(--dsw-alias-border-l3);
 }
 
 .mrfw-previewPath {
-  flex: 1 1 160px;
-  min-inline-size: 0;
-  color: var(--dsw-alias-label-secondary);
-  overflow-wrap: anywhere;
-  user-select: text;
+  flex: 1 1 auto;
+  min-width: 0;
+  margin-right: 12px;
+  font-size: 12px;
 }
 
-.mrfw-previewAction {
+/* Controls in the header row, sized like the docking kit's own pane controls:
+   a 28px hit area around a 15px glyph. */
+.mrfw-previewTool {
+  display: inline-flex;
   flex: none;
-  margin: 0;
-  padding: 2px 8px;
-  border: 1px solid var(--dsw-alias-border-l2);
-  border-radius: 4px;
-  font: inherit;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  padding: 6px;
   color: var(--dsw-alias-label-secondary);
+  line-height: 1;
   background: transparent;
+  border: none;
+  border-radius: var(--dsw-radius-sm);
   cursor: pointer;
 }
 
-.mrfw-previewAction:hover {
-  background: var(--dsw-alias-interactive-bg-hover);
+.mrfw-previewTool svg {
+  width: 15px;
+  height: 15px;
 }
 
-.mrfw-previewAction:focus-visible {
-  outline: 1px solid var(--dsw-alias-brand-primary);
+.mrfw-previewFolderTool svg {
+  width: 16px;
+  height: 16px;
+}
+
+@media (hover: hover) {
+  .mrfw-previewTool:hover {
+    color: var(--dsw-alias-label-primary);
+    background: var(--dsw-alias-interactive-bg-hover);
+  }
+}
+
+.mrfw-previewTool:focus-visible {
+  outline: var(--dsw-focus-ring-width) solid var(--dsw-focus-ring-color, var(--dsw-alias-state-business-primary));
   outline-offset: 1px;
 }
 
-.mrfw-previewAction[aria-pressed='true'] {
-  background: var(--dsw-alias-interactive-bg-active);
+.mrfw-previewTool[aria-pressed='true'],
+.mrfw-previewTool[aria-expanded='true'] {
+  color: var(--dsw-alias-label-primary);
+  background: var(--dsw-alias-interactive-bg-hover);
 }
 
+.mrfw-previewViewerTool {
+  flex: none;
+  width: auto;
+  max-width: 160px;
+  padding: 0 6px;
+  overflow: hidden;
+  color: var(--dsw-alias-label-secondary);
+  font-size: 12px;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+/* Everything below the header: the body, then the navigator. The navigator
+   either narrows the body or positions an overlay against this row, so the
+   header always spans the pane. */
 .mrfw-previewWorkspace {
+  position: relative;
+  isolation: isolate;
   display: flex;
-  flex: 1 1 0;
-  min-block-size: 0;
-  min-inline-size: 0;
+  flex: 1 1 auto;
+  min-width: 0;
+  min-height: 0;
+}
+
+.mrfw-previewWorkspace > :first-child {
+  isolation: isolate;
+  flex: 1 1 auto;
+  min-width: 0;
 }
 
 .mrfw-previewContent {
-  flex: 1 1 0;
-  min-block-size: 0;
-  min-inline-size: 0;
+  position: relative;
+  flex: 1 1 auto;
+  min-width: 0;
+  min-height: 0;
+  margin: 0;
+  padding: 0;
   overflow: auto;
-  padding: 8px 12px;
+  overflow-anchor: none;
+  --dsh-scrollbar-thumb: var(--dsw-alias-scrollbar-bg-l2);
+  --dsh-scrollbar-thumb-hover: var(--dsw-alias-scrollbar-hover-l2);
+  color: var(--dsw-alias-label-primary);
+  font-size: var(--dsh-content-font-size-secondary, 13px);
+  font-family: var(--dsw-font-mono, ui-monospace, monospace);
+  line-height: 1.6;
+  white-space: pre;
   outline: none;
 }
 
-.mrfw-previewFolder {
-  flex: 0 0 clamp(9rem, 38%, 17rem);
-  display: flex;
-  min-block-size: 0;
-  min-inline-size: 0;
-  border-inline-start: 1px solid var(--dsw-alias-border-l2);
-  overflow: hidden;
-}
-
-/* A narrow body stacks the Folder under the content instead of beside it. */
-@container (max-width: 360px) {
-  .mrfw-previewWorkspace {
-    flex-direction: column;
-  }
-
-  .mrfw-previewFolder {
-    flex: 0 1 50%;
-    border-inline-start: none;
-    border-block-start: 1px solid var(--dsw-alias-border-l2);
-  }
+.mrfw-previewContent::-webkit-scrollbar-track {
+  margin: 2px;
 }
 
 .mrfw-previewContent:focus-visible {
@@ -3679,47 +3698,396 @@ button.mrfw-sshButton {
   outline-offset: -1px;
 }
 
-.mrfw-previewStatus {
-  margin: 8px 0;
-  font-size: 13px;
-  color: var(--dsw-alias-label-secondary);
+.mrfw-previewWrap {
+  white-space: pre-wrap;
+  word-break: break-word;
 }
 
-.mrfw-previewSource {
+.mrfw-previewContent:has(.mrfw-previewCode) {
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+/* Plain text keeps the shared document inset while edge-to-edge renderers can
+   fill the scroller themselves. */
+.mrfw-previewTextDocument {
+  box-sizing: border-box;
+  min-width: 100%;
+  min-height: 100%;
+  padding: 8px;
+}
+
+.mrfw-previewPage {
   margin: 0;
-  font-family: var(--dsw-font-mono, var(--ds-font-family-code, monospace));
-  font-size: 12px;
-  line-height: 1.5;
+  padding: 0 10px;
+  font: var(--dsw-font-markdown-code-block);
+  white-space: inherit;
+}
+
+/* CodeDocument is upstream CodeBody's layout: the block fills the pane, the
+   block's own content node becomes the scrollport, and the sidebar pane's
+   background replaces the chat card's gray fill. */
+.mrfw-previewCode {
+  display: flex;
+  flex: 1 1 auto;
+  flex-direction: column;
+  width: 100%;
+  height: 100%;
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden;
+  white-space: normal;
+}
+
+.mrfw-previewCode .mrfw-previewCodeBlock {
+  --dsl-code-block-border-radius: 0px;
+  --dsl-code-block-line-white-space: pre;
+  --dsl-code-block-background: transparent;
+  display: flex;
+  flex: 1 1 auto;
+  flex-direction: column;
+  height: 100%;
+  min-height: 0;
+  position: static;
+  margin: 0;
+  min-width: 0;
+}
+
+.mrfw-previewCode .mrfw-previewCodeBlock > [data-code-block-content] {
+  position: relative;
+  display: block;
+  flex: 1 1 auto;
+  min-width: 0;
+  min-height: 0;
+  overflow: auto;
+}
+
+.mrfw-previewCode .mrfw-previewCodeBlock > [data-code-block-content]::-webkit-scrollbar-track {
+  margin: 2px;
+}
+
+.mrfw-previewCode .mrfw-previewCodeBlock pre {
+  box-sizing: border-box;
+  padding: 16px;
+  min-width: 100%;
+  overflow: visible;
+  white-space: pre;
+  word-break: normal;
+  overflow-wrap: normal;
+}
+
+.mrfw-previewCode[data-wrap='true'] .mrfw-previewCodeBlock {
+  --dsl-code-block-line-white-space: pre-wrap;
+}
+
+.mrfw-previewCode[data-wrap='true'] .mrfw-previewCodeBlock pre {
   white-space: pre-wrap;
   overflow-wrap: anywhere;
-  user-select: text;
 }
 
-.mrfw-previewMarkdown {
-  font-size: 13px;
+/* Loading and empty states: the upstream document preview centers them a
+   little above the pane's midpoint. */
+.mrfw-previewLoading {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  align-items: center;
+  justify-content: center;
+  box-sizing: border-box;
+  width: 100%;
+  height: 100%;
+  min-height: 0;
+  padding: 24px;
+  color: var(--dsw-alias-label-secondary);
+  font-family: var(--dsw-font, sans-serif);
+  font-size: var(--dsh-content-font-size, 14px);
+  line-height: 1.5;
+  text-align: center;
+  white-space: normal;
+}
+
+.mrfw-previewEmpty {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  align-items: center;
+  justify-content: center;
+  box-sizing: border-box;
+  height: 100%;
+  padding: 0 24px;
+  color: var(--dsw-alias-label-secondary);
+  font-size: var(--dsh-content-font-size-secondary, 13px);
+  font-family: var(--dsw-font-family);
   line-height: 1.6;
+  text-align: center;
+  white-space: normal;
 }
 
-.mrfw-previewMarkdown > p,
-.mrfw-previewMarkdown > ul,
-.mrfw-previewMarkdown > blockquote,
-.mrfw-previewMarkdown > pre {
-  margin-block: 8px;
+.mrfw-previewEmpty::after {
+  content: '';
+  flex: 0 1 12%;
 }
 
-.mrfw-previewHeading {
-  margin-block: 12px 6px;
+.mrfw-previewEmptyIcon {
+  flex: none;
+  opacity: 0.6;
+  filter: grayscale(1);
+}
+
+.mrfw-previewEmptyLine {
+  margin: 0;
+}
+
+.mrfw-previewRetry {
+  display: inline-flex;
+  flex: none;
+  gap: 6px;
+  align-items: center;
+  height: 32px;
+  padding: 0 14px 0 12px;
   color: var(--dsw-alias-label-primary);
+  font-size: var(--dsh-content-font-size-secondary, 13px);
+  font-family: inherit;
+  background: transparent;
+  border: 0.5px solid var(--dsw-alias-border-l2);
+  border-radius: var(--dsw-radius-md);
+  cursor: pointer;
 }
 
-.mrfw-previewMarkdown > blockquote {
-  margin-inline: 0;
-  padding-inline-start: 10px;
-  border-inline-start: 2px solid var(--dsw-alias-border-l2);
+@media (hover: hover) {
+  .mrfw-previewRetry:hover {
+    background: var(--dsw-alias-interactive-bg-hover);
+  }
+}
+
+/* Markdown's visual contract is the host MarkdownText sheet reduced to the
+   safe block subset this renderer may emit. The owner supplies scrolling;
+   prose whitespace and typography stay inside this child. */
+.mrfw-previewMarkdown {
+  min-width: 0;
+  padding: 10px 12px;
+  overflow-wrap: anywhere;
+  color: var(--dsw-alias-label-primary);
+  font: var(--dsw-font-markdown-base);
+  white-space: normal;
+}
+
+.mrfw-previewMarkdown strong {
+  font-weight: 600;
+}
+
+.mrfw-previewMarkdown h1 {
+  margin: 32px 0 16px;
+  font: var(--dsw-font-markdown-h1);
+}
+
+.mrfw-previewMarkdown h2 {
+  margin: 32px 0 16px;
+  font: var(--dsw-font-markdown-h2);
+}
+
+.mrfw-previewMarkdown h3 {
+  margin: 32px 0 16px;
+  font: var(--dsw-font-markdown-h3);
+}
+
+.mrfw-previewMarkdown :where(h1, h2, h3) strong {
+  font-weight: inherit;
+}
+
+.mrfw-previewMarkdown p {
+  margin: 16px 0;
+}
+
+.mrfw-previewMarkdown ul {
+  margin: 16px 0;
+  padding-left: 18px;
+}
+
+.mrfw-previewMarkdown li:not(:first-child) {
+  margin-top: 6px;
+}
+
+.mrfw-previewMarkdown li::marker {
+  line-height: 24px;
   color: var(--dsw-alias-label-secondary);
 }
 
-.mrfw-previewToggle {
-  margin-block: 0 8px;
+.mrfw-previewMarkdown blockquote {
+  margin: 16px 0 0;
+  padding-left: 14px;
+  border-left: 2px solid var(--dsw-alias-label-caption);
 }
+
+.mrfw-previewMarkdown blockquote p {
+  margin: 0;
+}
+
+.mrfw-previewMarkdown pre {
+  margin: 16px 0;
+  overflow: auto;
+  font-family: var(--ds-font-family-code);
+}
+
+.mrfw-previewMarkdown :not(pre) > code {
+  display: inline-flex;
+  align-items: center;
+  box-sizing: border-box;
+  padding: 0 5px;
+  border: 0.5px solid var(--dsw-alias-border-l1);
+  border-radius: var(--dsw-radius-sm);
+  background-color: var(--dsw-alias-markdown-inline-code);
+  font: var(--dsw-font-markdown-code);
+  font-family: var(--ds-font-family-code);
+  font-size: 0.875em !important;
+}
+
+.mrfw-previewMarkdown :where(h1, h2, h3) code {
+  font: inherit;
+  font-family: var(--ds-font-family-code);
+}
+
+.mrfw-previewMarkdownCode {
+  padding: 16px;
+  border-radius: var(--dsw-radius-lg);
+  background: var(--dsw-alias-markdown-code-block);
+  color: var(--dsw-alias-label-primary);
+  font: var(--dsw-font-markdown-code-block);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.mrfw-previewMarkdown > *:first-child,
+.mrfw-previewMarkdown p:first-child {
+  margin-top: 0 !important;
+}
+
+.mrfw-previewMarkdown > *:last-child,
+.mrfw-previewMarkdown p:last-child {
+  margin-bottom: 0 !important;
+}
+
+/* The navigator takes the upstream preview-card form. In a wide row it is a
+   pushed flex item; narrower rows overlay it at the right, and very narrow
+   rows fill the content row. Its width and resize behavior follow upstream's
+   navigatorGeometry rather than the viewport alone. */
+.mrfw-previewFolder {
+  position: relative;
+  display: flex;
+  flex: none;
+  flex-direction: column;
+  box-sizing: border-box;
+  width: var(--mrfw-files-navigator-width, 260px);
+  height: 100%;
+  min-width: 0;
+  min-height: 0;
+  --files-search-bar-height: 42px;
+  color: var(--dsw-alias-label-primary);
+  font-size: var(--dsh-content-font-size-secondary, 13px);
+  line-height: 1.5;
+  background: var(--dsw-alias-bg-base);
+  border-left: 0.5px solid var(--dsw-alias-border-l3);
+}
+
+.mrfw-previewFolderSeparator {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: -4px;
+  z-index: 1;
+  width: 8px;
+  cursor: col-resize;
+  touch-action: none;
+}
+
+.mrfw-previewFolder-fill {
+  position: absolute;
+  inset: 0;
+  z-index: 2;
+  width: auto;
+  height: auto;
+  border-left: 0;
+}
+
+.mrfw-previewWorkspace {
+  --files-navigator-covered: initial;
+}
+
+.mrfw-previewWorkspace > :not(.mrfw-previewFolder) {
+  visibility: var(--files-navigator-covered, inherit);
+}
+
+.mrfw-previewWorkspace:has(> .mrfw-previewFolder-fill) {
+  --files-navigator-covered: hidden;
+}
+
+/* navigator-layout FULLSCREEN_QUERY: every layout fills the row. */
+@media (width < 768px) {
+  .mrfw-previewWorkspace:has(> .mrfw-previewFolder) {
+    --files-navigator-covered: hidden;
+  }
+
+  .mrfw-previewFolder {
+    position: absolute;
+    inset: 0;
+    z-index: 2;
+    width: auto;
+    height: auto;
+    border-left: 0;
+  }
+
+  .mrfw-previewFolderSeparator {
+    display: none;
+  }
+}
+
+@media (width >= 768px) {
+  .mrfw-previewFolder-push,
+  .mrfw-previewFolder-overlay {
+    background: var(--dsw-alias-bg-layer-1);
+    border: 0;
+    border-radius: var(--dsw-radius-lg);
+    --dsw-elevation-stroke-color: var(--dsw-alias-border-l2);
+    box-shadow: var(--dsw-elevation-prominent);
+    --dsh-scrollbar-thumb: var(--dsw-alias-scrollbar-bg-l2);
+    --dsh-scrollbar-thumb-hover: var(--dsw-alias-scrollbar-hover-l2);
+  }
+
+  body[data-ds-dark-theme] .mrfw-previewFolder-push,
+  body[data-ds-dark-theme] .mrfw-previewFolder-overlay {
+    --dsw-elevation-stroke-color: var(--dsw-alias-border-l3);
+  }
+
+  .mrfw-previewFolder-push {
+    align-self: stretch;
+    height: auto;
+    margin: 8px;
+  }
+
+  .mrfw-previewFolder-overlay {
+    position: absolute;
+    top: 8px;
+    right: 8px;
+    bottom: 8px;
+    z-index: 2;
+    height: auto;
+  }
+
+  .mrfw-previewFolder .mrfw-ftBody::-webkit-scrollbar-track {
+    margin: var(--dsw-radius-lg) 2px;
+  }
+}
+
+.mrfw-previewFolderDragging {
+  cursor: col-resize;
+  user-select: none;
+}
+
+/* The folder's inner forked pane fills the card. */
+.mrfw-previewFolder > .mrfw-fsPane,
+.mrfw-previewFolder > .mrfw-ftBody {
+  min-height: 0;
+}
+
 `

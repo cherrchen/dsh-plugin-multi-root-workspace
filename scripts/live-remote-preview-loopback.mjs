@@ -237,14 +237,15 @@ try {
     await ready()
     check('real Files row opens exact real SFTP bytes in read-only Viewer',
       await display.locator('pre').textContent() === text
-      && await viewer.getByText('Read-only', { exact: true }).isVisible()
       && await viewer.locator('textarea,[contenteditable="true"]').count() === 0)
+    const textTab = dockTabs.filter({ has: page.getByText('a.txt', { exact: true }) }).first()
+    check('remote preview tab carries the file-type icon', await textTab.locator('.mrfw-previewTitleIcon').count() === 1)
     const rev = `${text}updated\n`
     writeFileSync(join(remote, 'nested', 'a.txt'), rev)
     await viewer.getByRole('button', { name: 'Reload file' }).click()
     await ready()
     check('refresh reads changed bytes in the same Viewer', await display.locator('pre').textContent() === rev)
-    await viewer.getByRole('button', { name: 'Folder', exact: true }).click()
+    await viewer.getByRole('button', { name: 'Show file tree', exact: true }).click()
     const folder = viewer.locator('[data-mrfw-preview-folder]')
     await row(folder, 'nested/a.txt').and(page.locator('[aria-current="true"]')).waitFor()
     check('Folder reuses FilesPane and reveals current remote file', true)
@@ -258,6 +259,8 @@ try {
     const tabsBefore = await tabCount()
     await row(folder, 'nested/b.md').click()
     await display.getByRole('heading', { name: 'From OpenSSH' }).waitFor()
+    const markdownTab = dockTabs.filter({ has: page.getByText('b.md', { exact: true }) }).first()
+    check('replace-in-place keeps the Markdown tab icon', await markdownTab.locator('.mrfw-previewTitleIcon').count() === 1)
     check('same-pane replaceTab preserves tab count and current-file affordance',
       !!paneBefore && await pane() === paneBefore && await tabCount() === tabsBefore)
     await row(folder, 'nested/b.md').and(page.locator('[aria-current="true"]')).waitFor()

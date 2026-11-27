@@ -20,6 +20,7 @@ ADR-0052 交付了 SSH 远端根的只读目录浏览，并在 `WorkspaceFilesPr
 4. **线协议**：请求即 list 身份 + 非空 `relativePath`；响应为严格 metadata + 恰好一个 `bytes` binary attachment，双侧强制 2 MiB、严格终形校验、超限稳定报错不截断。
 5. **读取管线**：单 owned channel 完成 准入 → LSTAT/realpath 根与祖先 → 只读 OPEN → FSTAT → 深度 1 串行 128 KiB READ → 发布前再探 → CLOSE → 最终准入；取消关自有通道并持位至清理完成；size/类型/mtime 变化拒绝 `file-changed`。
 6. **预算与渲染**：共享引用计数租约；≤8 资源记录 / ≤4 Viewer 内容 / ≤2 在途读；Markdown ≤128 KiB/4096 节点安全 AST；无图片/主动内容/HTML/SVG 渲染（源码回退）；无编辑/watch/搜索/diff/下载/同步。
+7. **界面边界**：Viewer 的外观与基础操作对齐宿主文档预览，但只作为插件独立实现的视觉适配；不得 fork/挂载上游 Viewer 的内部组件树或状态机，不实现 Host handoff/`open-in-app`。可复用宿主公开 primitives（如 `PathLabel`、`Menu`、`CodeBlock`），缺席时降级而不改变读取与授权合同。
 
 ## 备选方案（已拒绝）
 
