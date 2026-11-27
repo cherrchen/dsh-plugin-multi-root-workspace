@@ -38,7 +38,10 @@ import { createList, createLocalWorkspaceProvider, createWatch, type ListWorkspa
 import { createSshWorkspaceProvider, REMOTE_FILES_FAILURE_GROUPS } from './providers/ssh.ts'
 import { resolveWorkspaceFilesProvider, type FilesRootSelection, type RemoteRootSelection } from './providers/resolver.ts'
 import type { RemoteFilesClient } from '../remote-files-client.ts'
-import type { RemoteFilesFailureCode } from '../../remote/files-contract.ts'
+import type { RemoteFilesAuthorizationBook } from '../file-preview/authorization.ts'
+import { REMOTE_FILE_PREVIEW_TRANSPORT, type RemoteFilesFailureCode } from '../../remote/files-contract.ts'
+import { createRemotePreviewPort } from '../file-preview/open-port.ts'
+import type { RemotePreviewIntegration } from '../file-preview/install.tsx'
 import { createFilesStore } from './store.ts'
 import { filesTreeSurfaceSupported } from './primitives.ts'
 import { filesMenuHookOf, filesMenuSeat, type FilesMenuKinds, type FilesMenuSeat } from './context-menu.ts'
@@ -377,6 +380,8 @@ export function createFilesTreeSeats(
     readonly panel?: PanelClient | undefined
     /** The `remoteFiles` channel client; absent when this composition has no browse backend. */
     readonly remoteFiles?: RemoteFilesClient | undefined
+    /** The shared authorization-lease book; absent without the channel. */
+    readonly remoteAuthorization?: RemoteFilesAuthorizationBook | undefined
     /** The workspace search preferences, shared by every pane and session. */
     readonly preferences: WorkspaceSearchPreferenceBook
   },
@@ -393,8 +398,10 @@ export function createFilesTreeSeats(
   readonly list: ListWorkspaceDirectory
   /** The lazily remote-bound `workspaceFiles.changes` stream the local provider watches through. */
   readonly watch: WatchWorkspaceDirectory
-  /** The `remoteFiles` channel client the SSH provider lists and leases through. */
+  /** The `remoteFiles` channel client the SSH provider lists through. */
   readonly remoteFiles: RemoteFilesClient | undefined
+  /** The shared authorization-lease book the owner lease and preview records hold through. */
+  readonly remoteAuthorization: RemoteFilesAuthorizationBook | undefined
   /** Code → localized message for the fixed `remoteFiles` vocabulary (plugin dictionary). */
   readonly remoteFilesLocalize: ((code: RemoteFilesFailureCode) => string) | undefined
 } {
@@ -608,7 +615,7 @@ export function createFilesTreeSeats(
   const remoteFilesLocalize = remoteT === undefined
     ? undefined
     : (code: RemoteFilesFailureCode): string => remoteT(`remoteFiles.error.${REMOTE_FILES_FAILURE_GROUPS[code]}`)
-  return { store, inject, menuKinds, canOpenViewer: () => canOpenViewer, searchSupported, list, watch, remoteFiles: deps.remoteFiles, remoteFilesLocalize }
+  return { store, inject, menuKinds, canOpenViewer: () => canOpenViewer, searchSupported, list, watch, remoteFiles: deps.remoteFiles, remoteAuthorization: deps.remoteAuthorization, remoteFilesLocalize }
 }
 
 /**
@@ -634,8 +641,17 @@ export interface FilesTreeSurfaceDeps {
   readonly watch: WatchWorkspaceDirectory
   /** The `remoteFiles` channel client; absent disables remote selections entirely. */
   readonly remoteFiles?: RemoteFilesClient | undefined
+  /** The shared authorization-lease book; absent disables the owner lease (and remote preview). */
+  readonly remoteAuthorization?: RemoteFilesAuthorizationBook | undefined
   /** Code → localized message for the fixed `remoteFiles` failure groups (plugin dictionary). */
   readonly remoteFilesLocalize?: ((code: RemoteFilesFailureCode) => string) | undefined
+  /**
+   * The remote file preview's open route (ADR-0053 P6): present only when
+   * the preview surface installed. An endpoint whose live view still hints
+   * `sftp-binary-v1` gets a preview port on its provider; every other
+   * selection stays listing-only.
+   */
+  readonly remotePreview?: RemotePreviewIntegration | undefined
 }
 
 /** Selector hook stand-in for a composition without the viewer registry: a constant zero. */
@@ -713,24 +729,33 @@ export function createFilesTreeSurface(
           },
         ),
         ...(deps.remoteFiles === undefined ? {} : {
-          ssh: selection => createSshWorkspaceProvider(
-            { sessionId, root: selection.ref, incarnation: selection.incarnation },
-            deps.remoteFiles!,
-            deps.remoteFilesLocalize ?? (code => `remoteFiles.error.${REMOTE_FILES_FAILURE_GROUPS[code]}`),
-            reason => { onInvalidated?.(reason) },
-          ),
+          ssh: selection => {
+            const identity = { sessionId, root: selection.ref, incarnation: selection.incarnation }
+            // The preview port rides on the LIVE view's hint, not the stored
+            // selection's: an endpoint that dropped `sftp-binary-v1` resolves
+            // to a listing-only provider even under the same incarnation.
+            const preview = selection.view.preview === REMOTE_FILE_PREVIEW_TRANSPORT && deps.remotePreview !== undefined
+              ? createRemotePreviewPort(identity, selection.view.displayName ?? selection.ref.environmentId, deps.remotePreview)
+              : undefined
+            return createSshWorkspaceProvider(
+              identity,
+              deps.remoteFiles!,
+              deps.remoteFilesLocalize ?? (code => `remoteFiles.error.${REMOTE_FILES_FAILURE_GROUPS[code]}`),
+              reason => { onInvalidated?.(reason) },
+              preview,
+            )
+          },
         }),
       }),
-    // One authorization lease per remote selection — the metadata wait the
-    // owner loops, never a filesystem watch. Absent without the channel.
-    ...(deps.remoteFiles === undefined ? {} : {
+    // One hold on the grant's SHARED authorization lease per remote
+    // selection — the metadata wait the owner installs, never a filesystem
+    // watch. Absent without the lease book.
+    ...(deps.remoteAuthorization === undefined ? {} : {
       observeAuthority: async (root: RemoteRootSelection, signal: AbortSignal): Promise<void> => {
-        await deps.remoteFiles!.wait({
-          sessionId,
-          environmentId: root.ref.environmentId,
-          rootId: root.ref.rootId,
-          authorization: root.incarnation,
-        }, signal)
+        await deps.remoteAuthorization!.observe(
+          { sessionId, root: root.ref, incarnation: root.incarnation },
+          signal,
+        )
       },
     }),
   }

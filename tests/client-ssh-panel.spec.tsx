@@ -1322,6 +1322,105 @@ describe('the SSH management dialog', () => {
     }]])
   })
 
+  it('preserves the file-preview opt-in through an unrelated edit and drops it with listing', async () => {
+    const binding = {
+      environmentId: 'env-prod', rootId: 'web', path: '/srv/app',
+      actions: ['read'] as const,
+      directoryListing: 'stable-path' as const,
+      filePreview: 'stable-path' as const,
+    }
+    const ssh = fakeSsh(sshState({ bindings: [binding] }))
+    render(createElement(SshWorkspaceBindingsDialog, {
+      ssh, sessionId: 'session-1', remotes: undefined, roots: ROOTS,
+      initialEdit: { environmentId: 'env-prod', rootId: 'web' },
+      onClose() {}, onChanged() {}, t,
+    }))
+    const dialog = await screen.findByRole('dialog', { name: 'ssh.bindings' })
+    const path = within(dialog).getByLabelText<HTMLInputElement>('ssh.binding.path')
+    await waitFor(() => expect(path.value).toBe('/srv/app'))
+    const listing = within(dialog).getByRole('checkbox', { name: 'ssh.binding.directoryListing' }) as HTMLInputElement
+    const preview = within(dialog).getByRole('checkbox', { name: 'ssh.binding.filePreview' }) as HTMLInputElement
+    // The existing opt-in back-fills enabled and checked.
+    expect(listing.checked).toBe(true)
+    expect(preview.checked).toBe(true)
+    expect(preview.disabled).toBe(false)
+    // An unrelated field edit keeps it in the save payload.
+    fireEvent.click(within(dialog).getByRole('checkbox', { name: 'remote.capability.write' }))
+    fireEvent.click(within(dialog).getByRole('button', { name: 'ssh.binding.save' }))
+    expect(await callsOf(ssh, 'bindingSave')).toEqual([['session-1', 7, {
+      ...binding, actions: ['read', 'write'],
+    }]])
+  })
+
+  it('clears file preview when listing is toggled off and never resurrects it', async () => {
+    const binding = {
+      environmentId: 'env-prod', rootId: 'web', path: '/srv/app',
+      actions: ['read'] as const,
+      directoryListing: 'stable-path' as const,
+      filePreview: 'stable-path' as const,
+    }
+    const ssh = fakeSsh(sshState({ bindings: [binding] }))
+    render(createElement(SshWorkspaceBindingsDialog, {
+      ssh, sessionId: 'session-1', remotes: undefined, roots: ROOTS,
+      initialEdit: { environmentId: 'env-prod', rootId: 'web' },
+      onClose() {}, onChanged() {}, t,
+    }))
+    const dialog = await screen.findByRole('dialog', { name: 'ssh.bindings' })
+    const path = within(dialog).getByLabelText<HTMLInputElement>('ssh.binding.path')
+    await waitFor(() => expect(path.value).toBe('/srv/app'))
+    const listing = within(dialog).getByRole('checkbox', { name: 'ssh.binding.directoryListing' }) as HTMLInputElement
+    const preview = within(dialog).getByRole('checkbox', { name: 'ssh.binding.filePreview' }) as HTMLInputElement
+    expect(preview.checked).toBe(true)
+    // Listing off clears preview; listing back on leaves it OFF — no resurrection.
+    fireEvent.click(listing)
+    expect(preview.checked).toBe(false)
+    expect(preview.disabled).toBe(true)
+    fireEvent.click(listing)
+    expect(listing.checked).toBe(true)
+    expect(preview.checked).toBe(false)
+    expect(preview.disabled).toBe(false)
+    // Removing read clears BOTH opt-ins and disables both boxes.
+    fireEvent.click(within(dialog).getByRole('checkbox', { name: 'remote.capability.read' }))
+    expect(listing.checked).toBe(false)
+    expect(listing.disabled).toBe(true)
+    expect(preview.disabled).toBe(true)
+  })
+
+  it('enables file preview from the quick capability editor only under listing', async () => {
+    const binding = {
+      environmentId: 'env-prod', rootId: 'web', path: '/srv/app',
+      actions: ['read', 'write'] as const,
+    }
+    const endpoint = {
+      environmentId: binding.environmentId, rootId: binding.rootId, path: binding.path,
+      displayName: 'Production', platform: 'linux', target: 'ssh://deploy@prod.internal:22',
+      state: 'registered' as const, actions: [...binding.actions], transfers: [],
+      capabilities: { read: true, write: true, exec: false, receive: false, send: false },
+    }
+    const ssh = fakeSsh(sshState({
+      environments: [{ ...ENV_HELPER, environmentId: 'env-prod' }],
+      bindings: [binding],
+    }))
+    renderDialog({ ssh, endpoints: [endpoint] })
+    const row = (await screen.findByText('ssh://deploy@prod.internal:22/srv/app')).closest('.mrfw-row') as HTMLElement
+    fireEvent.click(within(row).getByRole('button', { name: 'panel.more' }))
+    fireEvent.click(screen.getByRole('button', { name: 'ssh.binding.editCapabilities' }))
+    const preview = await screen.findByRole('button', { name: /ssh\.binding\.filePreview/ })
+    const menu = preview.closest('[role="menu"], [data-menu]') as HTMLElement
+    const listing = within(menu).getByRole('button', { name: /ssh\.binding\.directoryListing/ })
+    // Preview stays disabled until listing is on, and its hint rides the row.
+    expect((preview as HTMLButtonElement).disabled).toBe(true)
+    expect(within(menu).getByText('ssh.binding.filePreviewHint')).toBeTruthy()
+    fireEvent.click(listing)
+    expect((preview as HTMLButtonElement).disabled).toBe(false)
+    fireEvent.click(preview)
+    fireEvent.click(within(menu).getByRole('button', { name: 'ssh.binding.save' }))
+    expect(await callsOf(ssh, 'bindingSave')).toEqual([['session-1', 7, {
+      environmentId: 'env-prod', rootId: 'web', path: '/srv/app',
+      actions: ['read', 'write'], directoryListing: 'stable-path', filePreview: 'stable-path',
+    }]])
+  })
+
   it('pre-selects the binding form when the dialog gets a matching initialEdit', async () => {
     const binding = { environmentId: 'env-prod', rootId: 'web', path: '/srv/app', actions: ['read'] as const }
     const ssh = fakeSsh(sshState({ bindings: [binding] }))

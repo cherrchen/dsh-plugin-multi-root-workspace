@@ -36,6 +36,9 @@ import { createWorktreeClient } from './worktree-client.ts'
 import { WorktreePrompt } from './WorktreePrompt.tsx'
 import { createRemotesClient, type RemotesClient } from './remotes-client.ts'
 import { createRemoteFilesClient } from './remote-files-client.ts'
+import { RemoteFilesAuthorizationBook } from './file-preview/authorization.ts'
+import { RemotePreviewBook } from './file-preview/resource-book.ts'
+import { installRemotePreview } from './file-preview/install.tsx'
 import { createSshClient, createSshSettingsClient, type SshClient } from './ssh-client.ts'
 import { DICTIONARIES, NS } from './locales.ts'
 import { STYLES } from './styles.ts'
@@ -247,12 +250,36 @@ export function apply(ctx: ClientContext): void {
   // Files registration makes, plus the session-bound open route. The fork
   // binds upstream's `sidebarFiles` namespace so its rows say exactly what
   // the native tree says.
+  const remoteFiles = connectionHandle === undefined ? undefined : createRemoteFilesClient(connectionHandle)
+  // One lease per remote grant — the tree's owner holds and (P5) the preview
+  // records share it; it dies with the plugin context.
+  const remoteAuthorization = remoteFiles === undefined ? undefined : new RemoteFilesAuthorizationBook(remoteFiles)
+  ctx.effect(() => () => { remoteAuthorization?.dispose() }, 'multi-root-workspace: remote files authorization')
   const filesTreeSeats = createFilesTreeSeats(ctx, {
     panel,
-    remoteFiles: connectionHandle === undefined ? undefined : createRemoteFilesClient(connectionHandle),
+    remoteFiles,
+    remoteAuthorization,
     preferences: createSearchPreferenceBook(readBrowserStorage()),
   })
   const filesTreeT = ctx.locale.bind(FILES_TREE_NS)
+  // The remote preview surface (ADR-0053 P5/P6): a book of minted records
+  // over the shared lease, a resource provider carrying lifetime facts only,
+  // a read-only sidebar-right tab body, and the integration the SSH provider
+  // rows open through.
+  const remotePreview = remoteFiles === undefined || remoteAuthorization === undefined
+    ? undefined
+    : installRemotePreview(ctx, {
+      book: new RemotePreviewBook(remoteFiles, remoteAuthorization, sessionId),
+      currentSession: sessionId,
+      subscribeSession,
+      t: ctx.locale.bind(NS),
+      filesTreeT,
+      seats: filesTreeSeats,
+    })
+  // The apply-level deps constant every surface caller shares: the seats
+  // plus the preview route. `remotePreview` is optional on the dep map, so
+  // compositions without a channel resolve to listing-only providers.
+  const filesTreeDeps = { ...filesTreeSeats, remotePreview }
 
   ctx.slots.inject('sidebar.footer.action', () => ctx.slots.register({
     name: 'sidebar.footer.action',
@@ -337,7 +364,7 @@ export function apply(ctx: ClientContext): void {
     // framework-stable prop or an apply-level constant, so the switcher's
     // takeover effect — which keys on the selection, not the wrapper —
     // never restarts because of it. `undefined` means the fork cannot mount.
-    const filesTree = createFilesTreeSurface(props, filesTreeT, filesTreeSeats)
+    const filesTree = createFilesTreeSurface(props, filesTreeT, filesTreeDeps)
     return absolutePath === undefined
       ? createElement(WorkspaceFoldersAction, { ...dialogDeps, sessionId: paneSessionId, compact: true })
       : createElement(RootSwitcher, { ...dialogDeps, primaryPath: absolutePath, sessionId: paneSessionId, openInApp: openInApp?.adapter, filesTree, nativeTree: nativeTreeRenderer((props as { renderFactorySlot?: unknown }).renderFactorySlot) })
@@ -358,7 +385,7 @@ export function apply(ctx: ClientContext): void {
     inject: filesTreeSeats.inject,
   }, function DocumentActionsOccupant(props) {
     const absolutePath = (props as { readonly absolutePath?: string } | undefined)?.absolutePath
-    const filesTree = createFilesTreeSurface(props, filesTreeT, filesTreeSeats)
+    const filesTree = createFilesTreeSurface(props, filesTreeT, filesTreeDeps)
     // No host path or no fork → no marker at all: the native navigator
     // keeps its tree untouched either way.
     if (absolutePath === undefined || filesTree === undefined) return null

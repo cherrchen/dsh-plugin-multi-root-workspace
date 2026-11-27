@@ -11,11 +11,12 @@ import { RemoteFilesService, type RemoteFilesManager, type RemoteFilesRegistry }
 import {
   RemoteFilesError,
   REMOTE_FILES_LIMITS,
+  REMOTE_FILE_PREVIEW_LIMITS,
   remoteFilesListRequest,
   validRemoteRelativePath,
   type RemoteFilesListing,
 } from '../src/remote/files-contract.ts'
-import { SftpConnectionLost, type SftpClient } from '../src/remote/sftp.ts'
+import { SftpConnectionLost, SftpInvalidContent, type SftpClient } from '../src/remote/sftp.ts'
 import type { DeploymentManifest } from '../src/remote/manifest.ts'
 import type { SftpEnvironment } from '../src/remote/ssh-environment.ts'
 
@@ -45,11 +46,14 @@ class FilesManager implements RemoteFilesManager {
 }
 
 let manager: FilesManager
+let previewOn = false
 
-async function mount(options: Parameters<typeof mountRemoteTools>[1] = {}): Promise<void> {
-  world = await mountRemoteTools(fixture, { withPanel: true, deviceListing: true, ...options })
+async function mount(options: Parameters<typeof mountRemoteTools>[1] & { preview?: boolean } = {}): Promise<void> {
+  const { preview, ...rest } = options
+  previewOn = preview === true
+  world = await mountRemoteTools(fixture, { withPanel: true, deviceListing: true, devicePreview: preview, ...rest })
   manager = new FilesManager(world)
-  service = new RemoteFilesService(world.stack.registry, manager, world.ctx.logger)
+  service = new RemoteFilesService(world.stack.registry, manager, world.ctx.logger, () => previewOn)
   world.stack.registry.setRemoteFilesService(service)
 }
 
@@ -503,11 +507,11 @@ describe.skipIf(process.platform === 'win32')('remoteFiles.list admission', () =
       // inside the registry. Neither the caller-visible run nor the
       // concurrency slot may retire ahead of it and its final re-admission.
       expect(settled).toBe(false)
-      expect((svc as unknown as { active: number }).active).toBe(1)
+      expect((svc as unknown as { active: { list: number } }).active.list).toBe(1)
       releaseRecheck?.()
       expect(await pending).toBe('ok')
       expect(admissions).toBe(3)
-      await vi.waitFor(() => { expect((svc as unknown as { active: number }).active).toBe(0) })
+      await vi.waitFor(() => { expect((svc as unknown as { active: { list: number } }).active.list).toBe(0) })
     } finally {
       releaseRecheck?.()
       await svc.dispose()
@@ -795,4 +799,260 @@ it('refuses remote file listing and leases when the SSH plane is unavailable', a
   ] as const) {
     expect(await world.panel(endpoint, payload)).toMatchObject({ ok: false, error: { code: 'provider-unavailable' } })
   }
+})
+
+// The preview read endpoint (ADR-0053 P3): the flag gates the operation, the
+// opt-in gates the binding, and the read pipeline proves the file's identity
+// twice around the bytes.
+describe.skipIf(process.platform === 'win32')('remoteFiles.read admission', () => {
+  const readRequest = (over: Record<string, unknown> = {}) => ({
+    sessionId: world!.session.id as string, environmentId: 'device', rootId: 'out',
+    relativePath: 'a.txt', authorization: '', ...over,
+  })
+
+  it('a listing-only binding and a disabled flag deny the read before any SSH I/O; the list stays available', async () => {
+    await mount({ seed: { device: { '/srv/root/a.txt': 'alpha' } } })
+    await registerRemote(world!, 'device', 'out')
+    const token = await authorization()
+    // preview flag OFF: even an opted-in binding is refused at admission.
+    await expect(service!.read(readRequest({ authorization: token }) as never)).rejects.toMatchObject({ code: 'capability-unsupported' })
+    expect(manager.opens).toBe(0)
+    const listing = await service!.list(request({ authorization: token }) as never)
+    expect(listing.entries.map(entry => entry.name)).toContain('a.txt')
+    expect(manager.opens).toBe(1)
+  })
+
+  it('preview-not-authorized when the binding opts into listing but not filePreview', async () => {
+    await mount({ preview: true, devicePreview: false, seed: { device: { '/srv/root/a.txt': 'alpha' } } })
+    // devicePreview off ⇒ binding carries directoryListing only; the flag is on.
+    await registerRemote(world!, 'device', 'out')
+    await expect(service!.read(readRequest({ authorization: await authorization() }) as never))
+      .rejects.toMatchObject({ code: 'preview-not-authorized' })
+    expect(manager.opens).toBe(0)
+  })
+
+  it('reads a regular file with strict framed metadata plus one bytes attachment, and advertises the preview hint', async () => {
+    await mount({ preview: true, seed: { device: { '/srv/root/a.txt': 'alpha-bytes' } } })
+    await registerRemote(world!, 'device', 'out')
+    const view = await world!.panel('remotes', { sessionId: world!.session.id })
+    const endpoint = (view.value as { endpoints: { rootId: string; browseAuthorization?: string; preview?: string }[] })
+      .endpoints.find(entry => entry.rootId === 'out')!
+    expect(endpoint.preview).toBe('sftp-binary-v1')
+    const token = endpoint.browseAuthorization!
+    const content = await service!.read(readRequest({ authorization: token }) as never)
+    expect(content.kind).toBe('file')
+    expect(content.complete).toBe(true)
+    expect(content.size).toBe('alpha-bytes'.length)
+    expect(Buffer.from(content.bytes).toString()).toBe('alpha-bytes')
+    const answer = await world!.panel('remoteFiles.read', readRequest({ authorization: token }))
+    expect(answer.ok).toBe(true)
+    const value = answer.value as { kind: string; size: number; complete: boolean; bytes: null }
+    expect(value.bytes).toBeNull()
+    expect(value.size).toBe('alpha-bytes'.length)
+    const attachments = (answer as { attachments?: { path: string[]; bytes: Uint8Array }[] }).attachments
+    expect(attachments).toEqual([{ path: ['bytes'], bytes: new Uint8Array(Buffer.from('alpha-bytes')) }])
+  })
+
+  it('reads an empty file and a file under a unicode+backslash path', async () => {
+    await mount({ preview: true, seed: { device: { '/srv/root/zero.bin': '', '/srv/root/空 格\\name.ts': 'let x = 1' } } })
+    await registerRemote(world!, 'device', 'out')
+    const token = await authorization()
+    const empty = await service!.read(readRequest({ authorization: token, relativePath: 'zero.bin' }) as never)
+    expect(empty.size).toBe(0)
+    expect(empty.bytes.byteLength).toBe(0)
+    const named = await service!.read(readRequest({ authorization: token, relativePath: '空 格\\name.ts' }) as never)
+    expect(Buffer.from(named.bytes).toString()).toBe('let x = 1')
+  })
+
+  it.each([
+    ['a symlinked target', (remote: RemoteToolsWorld['remotes'] extends ReadonlyMap<string, infer R> ? R : never) => remote.seedSymlink('/srv/root/link.txt'), 'link.txt', 'path-escapes-root'],
+    ['a directory target', () => {}, 'src', 'not-regular-file'],
+    ['a missing target', () => {}, 'gone.txt', 'file-not-found'],
+  ])('denies %s before OPEN', async (_name, prepare, relativePath, code) => {
+    await mount({ preview: true, seed: { device: { '/srv/root/a.txt': 'a' } } })
+    prepare(world!.remotes.get('device')!)
+    await registerRemote(world!, 'device', 'out')
+    await expect(service!.read(readRequest({ authorization: await authorization(), relativePath }) as never))
+      .rejects.toMatchObject({ code })
+    expect(world!.remotes.get('device')!.sftpCalls.filter(call => call.startsWith('preview-open'))).toEqual([])
+  })
+
+  it('an oversized file is refused before any READ', async () => {
+    await mount({ preview: true, seed: { device: { '/srv/root/big.bin': 'x'.repeat(REMOTE_FILE_PREVIEW_LIMITS.bytes + 1) } } })
+    await registerRemote(world!, 'device', 'out')
+    await expect(service!.read(readRequest({ authorization: await authorization(), relativePath: 'big.bin' }) as never))
+      .rejects.toMatchObject({ code: 'file-too-large' })
+    const remote = world!.remotes.get('device')!
+    expect(remote.sftpCalls.filter(call => call.startsWith('preview-read'))).toEqual([])
+    expect(remote.sftpCalls.filter(call => call.startsWith('preview-open'))).toEqual([])
+  })
+
+  it('short DATA progress is accepted; a premature EOF is file-changed', async () => {
+    await mount({ preview: true, seed: { device: { '/srv/root/a.txt': 'abcdefghij' } } })
+    await registerRemote(world!, 'device', 'out')
+    const token = await authorization()
+    const remote = world!.remotes.get('device')!
+    const inner = remote.sftp.readPreview.bind(remote.sftp)
+    remote.sftp.readPreview = async (handle: Buffer, offset: number, length: number) => {
+      // Answer in 1-byte fragments: positive forward progress every request.
+      return await inner(handle, offset, Math.min(length, 1))
+    }
+    const content = await service!.read(readRequest({ authorization: token }) as never)
+    expect(Buffer.from(content.bytes).toString()).toBe('abcdefghij')
+    remote.sftp.readPreview = async () => undefined
+    await expect(service!.read(readRequest({ authorization: token }) as never))
+      .rejects.toMatchObject({ code: 'file-changed' })
+  })
+
+  it('a post-open FSTAT drift is file-changed; a malformed handle answer is invalid-content', async () => {
+    await mount({ preview: true, seed: { device: { '/srv/root/a.txt': 'abc' } } })
+    await registerRemote(world!, 'device', 'out')
+    const token = await authorization()
+    const remote = world!.remotes.get('device')!
+    const innerFstat = remote.sftp.fstatPreview.bind(remote.sftp)
+    let drifts = 0
+    remote.sftp.fstatPreview = async (handle: Buffer) => {
+      const attrs = await innerFstat(handle)
+      return ++drifts === 1 ? { ...attrs, size: attrs.size! + 1 } : attrs
+    }
+    await expect(service!.read(readRequest({ authorization: token }) as never))
+      .rejects.toMatchObject({ code: 'file-changed' })
+    remote.sftp.fstatPreview = innerFstat
+    remote.sftp.readPreview = async () => { throw new SftpInvalidContent() }
+    await expect(service!.read(readRequest({ authorization: token }) as never))
+      .rejects.toMatchObject({ code: 'invalid-content' })
+  })
+
+  it('a cancelled read closes exactly its one owned channel and holds the slot through cleanup', async () => {
+    await mount({ preview: true, seed: { device: { '/srv/root/a.txt': 'data' } } })
+    await registerRemote(world!, 'device', 'out')
+    const remote = world!.remotes.get('device')!
+    let release: (() => void) | undefined
+    remote.sftp.readPreview = () => new Promise(resolve => { release = () => resolve(Buffer.from('x')) })
+    const controller = new AbortController()
+    const pending = service!.read(readRequest({ authorization: await authorization() }) as never, controller.signal)
+    await new Promise(resolve => setTimeout(resolve, 50))
+    controller.abort()
+    await expect(pending).rejects.toMatchObject({ code: 'cancelled' })
+    await new Promise(resolve => setTimeout(resolve, 30))
+    expect(manager.opens).toBe(1)
+    expect(manager.disposals).toBe(1)
+    release?.()
+  })
+
+  it('list stays responsive while both read slots are occupied', async () => {
+    await mount({ preview: true, seed: { device: { '/srv/root/a.txt': 'data' } } })
+    await registerRemote(world!, 'device', 'out')
+    const remote = world!.remotes.get('device')!
+    const release: (() => void)[] = []
+    const inner = remote.sftp.readPreview.bind(remote.sftp)
+    let hanging = 2
+    // Only the FIRST read request of each occupied slot hangs; the EOF probe
+    // and later reads flow through the real fake once released.
+    remote.sftp.readPreview = async (handle: Buffer, offset: number, length: number) => {
+      if (hanging-- <= 0) return await inner(handle, offset, length)
+      return await new Promise<Buffer | undefined>(resolve => { release.push(() => resolve(Buffer.from('d'))) })
+    }
+    const token = await authorization()
+    const reads = Array.from({ length: 2 }, () =>
+      service!.read(readRequest({ authorization: token }) as never).then(() => 'done' as const, (e: RemoteFilesError) => e.code))
+    await new Promise(resolve => setTimeout(resolve, 50))
+    await expect(service!.read(readRequest({ authorization: token }) as never)).rejects.toMatchObject({ code: 'resource-budget' })
+    const listing = await service!.list(request({ authorization: token }) as never)
+    expect(listing.entries.map(entry => entry.name)).toContain('a.txt')
+    expect(manager.opens).toBe(3)
+    for (const resolve of release.splice(0)) resolve()
+    expect(await Promise.all(reads)).toEqual(['done', 'done'])
+  })
+
+  it('a grant revoked before the final admission denies the bytes with a coded error', async () => {
+    await mount({ preview: true, seed: { device: { '/srv/root/a.txt': 'data' } } })
+    await registerRemote(world!, 'device', 'out')
+    const remote = world!.remotes.get('device')!
+    const inner = remote.sftp.readPreview.bind(remote.sftp)
+    remote.sftp.readPreview = async (handle: Buffer, offset: number, length: number) => {
+      const chunk = await inner(handle, offset, length)
+      await world!.stack.registry.removeRemote(world!.session.header.cwd!, { environmentId: 'device', rootId: 'out' }).catch(() => {})
+      return chunk
+    }
+    const outcome = await service!.read(readRequest({ authorization: await authorization() }) as never)
+      .then(() => 'ok' as const, (error: RemoteFilesError) => error.code)
+    expect(['root-unregistered', 'binding-changed', 'root-identity-changed']).toContain(outcome)
+  })
+
+  it('an FSTAT carrying matching size/mtime but a non-regular mode is file-changed — no READ is served', async () => {
+    await mount({ preview: true, seed: { device: { '/srv/root/a.txt': 'abc' } } })
+    await registerRemote(world!, 'device', 'out')
+    const remote = world!.remotes.get('device')!
+    const inner = remote.sftp.fstatPreview.bind(remote.sftp)
+    const token = await authorization()
+    for (const broken of [
+      { flags: 5, size: 3 },                          // plausible size, NO perms at all
+      { flags: 5, size: 3, permissions: 0o010644 },   // FIFO with a plausible size
+      { flags: 5, size: 3, permissions: 0o040755 },   // directory with a plausible size
+    ]) {
+      remote.sftp.fstatPreview = async () => broken as never
+      await expect(service!.read(readRequest({ authorization: token }) as never))
+        .rejects.toMatchObject({ code: 'file-changed' })
+    }
+    remote.sftp.fstatPreview = inner
+    expect(remote.sftpCalls.filter(call => call.startsWith('preview-read'))).toEqual([])
+  })
+
+  it('an ancestor swapped for a symlink mid-read fails the re-probe — plausible target answers never publish', async () => {
+    await mount({ preview: true, seed: { device: { '/srv/root/sub/a.txt': 'data' } } })
+    await registerRemote(world!, 'device', 'out')
+    const remote = world!.remotes.get('device')!
+    const inner = remote.sftp.readPreview.bind(remote.sftp)
+    remote.sftp.readPreview = async (handle: Buffer, offset: number, length: number) => {
+      const chunk = await inner(handle, offset, length)
+      // Mid-read: the PARENT is replaced by a symlink while the target's own
+      // lstat/realpath still answer plausibly — the ancestor re-probe must
+      // still refuse publication.
+      remote.files.delete('/srv/root/sub')
+      remote.seedSymlink('/srv/root/sub')
+      return chunk
+    }
+    await expect(service!.read(readRequest({ authorization: await authorization(), relativePath: 'sub/a.txt' }) as never))
+      .rejects.toMatchObject({ code: 'path-escapes-root' })
+  })
+
+  it('a revoke landing while the owned dispose is in flight still publishes no bytes', async () => {
+    await mount({ preview: true, seed: { device: { '/srv/root/a.txt': 'data' } } })
+    class BlockingDisposeManager extends FilesManager {
+      override async openFilesSftp(environmentId: string, signal: AbortSignal, expectedDigest: string) {
+        const env = await super.openFilesSftp(environmentId, signal, expectedDigest)
+        return {
+          ...env,
+          // The channel's dispose runs the grant removal INSIDE its own
+          // pending window: the service must close the channel BEFORE the
+          // final admission, so the revoke always lands before the proof.
+          dispose: async () => {
+            await world!.stack.registry.removeRemote(world!.session.header.cwd!, { environmentId: 'device', rootId: 'out' }).catch(() => {})
+            await env.dispose()
+          },
+        }
+      }
+    }
+    const blocking = new BlockingDisposeManager(world!)
+    const svc = new RemoteFilesService(world!.stack.registry, blocking, world!.ctx.logger, () => true)
+    try {
+      await registerRemote(world!, 'device', 'out')
+      const outcome = await svc.read(readRequest({ authorization: await authorization() }) as never)
+        .then(() => 'ok' as const, (error: RemoteFilesError) => error.code)
+      expect(outcome).toBe('root-unregistered')
+    } finally { await svc.dispose() }
+  })
+
+  it('rejects invalid/empty read requests with zero I/O and grants other tools nothing', async () => {
+    await mount({ preview: true, seed: { device: { '/srv/root/a.txt': 'data' } } })
+    await registerRemote(world!, 'device', 'out')
+    const token = await authorization()
+    for (const relativePath of ['', '/abs', '../x']) {
+      const answer = await world!.panel('remoteFiles.read', readRequest({ authorization: token, relativePath }))
+      expect(answer.ok).toBe(false)
+      expect(answer.error?.code).toBe('panel/bad-request')
+    }
+    expect(manager.opens).toBe(0)
+  })
 })

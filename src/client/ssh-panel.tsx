@@ -1201,6 +1201,9 @@ export function SshWorkspaceBindingsDialog(props: SshWorkspaceBindingsDialogProp
       imports: new Set(binding.transfers?.filter(transfer => transfer.direction === 'import').map(transfer => transfer.peer.rootId)),
       exports: new Set(binding.transfers?.filter(transfer => transfer.direction === 'export').map(transfer => transfer.peer.rootId)),
       directoryListing: binding.directoryListing === 'stable-path',
+      // The opt-in stays opted-in while its prerequisites hold; a binding
+      // saved without listing can never silently re-gain preview.
+      filePreview: binding.filePreview === 'stable-path' && binding.directoryListing === 'stable-path' && binding.actions.includes('read'),
     })
   }
   const save = async (value: BindingDraft): Promise<BindingSaveResult> =>
@@ -1308,7 +1311,7 @@ export function SshWorkspaceBindingsDialog(props: SshWorkspaceBindingsDialogProp
                   <WizardCheckbox key={action} checked={draft[action]}
                     disabled={busy || (action === 'exec' && !draft.exec && environment?.exec === undefined)}
                     label={t(`remote.capability.${action}`)}
-                    onChange={next => setDraft({ ...draft, [action]: next, ...(action === 'read' && !next ? { directoryListing: false } : {}) })} />
+                    onChange={next => setDraft({ ...draft, [action]: next, ...(action === 'read' && !next ? { directoryListing: false, filePreview: false } : {}) })} />
                 ))}
               </div>
             </section>
@@ -1337,9 +1340,23 @@ export function SshWorkspaceBindingsDialog(props: SshWorkspaceBindingsDialogProp
                 <div className="mrfw-wizCheckRow">
                   <WizardCheckbox checked={draft.directoryListing} disabled={busy || !draft.read}
                     label={t('ssh.binding.directoryListing')}
-                    onChange={next => setDraft({ ...draft, directoryListing: next })} />
+                    onChange={next => setDraft({ ...draft, directoryListing: next, ...(next ? {} : { filePreview: false }) })} />
                 </div>
                 <p className="mrfw-note">{t('ssh.binding.directoryListingHint')}</p>
+              </section>
+            )}
+            {/* The stable-path file preview opt-in (ADR-0053): extends the
+                listing assertion to file contents, so it requires read AND
+                listing and drops with either prerequisite. Same re-registration
+                flow — a saved change changes binding identity. */}
+            {environment === undefined ? null : (
+              <section className="mrfw-wizSection" aria-label={t('ssh.binding.filePreview')}>
+                <div className="mrfw-wizCheckRow">
+                  <WizardCheckbox checked={draft.filePreview} disabled={busy || !draft.read || !draft.directoryListing}
+                    label={t('ssh.binding.filePreview')}
+                    onChange={next => setDraft({ ...draft, filePreview: next })} />
+                </div>
+                <p className="mrfw-note">{t('ssh.binding.filePreviewHint')}</p>
               </section>
             )}
             {pending?.kind === 'save' ? <StatusLine state="ongoing">{t('ssh.pending.bindingSave')}</StatusLine> : null}

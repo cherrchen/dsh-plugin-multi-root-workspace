@@ -157,7 +157,7 @@ export function AddBindingWizard(props: {
             <WizardCheckbox key={action} checked={draft[action]}
               disabled={busy || (action === 'exec' && !draft.exec && environment?.exec === undefined)}
               label={t(`remote.capability.${action}`)}
-              onChange={next => setDraft({ ...draft, [action]: next, ...(action === 'read' && !next ? { directoryListing: false } : {}) })} />
+              onChange={next => setDraft({ ...draft, [action]: next, ...(action === 'read' && !next ? { directoryListing: false, filePreview: false } : {}) })} />
           ))}
         </div>
       </section>
@@ -166,9 +166,19 @@ export function AddBindingWizard(props: {
           <div className="mrfw-wizCheckRow">
             <WizardCheckbox checked={draft.directoryListing} disabled={busy || !draft.read}
               label={t('ssh.binding.directoryListing')}
-              onChange={next => setDraft({ ...draft, directoryListing: next })} />
+              onChange={next => setDraft({ ...draft, directoryListing: next, ...(next ? {} : { filePreview: false }) })} />
           </div>
           <p className="mrfw-note">{t('ssh.binding.directoryListingHint')}</p>
+        </section>
+      )}
+      {environment === undefined ? null : (
+        <section className="mrfw-wizSection" aria-label={t('ssh.binding.filePreview')}>
+          <div className="mrfw-wizCheckRow">
+            <WizardCheckbox checked={draft.filePreview} disabled={busy || !draft.read || !draft.directoryListing}
+              label={t('ssh.binding.filePreview')}
+              onChange={next => setDraft({ ...draft, filePreview: next })} />
+          </div>
+          <p className="mrfw-note">{t('ssh.binding.filePreviewHint')}</p>
         </section>
       )}
       {localPeers.length === 0 ? null : (
@@ -223,6 +233,10 @@ export function AddBindingWizard(props: {
         <div className="mrfw-wizSummaryRow">
           <dt>{t('ssh.binding.directoryListing')}</dt>
           <dd>{draft.directoryListing ? t('wizard.summaryEnabled') : t('wizard.summaryNone')}</dd>
+        </div>
+        <div className="mrfw-wizSummaryRow">
+          <dt>{t('ssh.binding.filePreview')}</dt>
+          <dd>{draft.filePreview && draft.directoryListing ? t('wizard.summaryEnabled') : t('wizard.summaryNone')}</dd>
         </div>
         <div className="mrfw-wizSummaryRow">
           <dt>{t('wizard.summaryTransfers')}</dt>

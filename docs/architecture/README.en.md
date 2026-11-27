@@ -32,6 +32,7 @@ The architecture documents distinguish **implemented Current state** from **futu
   - Still Target: the long-term upstream seam (§8) and the appendix (§9).
 - [registry-authority-service.md](./registry-authority-service.md) — Shared Registry authority: ordered admissions, kernel-authenticated IPC, consumer seams, fail-closed recovery and takeover (implemented; platform evidence in the progress ledger).
 - [file-browsing-providers.md](./file-browsing-providers.md) — Files-tab local/SSH-remote browsing providers: component dependencies, the selection/identity/authority/transport layers, the capability matrix, the metadata lease (not file watching) and the bounded security posture (implemented P1–P5; the remote preview extension remains Target).
+- [remote-file-preview.md](./remote-file-preview.md) — Remote file preview: plugin-owned viewer, `filePreview:'stable-path'` authorization, opaque resource identity, bounded SFTP reads over binary RPC, and lease and rendering boundaries.
 
 ## Naming Convention
 

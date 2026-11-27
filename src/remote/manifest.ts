@@ -90,6 +90,12 @@ export const bindingSchema = z.object({
    * used by exec/copy.
    */
   directoryListing: z.literal('stable-path').optional(),
+  /**
+   * Operator opt-in to Host-side file preview reads (ADR-0053 P3): the same
+   * stable-path deployment assertion extended to the target file's name/object
+   * mapping for the duration of a read. Requires `directoryListing` and `read`.
+   */
+  filePreview: z.literal('stable-path').optional(),
   actions: z.array(z.enum(['read', 'write', 'exec'])).min(1),
   transfers: z.array(z.object({
     direction: z.enum(['import', 'export']),
@@ -242,6 +248,9 @@ export function parseDeploymentManifest(text: string, manifestPath: string, opti
     }
     if (binding.directoryListing !== undefined && !binding.actions.includes('read')) {
       throw new ManifestError('invalid-manifest', `binding "${binding.rootId}" declares directoryListing without read`)
+    }
+    if (binding.filePreview !== undefined && (binding.directoryListing !== 'stable-path' || !binding.actions.includes('read'))) {
+      throw new ManifestError('invalid-manifest', `binding "${binding.rootId}" declares filePreview without read and stable-path directoryListing`)
     }
     // The listing contract bounds the absolute lookup path: an opt-in root
     // already past the byte floor is refused HERE, at declaration time —

@@ -29,6 +29,9 @@ import {
 } from '../src/client/files-tree/provider.ts'
 import { createLocalWorkspaceProvider } from '../src/client/files-tree/providers/local.ts'
 import { createSshWorkspaceProvider } from '../src/client/files-tree/providers/ssh.ts'
+import { createRemotePreviewPort } from '../src/client/file-preview/open-port.ts'
+import type { RemotePreviewIntegration } from '../src/client/file-preview/install.tsx'
+import type { SshFilesIdentity } from '../src/client/file-preview/authorization.ts'
 import { RemoteFilesError, type RemoteFilesListing } from '../src/remote/files-contract.ts'
 import type { RemoteFilesClient } from '../src/client/remote-files-client.ts'
 
@@ -423,5 +426,67 @@ describe('the ssh provider cancellation fence', () => {
       expect(result.error.message).toBe('localized:connection-failed')
       expect(result.error.message).not.toContain('10.0.0.1')
     }
+  })
+})
+
+describe('the remote preview port', () => {
+  const identity: SshFilesIdentity = {
+    sessionId: SESSION,
+    root: { kind: 'remote', environmentId: 'device', rootId: 'out' },
+    incarnation: 'a'.repeat(64),
+  }
+  const ref = (relativePath: string, root = identity.root): WorkspaceResourceRef => ({ root, relativePath })
+  /** A fake integration whose route answer the test flips mid-flight. */
+  const fakeIntegration = () => {
+    const state = { route: true }
+    const open = vi.fn()
+    const integration: RemotePreviewIntegration = {
+      canRoute: () => state.route,
+      open,
+    }
+    return { integration, open, state }
+  }
+
+  it('forwards the exact root, relative path, label and replace-tab to the integration', () => {
+    const { integration, open } = fakeIntegration()
+    const port = createRemotePreviewPort(identity, 'prod box', integration)
+    const resource = ref('src/inner.ts')
+    expect(port.canOpen(resource)).toBe(true)
+    port.open(resource)
+    expect(open).toHaveBeenCalledWith(identity, 'src/inner.ts', 'prod box', undefined)
+    port.open(resource, { replaceTab: 'tab-9' as TabId })
+    expect(open).toHaveBeenLastCalledWith(identity, 'src/inner.ts', 'prod box', 'tab-9')
+  })
+
+  it('answers canOpen with the LIVE route answer, not the construction-time one', () => {
+    const { integration, state } = fakeIntegration()
+    const port = createRemotePreviewPort(identity, 'prod box', integration)
+    const resource = ref('notes.md')
+    expect(port.canOpen(resource)).toBe(true)
+    state.route = false
+    expect(port.canOpen(resource)).toBe(false)
+    // A route refused at call time never reaches the integration.
+    port.open(resource)
+    expect(integration.open).not.toHaveBeenCalled()
+    state.route = true
+    expect(port.canOpen(resource)).toBe(true)
+  })
+
+  it('admits only its own root\'s non-empty remote-relative rows', () => {
+    const { integration, open } = fakeIntegration()
+    const port = createRemotePreviewPort(identity, 'prod box', integration)
+    // The root row itself — no file — is never openable.
+    expect(port.canOpen(ref(''))).toBe(false)
+    // A foreign root's row with an admissible path is still refused.
+    expect(port.canOpen(ref('src/inner.ts', { kind: 'remote', environmentId: 'device', rootId: 'other' }))).toBe(false)
+    expect(port.canOpen(ref('src/inner.ts', { kind: 'additional', rootId: 'out' }))).toBe(false)
+    // Lexically invalid remote paths never reach the integration.
+    for (const bad of ['../escape', 'a//b', 'a/./b', 'a/../b', '\0x']) {
+      expect(port.canOpen(ref(bad))).toBe(false)
+    }
+    // Literal backslashes are legal POSIX name bytes — admitted, not "fixed".
+    expect(port.canOpen(ref('dir\\name.txt'))).toBe(true)
+    port.open(ref('a//b'))
+    expect(open).not.toHaveBeenCalled()
   })
 })

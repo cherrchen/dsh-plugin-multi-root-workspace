@@ -514,6 +514,7 @@ async function runPersonalEndpoint(
         }
         if (previous !== undefined && previous.path === binding.path
           && previous.directoryListing === binding.directoryListing
+          && previous.filePreview === binding.filePreview
           && sameMembers(previous.actions, binding.actions)
           && sameMembers(transferKeys(previous.transfers), transferKeys(binding.transfers))) return config
         const rootId = binding.rootId ?? previous?.rootId ?? newBindingRootId(binding.path, new Set(siblings.map(entry => entry.rootId)))

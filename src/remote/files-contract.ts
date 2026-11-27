@@ -37,6 +37,23 @@ export const REMOTE_FILES_LIMITS = {
   waitAdmissionMs: 4_000,
 } as const
 
+export const REMOTE_FILES_READ = 'remoteFiles.read'
+export const REMOTE_FILE_PREVIEW_TRANSPORT = 'sftp-binary-v1'
+
+/** Content operations have a separate pool; both pools use the same owned-channel cap. */
+export const REMOTE_FILE_PREVIEW_LIMITS = {
+  bytes: 2 * 1024 * 1024,
+  blockBytes: 128 * 1024,
+  maxReadRequests: 65,
+  concurrent: 2,
+  deadlineMs: 20_000,
+  clientResources: 8,
+  clientContentViews: 4,
+  clientReadConcurrent: 2,
+  markdownBytes: 128 * 1024,
+  markdownNodes: 4096,
+} as const
+
 /**
  * A string with no unpaired surrogates. `String.prototype.isWellFormed` where
  * the runtime has it, else a UTF-8 encode/decode roundtrip (an unpaired
@@ -108,6 +125,23 @@ export type RemoteFilesListRequest = z.infer<typeof remoteFilesListRequest>
 export type RemoteEntry = z.infer<typeof remoteEntrySchema>
 export type RemoteFilesListing = z.infer<typeof remoteFilesListing>
 
+export const remoteFilesReadRequest = remoteFilesListRequest.refine(value => value.relativePath !== '')
+export type RemoteFilesReadRequest = z.infer<typeof remoteFilesReadRequest>
+
+export const remoteFilesReadMetadata = z.object({
+  kind: z.literal('file'),
+  size: z.number().int().min(0).max(REMOTE_FILE_PREVIEW_LIMITS.bytes),
+  modifiedAt: z.number().int().min(0).max(0xffffffff).optional(),
+  complete: z.literal(true),
+}).strict()
+export type RemoteFilesReadMetadata = z.infer<typeof remoteFilesReadMetadata>
+
+/** The result after Connection decoded the one binary field. No JSON fallback. */
+export const remoteFilesReadContent = remoteFilesReadMetadata.extend({
+  bytes: z.instanceof(Uint8Array),
+}).strict().refine(value => value.bytes.byteLength === value.size)
+export type RemoteFilesReadContent = z.infer<typeof remoteFilesReadContent>
+
 /** The authorization lease: the list request minus the directory operand. */
 export const remoteFilesAuthorizationRequest = remoteFilesListRequest.omit({ relativePath: true }).strict()
 export type RemoteFilesAuthorizationRequest = z.infer<typeof remoteFilesAuthorizationRequest>
@@ -141,6 +175,15 @@ export const REMOTE_FILES_FAILURES = {
   'resource-budget': { message: 'the remote listing service is busy', retryable: true },
   'invalid-request': { message: 'the remote listing request was rejected', retryable: false },
   'invalid-listing': { message: 'the remote returned a directory listing the host cannot trust', retryable: true },
+  /** The remote root did not opt in to file preview (`filePreview`), or the live grant lost it. */
+  'preview-not-authorized': { message: 'file preview is not authorized for this remote root', retryable: false },
+  /** The file existed at listing time and vanished before or during the read. */
+  'file-not-found': { message: 'the remote file no longer exists', retryable: true },
+  'not-regular-file': { message: 'the remote target is not a regular file', retryable: false },
+  'file-too-large': { message: 'the remote file exceeds the preview limit', retryable: false },
+  'file-changed': { message: 'the remote file changed during reading', retryable: true },
+  /** The response failed strict wire/shape/length validation on either side. */
+  'invalid-content': { message: 'the remote file response is invalid', retryable: false },
 } as const
 
 export type RemoteFilesFailureCode = keyof typeof REMOTE_FILES_FAILURES

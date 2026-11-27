@@ -174,3 +174,60 @@ describe('the remoteFiles client listing scheduler', () => {
     expect(call).toHaveBeenCalledTimes(1)
   })
 })
+
+/** remoteFiles.read: strict request/response schemas and carrier folding — fixed vocabulary only. */
+describe('the remoteFiles client preview read', () => {
+  const READ_REQUEST = {
+    sessionId: 'session-1', environmentId: 'device', rootId: 'out',
+    relativePath: 'a.txt', authorization: 'a'.repeat(64),
+  }
+  const content = { kind: 'file', size: 3, complete: true, bytes: new Uint8Array([65, 66, 67]) }
+
+  it('returns the decoded content envelope on a well-formed answer', async () => {
+    const call = vi.fn(async () => ({ ok: true, value: content }))
+    const client = createRemoteFilesClient({ rpc: { call } })
+    const result = await client.read(READ_REQUEST, new AbortController().signal)
+    expect(result).toEqual(content)
+    expect(call).toHaveBeenCalledTimes(1)
+  })
+
+  it('an invalid request never reaches the wire', async () => {
+    const call = vi.fn(async () => ({ ok: true, value: content }))
+    const client = createRemoteFilesClient({ rpc: { call } })
+    for (const bad of [{ ...READ_REQUEST, relativePath: '' }, { ...READ_REQUEST, relativePath: '../x' }, { ...READ_REQUEST, absolutePath: '/x' }]) {
+      await expect(client.read(bad as never, new AbortController().signal)).rejects.toMatchObject({ code: 'invalid-request' })
+    }
+    expect(call).not.toHaveBeenCalled()
+  })
+
+  it.each([
+    ['a non-object envelope', 'junk'],
+    ['a null envelope', null],
+    ['a non-boolean ok', { ok: 'yes', value: content }],
+    ['an unknown host code', { ok: false, error: { code: 'brand-new-code' } }],
+    ['a prototype-polluting code', { ok: false, error: { code: 'toString' } }],
+  ])('folds %s to provider-unavailable', async (_name, answer) => {
+    const client = createRemoteFilesClient({ rpc: { call: async () => answer } })
+    await expect(client.read(READ_REQUEST, new AbortController().signal)).rejects.toMatchObject({ code: 'provider-unavailable' })
+  })
+
+  it.each([
+    ['missing bytes', { kind: 'file', size: 3, complete: true }],
+    ['a length mismatch', { kind: 'file', size: 4, complete: true, bytes: new Uint8Array([1]) }],
+    ['non-Uint8Array bytes', { kind: 'file', size: 3, complete: true, bytes: 'abc' }],
+    ['an extra property', { ...content, absolutePath: '/x' }],
+  ])('rejects a payload with %s as invalid-content', async (_name, value) => {
+    const client = createRemoteFilesClient({ rpc: { call: async () => ({ ok: true, value }) } })
+    await expect(client.read(READ_REQUEST, new AbortController().signal)).rejects.toMatchObject({ code: 'invalid-content' })
+  })
+
+  it('a pre-aborted signal is cancelled with zero wire calls; a known code keeps its entry', async () => {
+    const call = vi.fn(async () => ({ ok: false, error: { code: 'file-too-large' } }))
+    const client = createRemoteFilesClient({ rpc: { call } })
+    const controller = new AbortController()
+    controller.abort()
+    await expect(client.read(READ_REQUEST, controller.signal)).rejects.toMatchObject({ code: 'cancelled' })
+    expect(call).not.toHaveBeenCalled()
+    await expect(client.read(READ_REQUEST, new AbortController().signal)).rejects.toMatchObject({ code: 'file-too-large' })
+  })
+})

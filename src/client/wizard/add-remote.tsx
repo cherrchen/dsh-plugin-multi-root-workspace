@@ -47,10 +47,12 @@ interface BindingForm {
   exports: ReadonlySet<string>
   /** The stable-SFTP-path Files browsing opt-in (ADR-0052); off by default. */
   directoryListing: boolean
+  /** The stable-path file preview opt-in (ADR-0053); requires read + listing. */
+  filePreview: boolean
 }
 
 const blankBinding = (): BindingForm => ({
-  path: '', read: true, write: false, exec: false, imports: new Set(), exports: new Set(), directoryListing: false,
+  path: '', read: true, write: false, exec: false, imports: new Set(), exports: new Set(), directoryListing: false, filePreview: false,
 })
 
 /** The SFTP directory picker, restyled on the wizard kit. */
@@ -382,6 +384,7 @@ export function RemoteWizard(props: RemoteWizardProps): ReactNode {
     const draftBinding: SshBindingDraft = {
       environmentId: selected.environmentId, path: binding.path.trim(), actions,
       ...(binding.directoryListing ? { directoryListing: 'stable-path' as const } : {}),
+      ...(binding.filePreview && binding.read && binding.directoryListing ? { filePreview: 'stable-path' as const } : {}),
       ...(transfers.length === 0 ? {} : { transfers }),
     }
     const state = await submitState('binding', signal => ssh!.bindingSave(sessionId, view.revision, draftBinding, signal))
@@ -579,7 +582,7 @@ export function RemoteWizard(props: RemoteWizardProps): ReactNode {
               <WizardCheckbox key={action} checked={binding[action]}
                 disabled={busy || (action === 'exec' && !binding.exec && selected.exec === undefined)}
                 label={t(`remote.capability.${action}`)}
-                onChange={next => setBinding({ ...binding, [action]: next, ...(action === 'read' && !next ? { directoryListing: false } : {}) })} />
+                onChange={next => setBinding({ ...binding, [action]: next, ...(action === 'read' && !next ? { directoryListing: false, filePreview: false } : {}) })} />
             ))}
           </div>
         </section>
@@ -587,9 +590,17 @@ export function RemoteWizard(props: RemoteWizardProps): ReactNode {
           <div className="mrfw-wizCheckRow">
             <WizardCheckbox checked={binding.directoryListing} disabled={busy || !binding.read}
               label={t('ssh.binding.directoryListing')}
-              onChange={next => setBinding({ ...binding, directoryListing: next })} />
+              onChange={next => setBinding({ ...binding, directoryListing: next, ...(next ? {} : { filePreview: false }) })} />
           </div>
           <p className="mrfw-note">{t('ssh.binding.directoryListingHint')}</p>
+        </section>
+        <section className="mrfw-wizSection" aria-label={t('ssh.binding.filePreview')}>
+          <div className="mrfw-wizCheckRow">
+            <WizardCheckbox checked={binding.filePreview} disabled={busy || !binding.read || !binding.directoryListing}
+              label={t('ssh.binding.filePreview')}
+              onChange={next => setBinding({ ...binding, filePreview: next })} />
+          </div>
+          <p className="mrfw-note">{t('ssh.binding.filePreviewHint')}</p>
         </section>
         {localPeers.length === 0 ? null : (
           <section className="mrfw-wizSection" aria-label={t('ssh.binding.transfers')}>
@@ -639,6 +650,10 @@ export function RemoteWizard(props: RemoteWizardProps): ReactNode {
         <div className="mrfw-wizSummaryRow">
           <dt>{t('ssh.binding.directoryListing')}</dt>
           <dd>{binding.directoryListing ? t('wizard.summaryEnabled') : t('wizard.summaryNone')}</dd>
+        </div>
+        <div className="mrfw-wizSummaryRow">
+          <dt>{t('ssh.binding.filePreview')}</dt>
+          <dd>{binding.filePreview && binding.directoryListing ? t('wizard.summaryEnabled') : t('wizard.summaryNone')}</dd>
         </div>
         <div className="mrfw-wizSummaryRow">
           <dt>{t('wizard.summaryTransfers')}</dt>

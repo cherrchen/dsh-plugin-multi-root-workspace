@@ -24,6 +24,7 @@ import type { NativeTreeRenderer } from '../../compat/files-tree.ts'
 import type { FilesInjected } from './face.ts'
 import { rowActions, type WorkspaceFilesProvider } from './provider.ts'
 import { locateFile, relativeUnderRoot } from './locate.ts'
+import { validRemoteRelativePath } from '../../remote/files-contract.ts'
 import type {} from './locales.ts'
 import type { createFilesStore } from './store.ts'
 import { drawnTree } from './hidden.ts'
@@ -101,7 +102,16 @@ export type FilesTreeProps =
      * Absent on the Files page, which has no current file.
      */
     readonly reveal?: {
+      /** The synthetic tree key the saved comparison walks against. */
       readonly path: string
+      /**
+       * The provider-derived relative path the key encodes (ADR-0053 P6):
+       * remote names keep literal backslashes the `/`-only root strip would
+       * fold, so remote trees require this field while local trees keep the
+       * computed fallback. It is verified against `provider.resource(path)`
+       * before any `locateFile` walk trusts it.
+       */
+      readonly relativePath?: string | undefined
       readonly revealed?: string | undefined
       readonly onSettled?: ((path: string) => void) | undefined
     } | undefined
@@ -167,6 +177,7 @@ export function FilesTree({
     }
   }, [])
   const revealPath = reveal?.path
+  const revealRelative = reveal?.relativePath
   const revealSaved = saved?.revealed
   const revealOnSettled = reveal?.onSettled
   // The reveal target's identity for the whole walk — encoded, so a root
@@ -197,7 +208,15 @@ export function FilesTree({
       seededKey.current = revealKey
       wantScroll.current = false
     }
-    const relative = relativeUnderRoot(revealPath, state.root)
+    // The reveal's workspace-relative target: the typed field wins where it
+    // is supplied — it must spell a nonempty admissible remote path AND agree
+    // with the provider's own key→resource decode of the synthetic path —
+    // and remote roots REQUIRE it, since the local root strip folds literal
+    // backslashes out of remote names. Local roots keep the computed form.
+    const relative = revealRelative !== undefined
+      ? (revealRelative !== '' && validRemoteRelativePath(revealRelative)
+        && provider.resource(revealPath)?.relativePath === revealRelative ? revealRelative : undefined)
+      : (provider.identity.root.kind === 'remote' ? undefined : relativeUnderRoot(revealPath, state.root))
     if (relative === undefined) {
       // The preview already names another root and the takeover is about to
       // re-key: settling here would record the other root's address as this
@@ -222,7 +241,7 @@ export function FilesTree({
     revealOnSettled?.(revealPath)
     if (location?.current !== undefined) wantScroll.current = true
     setCurrent(location?.current)
-  }, [revealKey, state, tabId, signal, toggle, provider, revealPath, revealOnSettled, revealSaved])
+  }, [revealKey, state, tabId, signal, toggle, provider, revealPath, revealRelative, revealOnSettled, revealSaved])
   const pendingScroll = useRef(0)
   // The live render's state and saved snapshot, read by the hold effect. They
   // are refs rather than dependencies: a store write must not release and
@@ -343,7 +362,12 @@ export function FilesTree({
       const snapshot = savedRef.current
       if (snapshot?.expanded !== undefined) {
         for (const path of snapshot.expanded) {
-          if (path === root || relativeUnderRoot(path, root) === undefined) continue
+          // Remote keys decode through the provider — the local root strip
+          // folds literal backslashes out of remote names.
+          const inside = provider.identity.root.kind === 'remote'
+            ? provider.resource(path)?.relativePath !== undefined
+            : relativeUnderRoot(path, root) !== undefined
+          if (path === root || !inside) continue
           toggle(tabId, path.slice(0, path.lastIndexOf('/')), path, snapshot.expanded.filter(value => value !== path), signal)
         }
       }

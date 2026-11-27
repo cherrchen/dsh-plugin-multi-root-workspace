@@ -1,6 +1,6 @@
 # 架构文档：Files 标签页的文件浏览 Provider（本地 + SSH 远端）
 
-> 状态：**已实现**（P1–P8，其中 P6 的预览端口为 fake-port 评估、未接线；见[实施计划](../plans/completed/2026-11-24-provider-remote-file-tree.md)；决策记录 [ADR-0052](../decisions/ADR-0052-provider-file-browsing.md)）。尚属 Target：预览面板（preview）对远端根的扩展——其 fake-port 探针结论已记录但未接线；远端文件内容读取协议未实现。
+> 状态：**已实现**。Provider 化的目录浏览见 [ADR-0052](../decisions/ADR-0052-provider-file-browsing.md) 与[实施计划](../plans/completed/2026-11-24-provider-remote-file-tree.md)；远端预览是后续的 [ADR-0053 扩展](remote-file-preview.md)，待维护者审查、未发布。
 > 相关文档：宿主侧 RPC 契约与服务的实现细节见 ADR-0052 与本文件 §6；用户配置见 [SSH 远端环境使用指南](../guide/user/ssh-remote-environments.md)；Fields 树 fork 的上游对齐职责见 [FORK.md](../../src/client/files-tree/FORK.md)。
 
 ## 1. 总览
@@ -51,7 +51,7 @@ client.apply（src/client/index.ts）
 | 概念 | 拼写 | 语义 |
 | --- | --- | --- |
 | 资源（resource） | `/mrfw` 树内的相对路径（provider 的 `treeRoot` 下） | 只是键：定位树节点与 RPC `relativePath`，不带权限 |
-| 身份（identity） | `{sessionId, environmentId, rootId}` + `incarnation`（浏览令牌） | 一次「绑定 + 登记 + 令牌铸造」的唯一化；令牌是 HMAC 化的授权摘要 |
+| 身份（identity） | `{sessionId, environmentId, rootId}` + `incarnation`（浏览令牌） | 一次「绑定 + 登记 + 令牌铸造」的唯一化；令牌是对实时身份四元组（存储 epoch、授予登记、绑定摘要、环境摘要）的普通 SHA-256 —— 不是 HMAC、bearer token 或独立的授权证明 |
 | 权威（authority） | 宿主 `RemoteFilesService` 的双重 `admit` | 每次 list 在 SSH I/O 之前与返回字节之前各做一次准入；比对令牌散列与代际 |
 | 传输（transport） | `SftpClient`（`ssh -s <alias> sftp`） | 只承载帧协议；不携带、也不推导权限 |
 
@@ -65,7 +65,7 @@ client.apply（src/client/index.ts）
 | `listDirectory` | `workspaceFiles.list` | `remoteFiles.list` RPC |
 | `watch` | `workspaceFiles.changes` 流 | **无**（见 §6 元数据租约） |
 | `search` | 宿主搜索席位（可用时） | **无** |
-| `preview` / 打开文件 | `sidebarRight.openResourceIn` | **无**（文件行惰性，点击不产生本地查看器） |
+| `preview` / 打开文件 | `sidebarRight.openResourceIn` | **条件性**（ADR-0053 P6）：仅当实时端点视图仍提示 `sftp-binary-v1` 且预览安装存在时挂出 preview port，经 `createRemotePreviewPort` 打开插件 Viewer；否则文件行惰性 |
 | `menu` / context menu | 宿主菜单注册表 | **无** |
 | `openInApp` | 有（真实路径） | **无**（`rootResource` 无适配器即不渲染，无 triggerPath 兜底） |
 | `joinChild` | 平台 join | `` `${parent}/${name}` ``（POSIX 语义） |
@@ -151,6 +151,6 @@ select ──► provider 创建（一槽缓存 {key,provider}）
 
 本地 provider 的搜索席位按能力探测（`search` 方法存在时接线 `useSearchState`），菜单/打开方式沿用宿主注册表；`searchSeat` 仅在选中 provider 声明 `search` 时暴露，搜索 key 只在能力/记录匹配期有效。远端 provider 不声明这些能力——同一面板代码天然走「无搜索、无菜单、无打开」分支。会话切换 mint 新 inject 产物，选择不跨会话泄漏；owner 死亡由接管文档观察者清扫（仅匹配 owner/key）。
 
-## 10. Target：预览面板扩展（未实现）
+## 10. 远端预览扩展（ADR-0053）
 
-预览面板（document preview 的 `NavigatorRetarget`）目前只对本地附加根改向。远端预览需要内容读取协议（`remoteFiles.read` 或等价物）——fake-port 探针已验证「选择+失效」机制可复用，但读取协议未定义、未接线。按本文件 §6，预览扩展不得引入文件监视或长连接流。
+远端预览通过可选的 `WorkspaceFilesProvider.preview` 端口路由到插件自有 Viewer；Viewer 的 Folder Navigator 复用 `FilesPane`。预览扩展不引入文件监视或内容长流。合同、授权与支持范围见[远端预览架构](remote-file-preview.md)。

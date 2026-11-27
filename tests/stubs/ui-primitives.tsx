@@ -66,6 +66,39 @@ export const IconFolderCloseRegular = icon('folder-close')
 export const IconFolderOpenRegular = icon('folder-open')
 export const IconFolderOpen16 = icon('folder-open')
 
+// Document-preview glyphs and code-rendering surface.
+export const IconWrapFillRegular = icon('wrap')
+export const IconNowrapFillRegular = icon('nowrap')
+
+/** Minimal language classifier: enough for viewer-choice tests. */
+export function languageForPath(path: string): string | undefined {
+  const name = path.split('/').pop() ?? path
+  const dot = name.lastIndexOf('.')
+  const extension = dot < 0 ? '' : name.slice(dot + 1).toLowerCase()
+  const known: Record<string, string> = {
+    ts: 'typescript', tsx: 'tsx', js: 'javascript', jsx: 'jsx', mjs: 'javascript', cjs: 'javascript',
+    json: 'json', md: 'markdown', markdown: 'markdown', py: 'python', sh: 'bash', bash: 'bash',
+    yml: 'yaml', yaml: 'yaml', toml: 'toml', css: 'css', html: 'html', txt: 'plaintext',
+  }
+  return known[extension]
+}
+
+/** Minimal `CodeBlock` mirror: byte-exact source in a pre, with wrap state exposed. */
+export function CodeBlock(props: {
+  readonly code: string
+  readonly lang?: string
+  readonly wrap?: boolean
+  readonly lineNumbers?: boolean
+  readonly className?: string
+}): ReactNode {
+  return createElement('div', {
+    className: props.className,
+    'data-code-block': true,
+    'data-lang': props.lang,
+    'data-wrap': props.wrap === true ? 'true' : 'false',
+  }, createElement('pre', null, createElement('code', null, props.code)))
+}
+
 // Current upstream permission glyph export names.
 export const PermissionIconWorkspaceWriteRegular = icon('workspace-write')
 export const PermissionIconReadOnlyRegular = icon('read-only')

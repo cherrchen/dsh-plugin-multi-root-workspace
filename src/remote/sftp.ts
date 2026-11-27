@@ -6,7 +6,7 @@
  * loss and no request is ever retried.
  */
 import { spawn } from 'node:child_process'
-import { REMOTE_FILES_LIMITS, validRemoteName, type RemoteEntry, type RemoteFilesListing } from './files-contract.ts'
+import { REMOTE_FILE_PREVIEW_LIMITS, REMOTE_FILES_LIMITS, validRemoteName, type RemoteEntry, type RemoteFilesListing } from './files-contract.ts'
 
 export class SftpStatusError extends Error {
   constructor(readonly code: number, message: string) {
@@ -19,6 +19,19 @@ export class SftpConnectionLost extends Error {
   constructor(message: string) {
     super(message)
     this.name = 'SftpConnectionLost'
+  }
+}
+
+/**
+ * A well-formed packet whose content the preview contract cannot trust:
+ * wrong reply type, an out-of-contract handle/data length, or arguments the
+ * budget refuses. Distinct from {@link SftpConnectionLost} (the channel is
+ * dead) and {@link SftpStatusError} (the server answered a real status).
+ */
+export class SftpInvalidContent extends Error {
+  constructor(message = 'invalid-content') {
+    super(message)
+    this.name = 'SftpInvalidContent'
   }
 }
 
@@ -289,6 +302,48 @@ export class SftpClient {
   }
 
   async close(handle: Buffer): Promise<void> { await this.status(await this.send(4, 'close', sfData(handle))) }
+
+  /**
+   * The preview read port (ADR-0053 P3): strict file-read primitives beside
+   * the listing port. Every method checks its expected reply type — a
+   * well-formed-but-wrong packet is `SftpInvalidContent`, a real STATUS is
+   * `SftpStatusError`, a malformed frame still kills only this channel. The
+   * read-only open uses `P_READ` with empty attrs; READ bounds its arguments
+   * before they reach the wire.
+   */
+  private async previewReply(reply: { type: number; body: Buffer }, expected: number): Promise<Buffer> {
+    if (reply.type === 101) await this.status(reply)
+    if (reply.type !== expected) throw new SftpInvalidContent()
+    return reply.body
+  }
+
+  async openPreview(path: string): Promise<Buffer> {
+    const body = await this.previewReply(await this.send(3, 'preview-open', sfStr(path), be32(P_READ), be32(0)), 102)
+    const length = body.readUInt32BE(0)
+    if (length < 1 || length > 256) throw new SftpInvalidContent()
+    return body.subarray(4)
+  }
+
+  async fstatPreview(handle: Buffer): Promise<Attrs> {
+    const body = await this.previewReply(await this.send(8, 'preview-fstat', sfData(handle)), 105)
+    return decodeAttrs(body).attrs
+  }
+
+  async readPreview(handle: Buffer, offset: number, length: number): Promise<Buffer | undefined> {
+    if (!Number.isSafeInteger(offset) || offset < 0 || offset > REMOTE_FILE_PREVIEW_LIMITS.bytes
+      || !Number.isSafeInteger(length) || length < 1 || length > REMOTE_FILE_PREVIEW_LIMITS.blockBytes) throw new SftpInvalidContent()
+    const reply = await this.send(5, 'preview-read', sfData(handle), be64(offset), be32(length))
+    if (reply.type === 101 && reply.body.readUInt32BE(0) === SSH_FX_EOF) return undefined
+    const body = await this.previewReply(reply, 103)
+    const bytes = body.subarray(4)
+    if (bytes.byteLength === 0 || bytes.byteLength > length) throw new SftpInvalidContent()
+    return bytes
+  }
+
+  async closePreview(handle: Buffer): Promise<void> {
+    await this.previewReply(await this.send(4, 'preview-close', sfData(handle)), 101)
+  }
+
   async remove(path: string): Promise<void> { await this.status(await this.send(13, 'remove', sfStr(path))) }
   async realpath(path: string): Promise<string> {
     const reply = await this.send(16, 'realpath', sfStr(path))

@@ -92,6 +92,12 @@ export const REMOTE_FILES_FAILURE_GROUPS: Record<RemoteFilesFailureCode, RemoteF
   'connection-lost': 'connection',
   'timeout': 'timeout',
   'resource-budget': 'busy',
+  'preview-not-authorized': 'capability',
+  'file-not-found': 'permission',
+  'not-regular-file': 'permission',
+  'file-too-large': 'invalid',
+  'file-changed': 'invalid',
+  'invalid-content': 'invalid',
   'invalid-request': 'invalid',
   'invalid-listing': 'invalid',
   'cancelled': 'cancelled',
@@ -133,6 +139,8 @@ export function createSshWorkspaceProvider(
   client: RemoteFilesClient,
   localize: (code: RemoteFilesFailureCode) => string,
   invalidated: (reason: RemoteFilesFailureCode) => void,
+  /** The remote preview's open port; absent keeps rows listing-only (ADR-0053 P6). */
+  preview?: WorkspaceFilesProvider['preview'],
 ): WorkspaceFilesProvider {
   const { sessionId, root } = identity
   const resource = (treePath: string): WorkspaceResourceRef | undefined => {
@@ -161,6 +169,7 @@ export function createSshWorkspaceProvider(
     treeRoot: REMOTE_TREE_ROOT,
     joinChild: (parent, name) => `${parent}/${name}`,
     retainHiddenLevels: false,
+    ...(preview === undefined ? {} : { preview }),
     resource,
     listDirectory: async (ref, signal): Promise<DirectoryListing> => {
       if (!belongsTo(identity, ref) || !validRemoteRelativePath(ref.relativePath)) {

@@ -79,6 +79,10 @@ describe('deployment manifest', () => {
     ['bad hostKey', { environments: [env({ hostKey: 'SHA256:short' })] }, 'invalid-manifest'],
     ['dup actions', { bindings: [binding({ actions: ['read', 'read'] })] }, 'invalid-manifest'],
     ['directory listing without read', { bindings: [binding({ actions: ['write'], directoryListing: 'stable-path' })] }, 'invalid-manifest'],
+    ['file preview without read', { bindings: [binding({ actions: ['write'], directoryListing: 'stable-path', filePreview: 'stable-path' })] }, 'invalid-manifest'],
+    ['file preview without directory listing', { bindings: [binding({ actions: ['read'], filePreview: 'stable-path' })] }, 'invalid-manifest'],
+    ['file preview with read and stable-path listing', { bindings: [binding({ actions: ['read'], directoryListing: 'stable-path', filePreview: 'stable-path' })] }, null],
+    ['file preview with a foreign literal', { bindings: [binding({ actions: ['read'], directoryListing: 'stable-path', filePreview: 'ephemeral' })] }, 'invalid-manifest'],
     ['helper directory listing with read', {
       environments: [env({ transport: 'helper', helper: { sha256: 'a'.repeat(64), protocol: 1 }, connection: { host: 'vps', nodePath: '/opt/n/bin/node', helperPath: '/opt/h/helper.js', workspace: '/w' } })],
       bindings: [binding({ actions: ['read'], directoryListing: 'stable-path' })],
@@ -88,6 +92,16 @@ describe('deployment manifest', () => {
     const run = () => parseDeploymentManifest(JSON.stringify({ schemaVersion: 1, configVersion: 'cfg-1', ...merged }), '/m.json')
     if (code === null) expect(run).not.toThrow()
     else expect(run).toThrowError(expect.objectContaining({ code }) as Error)
+  })
+
+  it('the filePreview flag enters the binding digest; previous manifests keep parsing unchanged', () => {
+    const bare = parseDeploymentManifest(text(), '/m.json')
+    const preview = parseDeploymentManifest(text([env()], [binding({ actions: ['read'], directoryListing: 'stable-path', filePreview: 'stable-path' })]), '/m.json')
+    expect(bare.manifest.bindings[0]!.filePreview).toBeUndefined()
+    expect(preview.manifest.bindings[0]!.filePreview).toBe('stable-path')
+    const listed = parseDeploymentManifest(text([env()], [binding({ actions: ['read'], directoryListing: 'stable-path' })]), '/m.json')
+    expect(bindingDigest(listed.manifest.environments[0]!, listed.manifest.bindings[0]!))
+      .not.toBe(bindingDigest(preview.manifest.environments[0]!, preview.manifest.bindings[0]!))
   })
 
   it('accepts aggregate quotas and a revocation list inside the attested digest', () => {
