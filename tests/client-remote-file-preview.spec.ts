@@ -484,7 +484,7 @@ describe('the remote preview resource book', () => {
     const addresses = Array.from({ length: REMOTE_FILE_PREVIEW_LIMITS.clientResources }, (_, index) =>
       book.register(identity(), `file-${index}.txt`, 'dev')!)
     for (const address of addresses) expect(address).toBeDefined()
-    expect(book.register(identity(), 'one-too-many.txt', 'dev')).toBeUndefined()
+    expect(() => book.register(identity(), 'one-too-many.txt', 'dev')).toThrowError(expect.objectContaining({ code: 'resource-budget' }))
     const colliding = new RemotePreviewBook(
       { read: vi.fn() }, new RemoteFilesAuthorizationBook({ wait: vi.fn() }),
       () => 's1', () => '00000000-0000-4000-8000-000000000001',
@@ -496,5 +496,38 @@ describe('the remote preview resource book', () => {
       () => 's1', () => 'not-a-uuid',
     )
     expect(() => badMint.register(identity(), 'a.txt', 'dev')).toThrow()
+  })
+
+  it('stages a replacement at capacity and keeps the old view live if routing fails', () => {
+    const { book } = previewHarness()
+    const addresses = Array.from({ length: REMOTE_FILE_PREVIEW_LIMITS.clientResources }, (_, index) =>
+      book.register(identity(), `file-${index}.txt`, 'dev')!)
+    const outgoing = addresses[0]!
+    const oldPin = new AbortController()
+    book.pin(outgoing, oldPin.signal)
+    const oldView = book.mount(outgoing, 's1', new AbortController().signal)
+    const committed = vi.fn(() => false)
+    const replacement = { address: outgoing, committed }
+    const failed = book.register(identity(), 'failed.txt', 'dev', replacement)!
+    expect(book.get(failed, 's1')?.relativePath).toBe('failed.txt')
+    expect(book.pin(failed, new AbortController().signal)).toBeUndefined()
+    expect(() => book.register(identity(), 'parallel.txt', 'dev', replacement)).toThrowError(expect.objectContaining({ code: 'resource-budget' }))
+    book.forgetUnpinned(failed)
+    expect(book.get(failed, 's1')).toBeUndefined()
+    expect(oldView.signal.aborted).toBe(false)
+    expect(book.get(outgoing, 's1')).toBeDefined()
+
+    const incoming = book.register(identity(), 'replacement.txt', 'dev', replacement)!
+    committed.mockReturnValue(true)
+    const newPin = new AbortController()
+    expect(book.pin(incoming, newPin.signal)?.relativePath).toBe('replacement.txt')
+    expect(committed).toHaveBeenLastCalledWith(incoming)
+    expect(oldView.signal.aborted).toBe(true)
+    expect(book.get(outgoing, 's1')).toBeUndefined()
+    oldPin.abort()
+    expect(book.get(incoming, 's1')).toBeDefined()
+    expect(() => book.register(identity(), 'one-too-many.txt', 'dev')).toThrowError(expect.objectContaining({ code: 'resource-budget' }))
+    expect(book.register(identity(), 'file-1.txt', 'dev')).toBe(addresses[1])
+    book.dispose()
   })
 })

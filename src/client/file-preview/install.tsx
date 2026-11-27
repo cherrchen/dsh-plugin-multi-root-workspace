@@ -17,12 +17,13 @@
  *
  * @module @dsh-electron/dsh-plugin-multi-root-workspace/client/file-preview/install
  */
-import { createElement, type ReactNode } from 'react'
+import { createElement, useSyncExternalStore, type ReactNode } from 'react'
 import type { Context as ClientContext } from '@deepseek-ai/cordis'
+import { createSnapshotStore } from '@deepseek-ai/dsh-client-store'
 import type { TabId } from '@deepseek-ai/dsh-client-ui-dockkit'
 import type { TranslateNS } from '@deepseek-ai/dsh-client-ui-slots'
-import { FileTypeIcon, classifyFileType } from '@deepseek-ai/dsh-client-ui-primitives'
-import { RemoteFilesError, type RemoteFilesFailureCode } from '../../remote/files-contract.ts'
+import { FileTypeIcon, Toast, classifyFileType } from '@deepseek-ai/dsh-client-ui-primitives'
+import { REMOTE_FILE_PREVIEW_LIMITS, RemoteFilesError, type RemoteFilesFailureCode } from '../../remote/files-contract.ts'
 import { REMOTE_PREVIEW_KIND, REMOTE_PREVIEW_RESOURCE_TYPE, remoteFileAddress, remoteFileId } from './resource-address.ts'
 import type { RemotePreviewBook, RemotePreviewRecord } from './resource-book.ts'
 import type { SshFilesIdentity } from './authorization.ts'
@@ -92,6 +93,7 @@ interface ViewerTabsSlice {
 /** The `sidebarRight` controller's open slice. */
 interface SidebarRightSlice {
   openResourceIn?(sessionId: string, address: string, options?: { readonly replaceTab?: TabId; readonly params?: unknown }): void
+  tabsIn?(sessionId: string): readonly { readonly id: TabId; readonly kind: string; readonly contentId: string }[]
 }
 
 /** The `slots` service slice for the keyed body seat. */
@@ -158,6 +160,8 @@ export interface RemotePreviewDeps {
  */
 export function installRemotePreview(ctx: ClientContext, deps: RemotePreviewDeps): RemotePreviewIntegration {
   const { book, t } = deps
+  const limitNotice = createSnapshotStore<number | undefined>(undefined)
+  let noticeSequence = 0
   let resourcesReady = false
   let tabsReady = false
   let bodyReady = false
@@ -261,6 +265,20 @@ export function installRemotePreview(ctx: ClientContext, deps: RemotePreviewDeps
       }
     }, 'multi-root workspace: remote preview tab type')
   })
+
+  ctx.slots.inject('shell.overlay', () => ctx.slots.register({
+    name: 'shell.overlay',
+    id: `${DEFINITION_ID}.limit-notice`,
+  }, function RemotePreviewLimitNotice(): ReactNode {
+    const notice = useSyncExternalStore(limitNotice.subscribe, limitNotice.getSnapshot)
+    if (notice === undefined) return null
+    return <Toast
+      key={notice}
+      text={t('preview.resourceLimit', { count: REMOTE_FILE_PREVIEW_LIMITS.clientResources })}
+      holdMs={8000}
+      onDone={() => { if (limitNotice.getSnapshot() === notice) limitNotice.set(undefined) }}
+    />
+  }))
 
   // The keyed body seat — the same store/inject shares the Files seats
   // declare, per the P1 probe wiring. It is consumed ONLY inside the
@@ -376,22 +394,44 @@ export function installRemotePreview(ctx: ClientContext, deps: RemotePreviewDeps
       if (!canRoute(identity.sessionId)) return
       let address: string | undefined
       try {
-        address = book.register(identity, relativePath, label)
+        const sessionId = identity.sessionId
+        const sidebar = readService<SidebarRightSlice>('sidebarRight')
+        if (typeof sidebar?.openResourceIn !== 'function') return
+        const readTabs = () => sidebar.tabsIn?.(sessionId) ?? []
+        const openTabs = replaceTab === undefined ? [] : readTabs()
+        const outgoing = openTabs.find(tab => tab.id === replaceTab)
+        if (replaceTab !== undefined && outgoing?.kind !== REMOTE_PREVIEW_KIND) return
+        // A resource can have more than one occurrence, so a provider pin
+        // alone cannot tell us whether a tab is the last holder of its slot.
+        const replacement = outgoing === undefined ? undefined : {
+          address: outgoing.contentId,
+          committed: (incoming: string): boolean => {
+            const tabs = readTabs()
+            return !tabs.some(tab => tab.contentId === outgoing.contentId)
+              && tabs.some(tab => tab.kind === REMOTE_PREVIEW_KIND && tab.contentId === incoming)
+          },
+        }
+        const canTransfer = replacement !== undefined
+          && openTabs.filter(tab => tab.contentId === replacement.address).length === 1
+        address = book.register(identity, relativePath, label, canTransfer ? replacement : undefined)
         if (address === undefined) return
         const tabs = readService<ViewerTabsSlice>('sidebarRightTabs')
         const claimed = tabs?.candidates(address).some(candidate => candidate.id === DEFINITION_ID) === true
-        const sidebar = claimed ? readService<SidebarRightSlice>('sidebarRight') : undefined
-        if (!claimed || typeof sidebar?.openResourceIn !== 'function') {
+        if (!claimed) {
           book.forgetUnpinned(address)
           return
         }
         // A replace-in-place open — only ever the Folder's own tree — marks
         // the fresh tab so its Folder mounts open instead of closed.
-        sidebar.openResourceIn(identity.sessionId, address, replaceTab === undefined ? {} : { replaceTab, params: { mrfwFolder: true } })
-      } catch {
+        sidebar.openResourceIn(sessionId, address, replaceTab === undefined ? {} : { replaceTab, params: { mrfwFolder: true } })
+        if (outgoing !== undefined && !readTabs().some(tab => tab.contentId === address)) book.forgetUnpinned(address)
+      } catch (error) {
         // A thrown mint/route never escapes the gesture; only a minted
         // address gets forgotten (TTL covers the rest).
         if (address !== undefined) book.forgetUnpinned(address)
+        if (error instanceof RemoteFilesError && error.code === 'resource-budget') {
+          limitNotice.set(++noticeSequence)
+        }
       }
     },
   }

@@ -56,11 +56,15 @@ try {
   }
   const text = `ssh-only-${randomUUID()}\n`
   const markdown = '# From OpenSSH\n\n![no fetch](https://127.0.0.1:1/test.png)\n\n<script>no execution</script>\n'
-  const bulk = '0123456789abcdef\n'.repeat(120_000)
+  const source = 'let value = 123;'
+  const bulk = `${source}\n`.repeat(120_000)
+  const extraFiles = Array.from({ length: 7 }, (_, index) => `preview-${index}.txt`)
   const secondText = `different-environment-${randomUUID()}\n`
   writeFileSync(join(remote, 'nested', 'a.txt'), text)
   writeFileSync(join(remote, 'nested', 'b.md'), markdown)
-  writeFileSync(join(remote, 'bulk.txt'), bulk)
+  writeFileSync(join(remote, 'source.ts'), source)
+  writeFileSync(join(remote, 'bulk.ts'), bulk)
+  for (const name of extraFiles) writeFileSync(join(remote, name), name)
   writeFileSync(join(remote, 'oversize.txt'), Buffer.alloc(2 * 1024 * 1024 + 1, 65))
   writeFileSync(join(workspace, 'local.txt'), 'native-local-control\n')
   writeFileSync(join(run, 'additional', 'extra.txt'), 'native-additional-control\n')
@@ -279,16 +283,54 @@ try {
     await page.screenshot({ path: join(artifacts, 'viewer-dark.png') })
     await page.emulateMedia({ colorScheme: 'light' })
 
+    await row(folder, 'source.ts').click()
+    await ready()
+    await display.locator('[data-code-preview]').waitFor()
+    const viewerMenu = viewer.locator('[data-document-viewer-menu]')
+    await viewerMenu.click()
+    await page.getByRole('menuitem', { name: 'Plain text', exact: true }).click()
+    await display.locator('[data-textpreview-plain]').waitFor()
+    await viewerMenu.click()
+    await page.getByRole('menuitem', { name: 'Code', exact: true }).click()
+    check('short source supports switching from Plain text back to Code', await display.locator('[data-code-preview]').isVisible())
+
     const start = performance.now()
-    await row(folder, 'bulk.txt').click()
+    await row(folder, 'bulk.ts').click()
     await ready()
     const shown = await display.locator('pre').textContent()
-    check('large content byte-exact through binary RPC',
-      createHash('sha256').update(shown).digest('hex') === createHash('sha256').update(bulk).digest('hex'),
+    check('120,000-line TypeScript uses bounded plain text with exact bytes and no Code choice',
+      createHash('sha256').update(shown).digest('hex') === createHash('sha256').update(bulk).digest('hex')
+      && await display.locator('[data-textpreview-plain] pre code').count() === 1
+      && await display.locator('[data-code-preview]').count() === 0
+      && await viewerMenu.count() === 0,
       { bytes: Buffer.byteLength(bulk), elapsedMs: Math.round(performance.now() - start) })
     await row(folder, 'oversize.txt').click()
     await display.and(page.locator('[data-mrfw-preview-state="error"]')).waitFor()
     check('oversize refuses without previous content', /larger than 2 MiB/u.test(await display.textContent()) && await display.locator('pre').count() === 0)
+    await row(folder, 'nested/a.txt').click()
+    await ready()
+
+    const previewTab = name => dockTabs.filter({ has: page.getByText(name, { exact: true }) })
+    const previewCount = () => dockTabs.filter({ has: page.locator('.mrfw-previewTitleIcon') }).count()
+    for (const name of extraFiles) {
+      await showFiles()
+      await openFile(name)
+      await ready()
+    }
+    assert.equal(await previewCount(), 8)
+    await showFiles()
+    await openFile('source.ts')
+    await page.getByText('You can have up to 8 remote file previews open.', { exact: false }).waitFor()
+    check('a ninth distinct preview shows the tab-limit message', await previewCount() === 8)
+    const previous = extraFiles.at(-1)
+    await previewTab(previous).click()
+    await ready()
+    await viewer.getByRole('button', { name: 'Show file tree', exact: true }).click()
+    await row(folder, 'source.ts').click()
+    await display.locator('[data-code-preview]').waitFor()
+    check('Folder replaces a tab in the same pane at the eight-preview limit',
+      await previewCount() === 8 && await previewTab(previous).count() === 0
+      && await previewTab('source.ts').count() === 1 && await pane() === paneBefore)
     await row(folder, 'nested/a.txt').click()
     await ready()
     await page.reload({ waitUntil: 'domcontentloaded' })

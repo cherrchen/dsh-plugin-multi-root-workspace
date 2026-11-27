@@ -555,6 +555,7 @@ export const en = {
   'wizard.done': 'Registered',
   'wizard.doneHint': 'The remote directory joined the workspace for this session; the agent accesses it under the binding permissions.',
   'preview.title': 'Remote file preview',
+  'preview.resourceLimit': 'You can have up to {count} remote file previews open. Close a preview tab to open another.',
   'preview.readOnly': 'Read-only',
   'preview.loading': 'Reading remote file…',
   'preview.empty': 'This file is empty.',

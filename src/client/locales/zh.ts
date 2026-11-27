@@ -554,6 +554,7 @@ export const zh = {
   'wizard.done': '已登记',
   'wizard.doneHint': '远端目录已加入本会话的工作区，Agent 按绑定权限访问。',
   'preview.title': '远端文件预览',
+  'preview.resourceLimit': '最多可打开 {count} 个远端文件预览。请关闭一个预览标签页，再打开新文件。',
   'preview.readOnly': '只读',
   'preview.loading': '正在读取远端文件…',
   'preview.empty': '此文件为空。',

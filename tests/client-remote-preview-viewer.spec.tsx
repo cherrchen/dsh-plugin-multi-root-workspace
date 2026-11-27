@@ -13,7 +13,7 @@
  */
 
 import { createElement } from 'react'
-import { act, cleanup, render, screen } from '@testing-library/react'
+import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import type { SessionId } from '@deepseek-ai/dsh-session/types'
 import type { TabId } from '@deepseek-ai/dsh-client-ui-dockkit'
@@ -58,6 +58,39 @@ const info = (address: string, signal: AbortSignal, visible: boolean): PreviewTa
     signal,
     actions: { bindCommands: () => () => {} },
   },
+})
+
+describe('the remote preview Code budget', () => {
+  it('rechecks the budget on reload even if the user explicitly selected Code', async () => {
+    const short = 'let x = 1;\n'
+    const manyLines = 'x\n'.repeat(5000)
+    const longLine = 'x'.repeat(128 * 1024 + 1)
+    let source = short
+    const { book, authorization } = harness(async () => content(source))
+    const address = book.register(IDENTITY, 'source.ts', 'dev box')!
+    book.pin(address, new AbortController().signal)
+    const { container } = render(createElement(RemotePreviewViewer, props(book, info(address, new AbortController().signal, true))))
+    const code = () => container.querySelector('[data-code-preview]')
+    const plain = () => container.querySelector('[data-textpreview-plain]')
+    const menu = () => screen.getByRole('button', { name: 'preview.openWith' })
+    await waitFor(() => { expect(code()?.textContent).toBe(short) })
+    fireEvent.click(menu())
+    fireEvent.click(screen.getByText('preview.viewer.text'))
+    expect(plain()?.textContent).toBe(short)
+    fireEvent.click(menu())
+    fireEvent.click(screen.getByText('preview.viewer.code'))
+    expect(code()?.textContent).toBe(short)
+
+    for (const next of [manyLines, longLine]) {
+      source = next
+      fireEvent.click(screen.getByRole('button', { name: 'preview.refresh' }))
+      await waitFor(() => { expect(plain()?.textContent === next).toBe(true) })
+      expect(code()).toBeNull()
+      expect(screen.queryByRole('button', { name: 'preview.openWith' })).toBeNull()
+    }
+    book.dispose()
+    authorization.dispose()
+  })
 })
 
 const props = (book: RemotePreviewBook, tab: PreviewTabInfo) => ({

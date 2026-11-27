@@ -20,12 +20,12 @@
  */
 import { useCallback, useEffect, useId, useMemo, useRef, useState, useSyncExternalStore, type CSSProperties, type ReactNode } from 'react'
 import clsx from 'clsx'
-import {
-  CodeBlock, FileTypeIcon, IconFolderCloseRegular, IconFolderOpenRegular, IconNowrapFillRegular,
-  IconRefreshOutlineRegular, IconWrapFillRegular, Menu, PathLabel, StateDot, Tooltip, classifyFileType,
-  languageForPath,
-} from '@deepseek-ai/dsh-client-ui-primitives'
+import { FileTypeIcon, Menu, StateDot, Tooltip, classifyFileType } from '@deepseek-ai/dsh-client-ui-primitives'
 import type { TranslateNS } from '@deepseek-ai/dsh-client-ui-slots'
+import { IconFolderClose, IconRefresh } from '../../compat/client-icons.ts'
+import {
+  PreviewCodeBlock, PreviewFolderOpenIcon, PreviewPathLabel, PreviewUnwrapIcon, PreviewWrapIcon, previewLanguageForPath,
+} from '../../compat/remote-preview-primitives.ts'
 import { RemoteFilesError, type RemoteFilesFailureCode } from '../../remote/files-contract.ts'
 import { REMOTE_FILES_FAILURE_GROUPS } from '../files-tree/providers/ssh.ts'
 import type { RemotePreviewBook, RemotePreviewRecord, RemotePreviewView } from './resource-book.ts'
@@ -129,25 +129,33 @@ const EMPTY_SHOWN = { key: undefined, value: { kind: 'idle' } } as const satisfi
   readonly value: Shown
 }
 
-/** Runtime-import faces: the jsdom primitive stub need only carry the names a test invokes. */
-const languageForPathRuntime = languageForPath as unknown as ((path: string) => string | undefined) | undefined
-const CodeBlockRuntime = CodeBlock as unknown as typeof CodeBlock | undefined
+// The host allocates line rows and highlight tokens. Bound both inputs before
+// offering Code; plain text uses one text node for the same complete source.
+const MAX_CODE_BYTES = 128 * 1024
+const MAX_CODE_LINES = 4096
 
 /** One viewer choice in the header's upstream-shaped selector. */
-interface ViewerChoice {
-  readonly id: 'markdown' | 'code' | 'text'
+type ViewerChoice = (
+  | { readonly id: 'code'; readonly language: string }
+  | { readonly id: 'markdown' | 'text' }
+) & {
   readonly title: string
   /** Whether the implementation consumes the document wrap preference. */
   readonly wrap: boolean
 }
 
+type TextPresentation = Exclude<PreviewPresentation, { kind: 'unsupported' }>
 
-function codeLanguage(relativePath: string): string | undefined {
-  try {
-    return languageForPathRuntime?.(relativePath)
-  } catch {
-    return undefined
+function codeLanguage(relativePath: string, { text, size }: TextPresentation): string | undefined {
+  if (PreviewCodeBlock === undefined || size > MAX_CODE_BYTES) return undefined
+  const language = previewLanguageForPath?.(relativePath)
+  if (language === undefined) return undefined
+  // Count the same LF-delimited rows the host draws (it trims a final LF).
+  let lines = 1
+  for (let index = text.indexOf('\n'); index !== -1 && index < text.length - 1; index = text.indexOf('\n', index + 1)) {
+    if (++lines > MAX_CODE_LINES) return undefined
   }
+  return language
 }
 
 /**
@@ -158,18 +166,15 @@ function codeLanguage(relativePath: string): string | undefined {
  */
 function viewerChoices(
   relativePath: string,
-  presentation: Exclude<PreviewPresentation, { kind: 'unsupported' }> | undefined,
+  presentation: TextPresentation | undefined,
   t: TranslateNS<'multiRootWorkspace'>,
 ): readonly ViewerChoice[] {
   if (presentation === undefined) return []
   const markdown = presentation.kind === 'markdown'
-  const language = codeLanguage(relativePath)
+  const language = codeLanguage(relativePath, presentation)
   const choices: ViewerChoice[] = []
   if (markdown) choices.push({ id: 'markdown', title: t('preview.viewer.markdown'), wrap: false })
-  // The host's extension table includes md/markdown as a Code grammar too;
-  // the extension test alone is therefore not enough on older primitive
-  // stubs. `languageForPath` is the compatibility probe's single truth.
-  if (language !== undefined) choices.push({ id: 'code', title: t('preview.viewer.code'), wrap: true })
+  if (language !== undefined) choices.push({ id: 'code', language, title: t('preview.viewer.code'), wrap: true })
   choices.push({ id: 'text', title: t('preview.viewer.text'), wrap: true })
   return choices
 }
@@ -326,13 +331,16 @@ export function RemotePreviewViewer(props: RemotePreviewViewerProps): ReactNode 
     [record?.relativePath, presentation, t],
   )
   const selected = choices.find(choice => choice.id === rendererId) ?? choices[0]
+  const WrapIcon = wrap ? PreviewUnwrapIcon : PreviewWrapIcon
   const folderLabel = t(folderOpen ? 'preview.folderHide' : 'preview.folderShow')
   const path = record === undefined ? '' : displayPathOf(record)
   return (
     <section aria-label={t('preview.title')} data-mrfw-preview className="mrfw-preview">
       {record === undefined ? null : (
         <header className="mrfw-previewHead">
-          <PathLabel path={path} className="mrfw-previewPath" data-textpreview-path />
+          {PreviewPathLabel === undefined
+            ? <span className="mrfw-previewPath" title={path} data-textpreview-path>{path}</span>
+            : <PreviewPathLabel path={path} className="mrfw-previewPath" data-textpreview-path />}
           {live && selected !== undefined && choices.length > 1 ? (
             <Menu
               open={menuOpen}
@@ -367,7 +375,7 @@ export function RemotePreviewViewer(props: RemotePreviewViewerProps): ReactNode 
                 data-textpreview-tool="wrap"
                 onClick={() => { setWrap(value => !value) }}
               >
-                {wrap ? <IconNowrapFillRegular /> : <IconWrapFillRegular />}
+                {WrapIcon === undefined ? <span aria-hidden="true">↵</span> : <WrapIcon />}
               </button>
             </Tooltip>
           ) : null}
@@ -380,7 +388,7 @@ export function RemotePreviewViewer(props: RemotePreviewViewerProps): ReactNode 
                 data-textpreview-tool="reload"
                 onClick={onRefresh}
               >
-                <IconRefreshOutlineRegular />
+                <IconRefresh />
               </button>
             </Tooltip>
           ) : null}
@@ -395,7 +403,7 @@ export function RemotePreviewViewer(props: RemotePreviewViewerProps): ReactNode 
                 data-files-navigator-toggle
                 onClick={() => { setFolderOpen(open => !open) }}
               >
-                {folderOpen ? <IconFolderOpenRegular /> : <IconFolderCloseRegular />}
+                {folderOpen ? <PreviewFolderOpenIcon /> : <IconFolderClose />}
               </button>
             </Tooltip>
           ) : null}
@@ -411,7 +419,7 @@ export function RemotePreviewViewer(props: RemotePreviewViewerProps): ReactNode 
         >
           <PreviewContent
             shown={shownNow}
-            renderer={selected?.id}
+            renderer={selected}
             wrap={wrap}
             relativePath={record?.relativePath ?? ''}
             onRetry={onRefresh}
@@ -480,7 +488,7 @@ export function RemotePreviewViewer(props: RemotePreviewViewerProps): ReactNode 
 /** The content region by machine state; status copy is the only live text. */
 function PreviewContent(props: {
   readonly shown: Shown
-  readonly renderer: 'markdown' | 'code' | 'text' | undefined
+  readonly renderer: ViewerChoice | undefined
   readonly wrap: boolean
   readonly relativePath: string
   readonly onRetry: () => void
@@ -501,9 +509,8 @@ function PreviewContent(props: {
     case 'ready': {
       const presentation = shown.presentation
       if (presentation.text === '') return null
-      const renderer = props.renderer ?? (presentation.kind === 'markdown' ? 'markdown' : 'text')
-      if (renderer === 'markdown' && presentation.kind === 'markdown') return <MarkdownDocument blocks={presentation.blocks} />
-      if (renderer === 'code') return <CodeDocument path={props.relativePath} text={presentation.text} wrap={props.wrap} t={t} />
+      if (props.renderer?.id === 'markdown' && presentation.kind === 'markdown') return <MarkdownDocument blocks={presentation.blocks} />
+      if (props.renderer?.id === 'code') return <CodeDocument language={props.renderer.language} text={presentation.text} wrap={props.wrap} t={t} />
       return <PlainTextDocument text={presentation.text} />
     }
   }
@@ -533,7 +540,7 @@ function EmptyStatus(props: {
       <p className="mrfw-previewEmptyLine">{props.line}</p>
       {props.retry === undefined || props.onRetry === undefined ? null : (
         <button type="button" className="mrfw-previewRetry" data-textpreview-retry onClick={props.onRetry}>
-          <IconRefreshOutlineRegular size={14} />
+          <IconRefresh size={14} />
           {props.retry}
         </button>
       )}
@@ -552,21 +559,19 @@ function PlainTextDocument({ text }: { readonly text: string }): ReactNode {
 
 /** Highlighted, line-numbered source through the host primitive when it exists. */
 function CodeDocument(props: {
-  readonly path: string
+  readonly language: string
   readonly text: string
   readonly wrap: boolean
   readonly t: TranslateNS<'multiRootWorkspace'>
 }): ReactNode {
-  const { path, text, wrap, t } = props
-  const language = codeLanguage(path)
-  if (CodeBlockRuntime === undefined) return <PlainTextDocument text={text} />
+  const { language, text, wrap, t } = props
+  if (PreviewCodeBlock === undefined) return <PlainTextDocument text={text} />
   return (
     <div className="mrfw-previewCode" data-code-preview data-wrap={wrap}>
-      <CodeBlockRuntime
+      <PreviewCodeBlock
         className="mrfw-previewCodeBlock"
         code={text}
         lang={language}
-        streaming={false}
         wrap={wrap}
         lineNumbers
         copyLabel={t('preview.copy')}

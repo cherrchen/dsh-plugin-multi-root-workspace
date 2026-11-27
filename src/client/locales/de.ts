@@ -555,6 +555,7 @@ export const de = {
   'wizard.done': 'Registriert',
   'wizard.doneHint': 'Das entfernte Verzeichnis ist jetzt Teil des Arbeitsbereichs dieser Sitzung; der Agent greift mit den Berechtigungen der Bindung darauf zu.',
   'preview.title': 'Remote-Dateivorschau',
+  'preview.resourceLimit': 'Es können höchstens {count} Vorschauen für Remote-Dateien gleichzeitig geöffnet sein. Schließe einen Vorschau-Tab, um eine weitere Datei zu öffnen.',
   'preview.readOnly': 'Schreibgeschützt',
   'preview.loading': 'Remote-Datei wird gelesen…',
   'preview.empty': 'Diese Datei ist leer.',

@@ -555,6 +555,7 @@ export const fr = {
   'wizard.done': 'Enregistré',
   'wizard.doneHint': 'Le répertoire distant a rejoint l’espace de travail de cette session ; l’agent y accède selon les permissions de la liaison.',
   'preview.title': 'Aperçu du fichier distant',
+  'preview.resourceLimit': 'Vous pouvez ouvrir jusqu’à {count} aperçus de fichiers distants. Fermez un onglet d’aperçu pour en ouvrir un autre.',
   'preview.readOnly': 'Lecture seule',
   'preview.loading': 'Lecture du fichier distant…',
   'preview.empty': 'Ce fichier est vide.',

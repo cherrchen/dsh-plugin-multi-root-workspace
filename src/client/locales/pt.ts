@@ -555,6 +555,7 @@ export const pt = {
   'wizard.done': 'Registado',
   'wizard.doneHint': 'O diretório remoto juntou-se ao espaço de trabalho desta sessão; o agente acede com as permissões da vinculação.',
   'preview.title': 'Pré-visualização de arquivo remoto',
+  'preview.resourceLimit': 'Você pode manter até {count} pré-visualizações de arquivos remotos abertas. Feche uma aba de pré-visualização para abrir outra.',
   'preview.readOnly': 'Somente leitura',
   'preview.loading': 'Lendo arquivo remoto…',
   'preview.empty': 'Este arquivo está vazio.',

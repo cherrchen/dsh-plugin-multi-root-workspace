@@ -100,11 +100,22 @@ interface ViewState {
   latest: AbortController | undefined
 }
 
+/** A handoff can spend the outgoing slot only after the host commits it. */
+export interface RemotePreviewReplacement {
+  readonly address: string
+  readonly committed: (address: string) => boolean
+}
+
 export class RemotePreviewBook {
   private disposed = false
   private readonly byAddress = new Map<string, RecordState>()
   private readonly byKey = new Map<string, RecordState>()
   private readonly views = new Set<ViewState>()
+  private replacement: {
+    readonly incoming: RecordState
+    readonly outgoing: RecordState
+    readonly committed: RemotePreviewReplacement['committed']
+  } | undefined
   private activeReads = 0
 
   constructor(
@@ -117,16 +128,23 @@ export class RemotePreviewBook {
   /**
    * Register a file for preview and return its opaque address, reusing the
    * live record the same logical key already has. `undefined` when the
-   * request cannot parse, the session moved on, or the registry is full.
+   * request cannot parse or the session moved on. At capacity, stage only
+   * one replacement with no pin or view until the host commits the handoff.
+   * A request that needs another slot throws `resource-budget`.
    */
-  register(identity: SshFilesIdentity, relativePath: string, label: string): string | undefined {
+  register(identity: SshFilesIdentity, relativePath: string, label: string, replace?: RemotePreviewReplacement): string | undefined {
     if (this.disposed || this.activeSession() !== identity.sessionId) return undefined
     const request = { ...authorizationRequest(identity), relativePath }
     if (!remoteFilesReadRequest.safeParse(request).success) return undefined
     const key = JSON.stringify([providerKey(identity), relativePath])
     const existing = this.byKey.get(key)
     if (existing !== undefined && !existing.control.signal.aborted) return existing.record.address
-    if (this.byAddress.size >= REMOTE_FILE_PREVIEW_LIMITS.clientResources) return undefined
+    let outgoing: RecordState | undefined
+    if (this.byAddress.size >= REMOTE_FILE_PREVIEW_LIMITS.clientResources) {
+      outgoing = replace === undefined ? undefined : this.byAddress.get(replace.address)
+      if (this.replacement !== undefined || outgoing === undefined || outgoing.pins.size === 0
+        || outgoing.record.identity.sessionId !== identity.sessionId) throw new RemoteFilesError('resource-budget')
+    }
     const address = remoteFileAddress(this.mintId())
     // A mint that cannot produce a v4 UUID, or one that collides with a live
     // record, is a programming fault — never a silent replacement.
@@ -155,6 +173,9 @@ export class RemotePreviewBook {
     }
     this.byAddress.set(address, state)
     this.byKey.set(key, state)
+    if (outgoing !== undefined && replace !== undefined) {
+      this.replacement = { incoming: state, outgoing, committed: replace.committed }
+    }
     return address
   }
 
@@ -180,6 +201,15 @@ export class RemotePreviewBook {
   pin(address: string, signal: AbortSignal): RemotePreviewRecord | undefined {
     const state = this.byAddress.get(address)
     if (state === undefined || state.control.signal.aborted || signal.aborted || remoteFileId(address) === undefined) return undefined
+    const replacement = this.replacement
+    if (replacement?.incoming === state) {
+      if (!replacement.committed(address)) return undefined
+      this.replacement = undefined
+      // The Host can retain a resource subscription briefly after removing
+      // its tab. The committed layout proves the old slot has no occurrence.
+      this.retire(replacement.outgoing, new RemoteFilesError('cancelled'))
+      if (state.control.signal.aborted || signal.aborted) return undefined
+    }
     if (state.pins.has(signal)) return state.record
     if (!state.leased) {
       state.leased = true
@@ -350,6 +380,7 @@ export class RemotePreviewBook {
    */
   private retire(state: RecordState, reason: unknown): void {
     if (this.byAddress.get(state.record.address) !== state) return
+    if (this.replacement?.incoming === state) this.replacement = undefined
     this.byAddress.delete(state.record.address)
     if (this.byKey.get(state.key) === state) this.byKey.delete(state.key)
     clearTimeout(state.expiry)

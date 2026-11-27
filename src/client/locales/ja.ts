@@ -555,6 +555,7 @@ export const ja = {
   'wizard.done': '登録しました',
   'wizard.doneHint': 'リモートディレクトリがこのセッションのワークスペースに追加され、Agent はバインドされた権限でアクセスします。',
   'preview.title': 'リモートファイルプレビュー',
+  'preview.resourceLimit': 'リモートファイルのプレビューは最大 {count} 件まで開けます。別のファイルを開くには、プレビュータブを 1 つ閉じてください。',
   'preview.readOnly': '読み取り専用',
   'preview.loading': 'リモートファイルを読み込んでいます…',
   'preview.empty': 'このファイルは空です。',
