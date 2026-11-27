@@ -29,14 +29,18 @@ import { RemoteAdmissionError, type RemoteEndpointRef } from './contract.ts'
 import { remoteFilesAuthorization } from './files-authorization.ts'
 import {
   RemoteFilesError,
+  remoteFilesReadRequest,
+  REMOTE_FILE_PREVIEW_LIMITS,
   REMOTE_FILES_LIMITS,
   type RemoteFilesAuthorizationRequest,
   type RemoteFilesFailureCode,
   type RemoteFilesListRequest,
   type RemoteFilesListing,
+  type RemoteFilesReadContent,
+  type RemoteFilesReadRequest,
 } from './files-contract.ts'
 import { bindingDigest, environmentDigest, type DeploymentManifest, type RemoteBinding } from './manifest.ts'
-import { SftpClient, SftpConnectionLost, SftpStatusError, SSH_FX_NO_SUCH_FILE, SSH_FX_PERMISSION_DENIED } from './sftp.ts'
+import { SftpClient, SftpConnectionLost, SftpInvalidContent, SftpStatusError, SSH_FX_NO_SUCH_FILE, SSH_FX_PERMISSION_DENIED } from './sftp.ts'
 import { SshEnvironmentError, type SftpEnvironment } from './ssh-environment.ts'
 import { primaryKey } from '../roots.ts'
 
@@ -115,7 +119,8 @@ function environmentCode(code: string): RemoteFilesFailureCode {
 }
 
 export class RemoteFilesService {
-  private active = 0
+  /** Separate pools for listings and content reads (ADR-0053 P3). */
+  private readonly active = { list: 0, read: 0 }
   private waits = 0
   private live = true
   private readonly jobs = new Set<Promise<void>>()
@@ -125,6 +130,11 @@ export class RemoteFilesService {
     private readonly registry: RemoteFilesRegistry,
     private readonly manager: RemoteFilesManager,
     private readonly logger: { debug(message: string): void; warn(message: string): void },
+    /**
+     * The preview flag is a LIVE gate (transport/version/mode), consulted on
+     * every `supportsPreview` and every read admission — never a snapshot.
+     */
+    private readonly previewEnabled: () => boolean = () => false,
   ) {}
 
   /** Whether one binding may be browsed RIGHT NOW — the explicit opt-in and live capability gate. */
@@ -133,6 +143,16 @@ export class RemoteFilesService {
     if (this.manager.capability !== undefined && !this.manager.capability.eligible) return false
     return this.registry.remoteManifest?.environments.some(entry => entry.environmentId === environmentId) === true
       && binding.directoryListing === 'stable-path'
+  }
+
+  /**
+   * Whether one binding may be PREVIEW-READ right now (ADR-0053 P3): the
+   * browse gate plus the live preview flag, the `filePreview` opt-in and the
+   * `read` action — the same triple the operation-side admission re-checks.
+   */
+  supportsPreview(environmentId: string, binding: RemoteBinding): boolean {
+    return this.previewEnabled() && this.supports(environmentId, binding)
+      && binding.filePreview === 'stable-path' && binding.actions.includes('read')
   }
 
   /**
@@ -147,9 +167,46 @@ export class RemoteFilesService {
   }
 
   async list(request: RemoteFilesListRequest, callerSignal?: AbortSignal): Promise<RemoteFilesListing> {
+    return await this.execute('list', request, callerSignal, async (client, admitted, signal) => {
+      const target = await this.probe(client, admitted, request.relativePath, signal)
+      const listing = await client.readdirBounded(target, signal)
+      signal.throwIfAborted()
+      // SFTP offers no fd-bound listing: the same canonical probes repeat
+      // AFTER the read so a swap landing mid-listing still fails closed.
+      await this.probe(client, admitted, request.relativePath, signal)
+      return listing
+    })
+  }
+
+  /**
+   * One bounded file read (ADR-0053 P3): the same ordered-admission + owned
+   * channel + post-I/O re-admission frame as {@link list}, on the separate
+   * `read` pool with the preview budgets — the whole read runs on ONE owned
+   * channel at pipeline depth 1.
+   */
+  async read(request: RemoteFilesReadRequest, callerSignal?: AbortSignal): Promise<RemoteFilesReadContent> {
+    const parsed = remoteFilesReadRequest.safeParse(request)
+    if (!parsed.success) throw new RemoteFilesError('invalid-request')
+    return await this.execute('read', parsed.data, callerSignal, (client, admitted, signal) =>
+      this.readFile(client, admitted, parsed.data.relativePath, signal))
+  }
+
+  /**
+   * The shared execution frame for `list` and `read` (ADR-0053 P3): per-purpose
+   * slot pool and deadline, the abort race, and the owned-lifecycle contract —
+   * a claimed slot is held until the work actually unwinds, never when the
+   * race merely returned early.
+   */
+  private async execute<T>(
+    purpose: 'list' | 'read',
+    request: RemoteFilesListRequest,
+    callerSignal: AbortSignal | undefined,
+    consume: (client: SftpClient, admitted: AdmittedGrant, signal: AbortSignal) => Promise<T>,
+  ): Promise<T> {
+    const limits = purpose === 'read' ? REMOTE_FILE_PREVIEW_LIMITS : REMOTE_FILES_LIMITS
     if (!this.live) throw new RemoteFilesError('provider-unavailable')
     // 0 waiting: a request that cannot start immediately never queues.
-    if (this.active >= REMOTE_FILES_LIMITS.concurrent) throw new RemoteFilesError('resource-budget')
+    if (this.active[purpose] >= limits.concurrent) throw new RemoteFilesError('resource-budget')
     const deadline = new AbortController()
     const stateAbort = new AbortController()
     const signal = AbortSignal.any(
@@ -158,34 +215,34 @@ export class RemoteFilesService {
         : [this.shutdown.signal, deadline.signal, stateAbort.signal, callerSignal],
     )
     // The abort race: a backend operation that ignores the signal still
-    // loses the listing; the owned channel is closed by run's own listener.
+    // loses the operation; the owned channel is closed by run's own listener.
     const aborted = Promise.withResolvers<never>()
     const onAbort = (): void => {
       aborted.reject(signal.reason instanceof Error ? signal.reason : new RemoteFilesError('cancelled'))
     }
     // A pre-aborted request never claims a slot nor reaches admission.
     if (signal.aborted) throw this.normalize(signal.reason, deadline, stateAbort, callerSignal)
-    this.active++
+    this.active[purpose]++
     const job = Promise.withResolvers<void>()
     this.jobs.add(job.promise)
-    const timer = setTimeout(() => deadline.abort(), REMOTE_FILES_LIMITS.deadlineMs)
+    const timer = setTimeout(() => deadline.abort(), limits.deadlineMs)
     timer.unref()
     try {
       signal.addEventListener('abort', onAbort, { once: true })
-      const run = this.run(request, signal, stateAbort, callerSignal, deadline).finally(() => {
+      const run = this.run(request, signal, stateAbort, callerSignal, deadline, purpose, consume).finally(() => {
         // The slot, job record and timer are released only when the task
         // ACTUALLY unwound — never when the race merely returned early.
         clearTimeout(timer)
-        this.active--
+        this.active[purpose]--
         this.jobs.delete(job.promise)
         job.resolve()
       })
       try {
-        const listing = await Promise.race([run, aborted.promise])
+        const value = await Promise.race([run, aborted.promise])
         // A cancellation landing between the last I/O and now must not
         // report success.
         signal.throwIfAborted()
-        return listing
+        return value
       } catch (error) {
         throw this.normalize(error, deadline, stateAbort, callerSignal)
       }
@@ -367,36 +424,41 @@ export class RemoteFilesService {
   }
 
   /**
-   * One listing end to end: admit → verify → owned channel → canonical probes
-   * → bounded OPENDIR/READDIR → probes again → re-admit → bytes. Network I/O
-   * always happens OUTSIDE the registry's ordered admission; the re-admission
-   * listener subscribes only after the first admit produced the token.
+   * One operation end to end: admit → verify → owned channel → consume
+   * (list probes + bounded READDIR, or the read pipeline) → re-admit → value.
+   * Network I/O always happens OUTSIDE the registry's ordered admission. The
+   * re-admission listener subscribes BEFORE the first admission — a drift
+   * landing between admit and subscribe cannot slip; while one re-admission
+   * is in flight, further notifications coalesce into the dirty flag and
+   * drain in a do-loop — never a second pending admit.
    */
-  private async run(
+  private async run<T>(
     request: RemoteFilesListRequest,
     signal: AbortSignal,
     stateAbort: AbortController,
     callerSignal: AbortSignal | undefined,
     deadline: AbortController,
-  ): Promise<RemoteFilesListing> {
-    signal.throwIfAborted()
-    const admitted = await this.admit(request)
+    purpose: 'list' | 'read',
+    consume: (client: SftpClient, admitted: AdmittedGrant, signal: AbortSignal) => Promise<T>,
+  ): Promise<T> {
     signal.throwIfAborted()
     // Cancel only when THIS endpoint's facts stop matching; an unrelated
-    // registry write re-admits cleanly and the listing continues. While one
-    // re-admission is in flight, further notifications coalesce into the
-    // dirty flag and drain in a do-loop — never a second pending admit.
+    // registry write re-admits cleanly and the operation continues.
     let done = false
     let dirty = false
     let rechecking: Promise<void> | undefined
-    const unsubscribe = this.registry.onRemoteChange(() => {
+    let admitted: AdmittedGrant | undefined
+    const recheck = (): void => {
       if (done) return
-      if (rechecking !== undefined) { dirty = true; return }
+      // Before the first admission there is no token to re-prove: the
+      // notification is remembered and replayed as soon as one lands.
+      if (admitted === undefined || rechecking !== undefined) { dirty = true; return }
+      const token = admitted.token
       rechecking = (async () => {
         try {
           do {
             dirty = false
-            await this.admit(request, admitted.token)
+            await this.admit(request, token, purpose)
           } while (dirty && !done)
         } catch (error: unknown) {
           if (!done) stateAbort.abort(error)
@@ -404,7 +466,8 @@ export class RemoteFilesService {
           rechecking = undefined
         }
       })()
-    })
+    }
+    const unsubscribe = this.registry.onRemoteChange(recheck)
     let env: (SftpEnvironment & { live(): boolean }) | undefined
     // envReady gates the close promise so an abort landing while
     // openFilesSftp is still pending still disposes the late-arriving
@@ -423,6 +486,13 @@ export class RemoteFilesService {
       const close = (): void => { void closeOwned() }
       signal.addEventListener('abort', close, { once: true })
       try {
+        admitted = await this.admit(request, undefined, purpose)
+        // A notification admitted while the first admission ran must be
+        // re-proved now — the initial admit cannot speak for the drift.
+        if (dirty) {
+          recheck()
+          if (rechecking !== undefined) await rechecking
+        }
         signal.throwIfAborted()
         // The computed absolute lookup path is bounded BEFORE the channel
         // opens: binding root + '/' + relative must fit `absolutePathBytes`
@@ -445,14 +515,18 @@ export class RemoteFilesService {
         // The open may have resolved after the abort fired: the listener
         // already scheduled disposal; never proceed on a dead signal.
         signal.throwIfAborted()
-        const target = await this.probe(env.client, admitted, request.relativePath, signal)
-        const listing = await env.client.readdirBounded(target, signal)
-        signal.throwIfAborted()
-        // SFTP offers no fd-bound listing: the same canonical probes repeat
-        // AFTER the read so a swap landing mid-listing still fails closed.
-        await this.probe(env.client, admitted, request.relativePath, signal)
+        const value = await consume(env.client, admitted, signal)
         signal.throwIfAborted()
         if (!env.live()) throw new RemoteFilesError('connection-lost')
+        // A read cannot publish bytes while a revoke may still be in flight
+        // behind an unfinished dispose: the owned channel is closed BEFORE
+        // the final admission (idempotent with the finally's cleanup), with
+        // the recheck listener still attached for the duration of the close.
+        // The handle itself is already closed strictly inside consume.
+        if (purpose === 'read') {
+          await closeOwned()
+          signal.throwIfAborted()
+        }
         // Finish in the authorization lease's order: stop taking newer
         // notifications, drain the recheck already admitted into the dirty
         // loop, then require a NEW ordered admission. A recheck that ordered
@@ -461,10 +535,12 @@ export class RemoteFilesService {
         unsubscribe()
         if (rechecking !== undefined) await rechecking
         signal.throwIfAborted()
-        await this.admit(request, admitted.token)
+        await this.admit(request, admitted.token, purpose)
         signal.throwIfAborted()
-        if (!env.live()) throw new RemoteFilesError('connection-lost')
-        return listing
+        // The read already proved liveness before its intentional close;
+        // only the listing still checks the channel is live here.
+        if (purpose === 'list' && !env.live()) throw new RemoteFilesError('connection-lost')
+        return value
       } finally {
         done = true
         signal.removeEventListener('abort', close)
@@ -476,8 +552,8 @@ export class RemoteFilesService {
     } finally {
       unsubscribe()
       // A notification already admitted into the dirty-loop is part of this
-      // listing's ordered work. Drain it before `run` settles: the caller may
-      // still win the cancellation race early, but the listing slot and the
+      // operation's ordered work. Drain it before `run` settles: the caller
+      // may still win the cancellation race early, but the slot and the
       // service-dispose barrier never release ahead of the registry request.
       if (rechecking !== undefined) await rechecking
     }
@@ -487,11 +563,15 @@ export class RemoteFilesService {
    * One ordered admission: re-binds the session, re-checks the grant's live
    * digests and the opt-in, and returns ONLY the immutable facts the network
    * phase needs. With `expectedToken` this is the re-admission: any drift in
-   * the hashed identity fails the listing before its bytes are trusted.
+   * the hashed identity fails the operation before its bytes are trusted.
+   * `purpose: 'read'` additionally requires the live preview flag and the
+   * binding's `filePreview` opt-in — enforced here, on every admission, not
+   * only at the surface (ADR-0053 P3).
    */
   private async admit(
     request: { readonly sessionId: string; readonly environmentId: string; readonly rootId: string; readonly authorization: string },
     expectedToken?: string,
+    purpose: 'list' | 'read' = 'list',
   ): Promise<AdmittedGrant> {
     return await this.registry.withRemoteFilesRead(
       request.sessionId,
@@ -539,6 +619,14 @@ export class RemoteFilesService {
         if (binding.directoryListing !== 'stable-path' || this.manager.capability?.eligible === false) {
           throw new RemoteFilesError('capability-unsupported')
         }
+        // The preview gate is enforced AT THE OPERATION, not only where the
+        // view advertises it: a forged or stale request hits the same wall.
+        if (purpose === 'read') {
+          if (!this.previewEnabled()) throw new RemoteFilesError('capability-unsupported')
+          if (binding.filePreview !== 'stable-path' || !binding.actions.includes('read')) {
+            throw new RemoteFilesError('preview-not-authorized')
+          }
+        }
         return { path: binding.path, environmentDigest: endpoint.environmentDigest, token }
       },
     )
@@ -577,6 +665,119 @@ export class RemoteFilesService {
     }
     signal.throwIfAborted()
     return target
+  }
+
+  /**
+   * The read pipeline (ADR-0053 P3) — all on the caller's ONE owned channel,
+   * pipeline depth 1, no filesystem or temp fallback: canonical parent probe
+   * (reusing the listing's root/ancestor assertions), LSTAT + realpath on the
+   * target, strict read-only OPEN, FSTAT, serial bounded READs ending in an
+   * exact EOF probe, FSTAT and path probes again before publication, then a
+   * strict CLOSE while the channel is still live. Post-open anomalies are
+   * `file-changed`, never a re-run of the first-pass vocabulary.
+   */
+  private async readFile(client: SftpClient, admitted: AdmittedGrant, relativePath: string, signal: AbortSignal): Promise<RemoteFilesReadContent> {
+    const slash = relativePath.lastIndexOf('/')
+    const parent = slash < 0 ? '' : relativePath.slice(0, slash)
+    const name = relativePath.slice(slash + 1)
+    // The parent directory is probed with the full listing assertions
+    // (canonical root, real dirs, realpath equality); the file operand keeps
+    // '/'-joining only — no host path API.
+    type SftpAttrs = Awaited<ReturnType<SftpClient['lstat']>>
+    const checkFileAttrs = (attrs: SftpAttrs, post: boolean): { readonly size: number; readonly mtime?: number } => {
+      // A non-regular FSTAT answer is drift the contract refuses, never a
+      // readable file — no READ may be served for it either way.
+      if (((attrs.permissions ?? 0) & 0o170000) !== 0o100000) {
+        throw new RemoteFilesError(post ? 'file-changed' : 'not-regular-file')
+      }
+      // Flags outside the v3 bit set (size|owner|perms|times|extended) or a
+      // missing size are a response the contract cannot interpret.
+      if ((attrs.flags & 0x7ffffff0) !== 0 || attrs.size === undefined || !Number.isSafeInteger(attrs.size) || attrs.size < 0) {
+        throw new RemoteFilesError('invalid-content')
+      }
+      if (attrs.size > REMOTE_FILE_PREVIEW_LIMITS.bytes) {
+        if (post) throw new RemoteFilesError('file-changed')
+        throw new RemoteFilesError('file-too-large')
+      }
+      return { size: attrs.size, ...(attrs.mtime === undefined ? {} : { mtime: attrs.mtime }) }
+    }
+    // File-operand failures: a missing target is file-not-found BEFORE the
+    // open and file-changed after; permission stays permission-denied;
+    // everything coded or carrier-shaped passes through.
+    const fileError = (error: unknown, post: boolean): Error => {
+      if (error instanceof RemoteFilesError || error instanceof SftpConnectionLost || error instanceof SftpInvalidContent) return error
+      if (error instanceof SftpStatusError) {
+        if (error.code === SSH_FX_PERMISSION_DENIED) return new RemoteFilesError('permission-denied')
+        if (error.code === SSH_FX_NO_SUCH_FILE) return new RemoteFilesError(post ? 'file-changed' : 'file-not-found')
+        return new RemoteFilesError('connection-failed')
+      }
+      return error as Error
+    }
+    const targetAttrs = async (post: boolean): Promise<{ readonly target: string; readonly size: number; readonly mtime?: number }> => {
+      signal.throwIfAborted()
+      // EVERY pass re-proves the canonical root and the ancestor chain: a
+      // mid-read ancestor swap is refused even while the target's own
+      // lstat/realpath still answer plausibly. The file operand itself keeps
+      // '/'-joining only — no host path API.
+      const parentPath = await this.probe(client, admitted, parent, signal)
+      const target = `${parentPath === '/' ? '' : parentPath}/${name}`
+      let attrs: SftpAttrs
+      try {
+        attrs = await client.lstat(target)
+      } catch (error: unknown) {
+        throw fileError(error, post)
+      }
+      signal.throwIfAborted()
+      const kind = (attrs.permissions ?? 0) & 0o170000
+      // A symlinked target is refused BEFORE realpath — never followed.
+      if (kind === 0o120000) throw new RemoteFilesError('path-escapes-root')
+      if (kind !== 0o100000) {
+        if (post) throw new RemoteFilesError('file-changed')
+        throw new RemoteFilesError('not-regular-file')
+      }
+      const real = await client.realpath(target).catch((error: unknown) => { throw fileError(error, post) })
+      signal.throwIfAborted()
+      if (real !== target) throw new RemoteFilesError('path-escapes-root')
+      return { target, ...checkFileAttrs(attrs, post) }
+    }
+    const compare = (a: { readonly size: number; readonly mtime?: number }, b: { readonly size: number; readonly mtime?: number }): void => {
+      if (a.size !== b.size || a.mtime !== b.mtime) throw new RemoteFilesError('file-changed')
+    }
+
+    const before = await targetAttrs(false)
+    signal.throwIfAborted()
+    const handle = await client.openPreview(before.target).catch((error: unknown) => { throw fileError(error, false) })
+    let succeeded = false
+    try {
+      signal.throwIfAborted()
+      const opened = checkFileAttrs(await client.fstatPreview(handle).catch((error: unknown) => { throw fileError(error, true) }), true)
+      compare(before, opened)
+      const bytes = new Uint8Array(opened.size)
+      for (let offset = 0, requests = 0; offset < bytes.byteLength;) {
+        signal.throwIfAborted()
+        if (++requests >= REMOTE_FILE_PREVIEW_LIMITS.maxReadRequests) throw new RemoteFilesError('invalid-content')
+        const length = Math.min(bytes.byteLength - offset, REMOTE_FILE_PREVIEW_LIMITS.blockBytes)
+        const chunk = await client.readPreview(handle, offset, length)
+        signal.throwIfAborted()
+        if (chunk === undefined) throw new RemoteFilesError('file-changed')
+        if (chunk.byteLength < 1 || chunk.byteLength > length) throw new RemoteFilesError('invalid-content')
+        bytes.set(chunk, offset)
+        offset += chunk.byteLength
+      }
+      signal.throwIfAborted()
+      if (await client.readPreview(handle, bytes.byteLength, 1) !== undefined) throw new RemoteFilesError('file-changed')
+      signal.throwIfAborted()
+      compare(opened, checkFileAttrs(await client.fstatPreview(handle).catch((error: unknown) => { throw fileError(error, true) }), true))
+      compare(opened, await targetAttrs(true))
+      signal.throwIfAborted()
+      succeeded = true
+      return { kind: 'file', size: opened.size, complete: true, ...(opened.mtime === undefined ? {} : { modifiedAt: opened.mtime }), bytes }
+    } finally {
+      if (!signal.aborted) {
+        if (succeeded) await client.closePreview(handle)
+        else await client.closePreview(handle).catch(() => {})
+      }
+    }
   }
 
   private async kindOf(client: SftpClient, path: string, root: boolean): Promise<'directory' | 'symlink' | 'other'> {
@@ -622,6 +823,7 @@ export class RemoteFilesService {
       if (error.code === SSH_FX_PERMISSION_DENIED) return new RemoteFilesError('permission-denied')
       return new RemoteFilesError('connection-failed')
     }
+    if (error instanceof SftpInvalidContent) return new RemoteFilesError('invalid-content')
     if (error instanceof SftpConnectionLost) return new RemoteFilesError('connection-lost')
     if (error instanceof SshEnvironmentError) return new RemoteFilesError(environmentCode(error.code))
     return new RemoteFilesError('connection-failed')

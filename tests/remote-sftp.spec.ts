@@ -4,7 +4,7 @@ import { execFileSync } from 'node:child_process'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
-import { SftpClient, SftpConnectionLost, P_CREAT, P_EXCL, P_WRITE } from '../src/remote/sftp.ts'
+import { SftpClient, SftpConnectionLost, SftpInvalidContent, P_CREAT, P_EXCL, P_WRITE } from '../src/remote/sftp.ts'
 
 let dir = ''
 const clients: SftpClient[] = []
@@ -250,5 +250,115 @@ describe.skipIf(process.platform === 'win32')('SFTP bounded readdir', () => {
     const second = await scriptedSsh([version(), nameReply(1, [entry('/root', 0o040755)])])
     await second.init()
     await expect(second.lstat('/root')).rejects.toMatchObject({ name: 'SftpStatusError' })
+  })
+})
+
+/** P3: the preview read port — strict reply types, malformed handles, EOF shape. */
+describe.skipIf(process.platform === 'win32')('SFTP preview read port', () => {
+  const handle = (id: number, bytes: number[] = [1]) => frame([102, ...be32(id), ...be32(bytes.length), ...bytes])
+  const data = (id: number, bytes: number[]) => frame([103, ...be32(id), ...be32(bytes.length), ...bytes])
+  const statusCode = (id: number, code: number) => frame([101, ...be32(id), ...be32(code), ...be32(0), ...be32(0)])
+
+  /** A fake `ssh` answering each complete request; request bodies are dumped to req-N.bin. */
+  async function scriptedSsh(replies: number[][]) {
+    const script = join(dir, 'emit.mjs')
+    writeFileSync(script, `
+      import { writeFileSync } from 'node:fs'
+      const replies = ${JSON.stringify(replies.map(r => Buffer.from(r).toString('base64')))}
+      let input = Buffer.alloc(0); let next = 0
+      process.stdin.on('data', chunk => {
+        input = Buffer.concat([input, chunk])
+        while (input.length >= 4 && input.length >= input.readUInt32BE(0) + 4) {
+          const request = input.subarray(0, input.readUInt32BE(0) + 4)
+          input = input.subarray(request.length)
+          writeFileSync(${JSON.stringify(dir)} + '/req-' + next + '.bin', request)
+          if (next < replies.length) process.stdout.write(Buffer.from(replies[next++], 'base64'))
+        }
+      })
+    `)
+    const wrapper = join(dir, 'fake-ssh.sh')
+    writeFileSync(wrapper, `#!/bin/sh\nexec "${process.execPath}" "${script}" "$@"\n`)
+    chmodSync(wrapper, 0o755)
+    const client = SftpClient.connect('fake-alias', { ssh: wrapper })
+    clients.push(client)
+    return client
+  }
+
+  it('opens read-only: the wire request carries OPEN opcode 3, P_READ and empty attrs', async () => {
+    const client = await scriptedSsh([version(), handle(1, [9, 9, 9]), statusCode(2, 0)])
+    await client.init()
+    const got = await client.openPreview('/srv/root/a.txt')
+    expect(got).toEqual(Buffer.from([9, 9, 9]))
+    await client.closePreview(got)
+    // req-0 is the INIT handshake; req-1 is the OPEN.
+    const request = readFileSync(join(dir, 'req-1.bin'))
+    // [len][type=3][id][path-string][pflags=1][attrs=0]
+    expect(request.readUInt8(4)).toBe(3)
+    const pathLength = request.readUInt32BE(9)
+    const tail = request.subarray(13 + pathLength)
+    expect(tail.readUInt32BE(0)).toBe(1) // P_READ only
+    expect(tail.readUInt32BE(4)).toBe(0) // no attrs
+  })
+
+  it('rejects a wrong OPEN reply type, an oversized handle and a truncated handle', async () => {
+    for (const reply of [
+      data(1, [1]),                                                  // DATA instead of HANDLE
+      frame([102, ...be32(1), ...be32(300), ...new Array(300).fill(0)]), // handle > 256
+      frame([102, ...be32(1), ...be32(0)]),                          // zero-length handle
+    ]) {
+      const client = await scriptedSsh([version(), reply])
+      await client.init()
+      await expect(client.openPreview('/x')).rejects.toBeInstanceOf(SftpInvalidContent)
+    }
+  })
+
+  it('rejects a wrong FSTAT type and a STATUS OK on READ; EOF is undefined', async () => {
+    const client = await scriptedSsh([
+      version(), handle(1),
+      data(2, [1]),        // FSTAT answered with DATA
+    ])
+    await client.init()
+    const h = await client.openPreview('/x')
+    await expect(client.fstatPreview(h)).rejects.toBeInstanceOf(SftpInvalidContent)
+
+    const second = await scriptedSsh([version(), handle(1), statusCode(2, 0)])
+    await second.init()
+    const h2 = await second.openPreview('/x')
+    await expect(second.readPreview(h2, 0, 10)).rejects.toBeInstanceOf(SftpInvalidContent)
+
+    const third = await scriptedSsh([version(), handle(1), statusCode(2, 1)])
+    await third.init()
+    const h3 = await third.openPreview('/x')
+    await expect(third.readPreview(h3, 0, 10)).resolves.toBeUndefined()
+  })
+
+  it('accepts a short DATA and rejects an over-length or empty DATA', async () => {
+    const client = await scriptedSsh([version(), handle(1), data(2, [65, 66])])
+    await client.init()
+    const h = await client.openPreview('/x')
+    await expect(client.readPreview(h, 0, 10)).resolves.toEqual(Buffer.from([65, 66]))
+
+    const over = await scriptedSsh([version(), handle(1), data(2, [1, 2, 3, 4, 5])])
+    await over.init()
+    const oh = await over.openPreview('/x')
+    await expect(over.readPreview(oh, 0, 3)).rejects.toBeInstanceOf(SftpInvalidContent)
+
+    const empty = await scriptedSsh([version(), handle(1), data(2, [])])
+    await empty.init()
+    const eh = await empty.openPreview('/x')
+    await expect(empty.readPreview(eh, 0, 3)).rejects.toBeInstanceOf(SftpInvalidContent)
+  })
+
+  it('rejects out-of-contract read offsets and a wrong CLOSE reply', async () => {
+    const client = await scriptedSsh([version(), handle(1)])
+    await client.init()
+    const h = await client.openPreview('/x')
+    for (const [offset, length] of [[-1, 1], [0, 0], [0, 200_000], [3 * 1024 * 1024, 1]] as const) {
+      await expect(client.readPreview(h, offset, length)).rejects.toBeInstanceOf(SftpInvalidContent)
+    }
+    const closer = await scriptedSsh([version(), handle(1), data(2, [1])])
+    await closer.init()
+    const ch = await closer.openPreview('/x')
+    await expect(closer.closePreview(ch)).rejects.toBeInstanceOf(SftpInvalidContent)
   })
 })

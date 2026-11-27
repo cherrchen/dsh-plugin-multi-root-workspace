@@ -108,6 +108,16 @@ While browsing, the plugin holds an **authorization metadata lease** with the ho
 
 Failures (for example permission denied or a remote timeout) render as an in-row error without emptying the tree; only authorization-class changes end the current browse.
 
+### Previewing remote files (optional)
+
+With browsing enabled, the same binding can also tick **Preview files (stable SFTP path)** so remote file rows in the Files tab open a read-only preview. The checkbox is available only when **read** and **List in Files** are both ticked. The hint next to it states its precondition:
+
+> Enable only if untrusted processes cannot replace files or their parent paths or introduce links while previewing. Changing this setting requires authorizing the root again.
+
+The preview is read-only: it renders UTF-8 text and a bounded Markdown subset (no images, links or arbitrary markup); anything larger than the size limit or not text shows "cannot be previewed". The folder navigator inside the preview is read-only too — it does not watch the remote and never caches beyond the grant; when authorization lapses the preview expires immediately and the file must be reopened from Files.
+
+Like browsing, this is a **deployment assertion** — saving moves the binding to `withheld` and it takes effect only after re-registration. On an older DSH host without the preview transport, the setting can be saved but the host never issues the preview capability, so file rows stay inert; upgrading later needs no re-ticking.
+
 ## Using the remote tools
 
 The model reaches a registered remote directory only through `remote_copy` and `remote_bash`. Both copy endpoints take the same fields, and an **omitted** `environmentId` means the local workspace: the local primary root is `local:primary` (omit `environmentId`, use `rootId` `primary`), an additional root uses its registered `aliasId` (for example `docs`), and a remote endpoint must name `environmentId` explicitly with the `rootId` registered in the bindings dialog. `relativePath` is a normalized relative POSIX path to one regular file inside the root; it may not start with `/` or contain `.` or `..` segments.

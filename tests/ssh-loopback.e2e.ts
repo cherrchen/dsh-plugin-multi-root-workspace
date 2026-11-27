@@ -24,6 +24,9 @@ import { join } from 'node:path'
 import { spawn, type ChildProcess } from 'node:child_process'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import { SftpClient } from '../src/remote/sftp.ts'
+import { RemoteFilesService } from '../src/remote/files-service.ts'
+import { remoteFilesAuthorization } from '../src/remote/files-authorization.ts'
+import { bindingDigest, environmentDigest } from '../src/remote/manifest.ts'
 
 const ON = process.env.DSH_MULTI_ROOT_SSH_LOOPBACK === '1'
 const SSHD = ['/usr/sbin/sshd', '/usr/bin/sshd', '/sbin/sshd'].find(candidate => existsSync(candidate))
@@ -151,4 +154,102 @@ loopDescribe('loopback sshd behind the real OpenSSH client', () => {
       await client.dispose()
     }
   })
+it('reads a seeded file byte-exact through SftpClient preview primitives', async () => {
+  const client = SftpClient.connect('mrfw-loop', { configFile })
+  try {
+    await client.init()
+    const target = join(tree, 'deep', 'preview.bin')
+    const expected = Buffer.alloc(200_000).map((_, index) => index % 251)
+    writeFileSync(target, expected)
+    const attrs = await client.lstat(target)
+    expect(attrs.permissions! & 0o170000).toBe(0o100000)
+    const handle = await client.openPreview(target)
+    const opened = await client.fstatPreview(handle)
+    expect(opened.size).toBe(expected.length)
+    const got = Buffer.alloc(expected.length)
+    for (let offset = 0; offset < got.length;) {
+      const chunk = await client.readPreview(handle, offset, Math.min(128 * 1024, got.length - offset))
+      expect(chunk).toBeDefined()
+      chunk!.copy(got, offset)
+      offset += chunk!.length
+    }
+    expect(await client.readPreview(handle, got.length, 1)).toBeUndefined()
+    const closing = await client.fstatPreview(handle)
+    expect(closing.size).toBe(expected.length)
+    await client.closePreview(handle)
+    expect(got.equals(expected)).toBe(true)
+  } finally {
+    await client.dispose()
+  }
+})
+
+it('a real SftpClient behind a test registry/manager completes RemoteFilesService.read', async () => {
+  // Registry admission is still the in-process seam (the Host registry is
+  // proven in remote-files-service.spec); what is REAL here is SSH itself —
+  // openPreview/fstatPreview/readPreview/closePreview on the loopback wire.
+  const client = SftpClient.connect('mrfw-loop', { configFile })
+  await client.init()
+  const env = {
+    environmentId: 'loop', platform: 'linux' as const, account: 'me',
+    hostKey: 'SHA256:AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA', namespace: 'loop',
+    transport: 'sftp' as const, helper: null, connection: { host: 'mrfw-loop' },
+    credentialIsolation: 'unattested' as const,
+  }
+  const binding = {
+    primary: '/ws/app', environmentId: 'loop', rootId: 'out', path: realpathSync(tree),
+    actions: ['read' as const], directoryListing: 'stable-path' as const, filePreview: 'stable-path' as const,
+  }
+  const deployment = { schemaVersion: 1, configVersion: 'cfg-loop', environments: [env], bindings: [binding] }
+  const envDigest = environmentDigest(env as never)
+  const bindDigest = bindingDigest(env as never, binding as never)
+  const epoch = 'epoch-loop', incarnation = 'inc-loop'
+  const token = remoteFilesAuthorization(epoch, incarnation, bindDigest, envDigest)
+  const registry = {
+    remoteManifest: deployment as never,
+    onRemoteChange: () => () => {},
+    withRemoteFilesRead: async (_s: string, _e: unknown, body: (operation: unknown) => unknown) => await body({
+      identity: { primaryRoot: '/ws/app', authorityEpoch: epoch },
+      endpoints: [{
+        environmentId: 'loop', rootId: 'out', displayPath: realpathSync(tree),
+        verifiedTarget: { kind: 'path', value: realpathSync(tree) },
+        bindingDigest: bindDigest, environmentDigest: envDigest, incarnation, localRoot: null,
+      }],
+    }),
+  }
+  const manager = {
+    deployment: deployment as never,
+    openFilesSftp: async () => ({
+      client, live: () => true, dispose: async () => {},
+    }),
+  }
+  const service = new RemoteFilesService(registry, manager as never, { debug: () => {}, warn: () => {} }, () => true)
+  try {
+    const content = Buffer.from('loopback preview payload\n')
+    writeFileSync(join(tree, 'preview.txt'), content)
+    const read = await service.read({
+      sessionId: 'session', environmentId: 'loop', rootId: 'out',
+      relativePath: 'preview.txt', authorization: token,
+    })
+    expect(read.kind).toBe('file')
+    expect(read.size).toBe(content.length)
+    expect(read.complete).toBe(true)
+    expect(Buffer.from(read.bytes).equals(content)).toBe(true)
+    // Nested + literal-name files travel through the same probe path.
+    const nested = Buffer.alloc(150_000).map((_, index) => index % 253)
+    writeFileSync(join(tree, 'deep', 'inner', 'nested.bin'), nested)
+    const deep = await service.read({
+      sessionId: 'session', environmentId: 'loop', rootId: 'out',
+      relativePath: 'deep/inner/nested.bin', authorization: token,
+    })
+    expect(Buffer.from(deep.bytes).equals(nested)).toBe(true)
+    // And a missing file is the file-local failure, not a generic error.
+    await expect(service.read({
+      sessionId: 'session', environmentId: 'loop', rootId: 'out',
+      relativePath: 'absent.txt', authorization: token,
+    })).rejects.toMatchObject({ code: 'file-not-found' })
+  } finally {
+    await service.dispose()
+    await client.dispose()
+  }
+})
 })

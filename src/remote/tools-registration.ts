@@ -1,4 +1,5 @@
 import type { Context } from '@deepseek-ai/cordis'
+import { remoteFilePreviewTransport } from '../compat/remote-file-preview.ts'
 import { primaryKey } from '../roots.ts'
 import { REMOTE_CONTEXT_NAME, renderRemoteCapabilities } from './capabilities.ts'
 import { remoteBashTool } from './exec-tool.ts'
@@ -81,7 +82,16 @@ export function mountRemoteTools(
   ctx.effect(() => {
     const opening = manager as Partial<SshEnvironmentManager>
     if (typeof opening.openFilesSftp !== 'function') return () => {}
-    const service = new RemoteFilesService(registry, opening as unknown as RemoteFilesManager, ctx.logger)
+    const service = new RemoteFilesService(
+      registry,
+      opening as unknown as RemoteFilesManager,
+      ctx.logger,
+      // The live preview gate (ADR-0053): personal custody only, and only on
+      // the release the binary carrier is evidenced for — consulted on every
+      // supportsPreview and every read admission, never snapshotted.
+      () => registry.remoteMode === 'personal'
+        && remoteFilePreviewTransport(ctx.get('multiRootCompat')?.release) !== undefined,
+    )
     const unregister = registry.setRemoteFilesService(service)
     return () => {
       unregister()

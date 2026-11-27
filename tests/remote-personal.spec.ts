@@ -181,6 +181,26 @@ describe.skipIf(process.platform === 'win32')('personal config store', () => {
     expect(manifest.configVersion).toBe('personal-0')
     expect(digest).toMatch(/^[0-9a-f]{64}$/)
   })
+
+  it('a personal binding roundtrips filePreview and the flag changes the converted digest', async () => {
+    const dir = tmp()
+    const path = join(dir, 'remotes.json')
+    const binding = {
+      primary: '/ws/app', environmentId: 'dev-box', rootId: 'app', path: '/srv/app',
+      actions: ['read' as const], directoryListing: 'stable-path' as const, filePreview: 'stable-path' as const,
+    }
+    await savePersonalConfig(path, { ...CONFIG(), bindings: [binding] }, 0)
+    const loaded = loadPersonalManifest(path)
+    expect(loaded.manifest.bindings[0]!.filePreview).toBe('stable-path')
+    // Toggling the flag is a real identity change: digests differ.
+    const without = toDeploymentManifest({ ...CONFIG(), bindings: [{ ...binding, filePreview: undefined }] }, path)
+    const withFlag = toDeploymentManifest({ ...CONFIG(), bindings: [binding] }, path)
+    expect(without.digest).not.toBe(withFlag.digest)
+    // Old configs without the field load with the flag absent.
+    await savePersonalConfig(path, { ...CONFIG(1), bindings: [{ primary: '/ws/app', environmentId: 'dev-box', rootId: 'app', path: '/srv/app', actions: ['read' as const] }] }, 0)
+    const legacy = loadPersonalManifest(path)
+    expect(legacy.manifest.bindings[0]!.filePreview).toBeUndefined()
+  })
 })
 
 describe.skipIf(process.platform === 'win32')('managed ssh files', () => {

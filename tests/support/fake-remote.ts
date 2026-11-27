@@ -118,6 +118,28 @@ export class FakeRemote {
       entries.sort((a, b) => a.name.localeCompare(b.name))
       return { entries, truncated: false }
     },
+    /** The preview read port (ADR-0053 P3): handle-keyed strict primitives. */
+    openPreview: async (path: string) => {
+      this.sftpCalls.push(`preview-open ${path}`)
+      const file = this.files.get(path)
+      if (file === undefined) throw new SftpStatusError(NO_SUCH_FILE, 'No such file')
+      return Buffer.from(path)
+    },
+    fstatPreview: async (handle: Buffer) => {
+      this.sftpCalls.push(`preview-fstat ${handle.toString()}`)
+      return this.attrs(handle.toString())
+    },
+    readPreview: async (handle: Buffer, offset: number, length: number) => {
+      this.sftpCalls.push(`preview-read ${handle.toString()} ${offset} ${length}`)
+      const file = this.files.get(handle.toString())
+      if (file === undefined) throw new SftpStatusError(NO_SUCH_FILE, 'No such file')
+      if (offset >= file.data.length) return undefined
+      const bytes = file.data.subarray(offset, Math.min(offset + length, file.data.length))
+      return bytes.byteLength === 0 ? undefined : bytes
+    },
+    closePreview: async (handle: Buffer) => {
+      this.sftpCalls.push(`preview-close ${handle.toString()}`)
+    },
     remove: async (path: string) => {
       this.sftpCalls.push(`remove ${path}`)
       if (!this.files.delete(path)) throw new SftpStatusError(NO_SUCH_FILE, 'No such file')
@@ -285,6 +307,8 @@ export function fakeManifest(options: {
   deviceListing?: boolean
   /** Opt the Helper-backed build binding into Host-side directory listing. */
   buildListing?: boolean
+  /** Opt the device binding into `filePreview: 'stable-path'` (implies listing). */
+  devicePreview?: boolean
 }): DeploymentManifest {
   const buildPath = options.buildPath ?? '/srv/root'
   const devicePath = options.devicePath ?? '/srv/root'
@@ -321,7 +345,8 @@ export function fakeManifest(options: {
       },
       {
         primary: options.primary, environmentId: 'device', rootId: 'out', path: devicePath,
-        ...(options.deviceListing === true ? { directoryListing: 'stable-path' as const } : {}),
+        ...(options.deviceListing === true || options.devicePreview === true ? { directoryListing: 'stable-path' as const } : {}),
+        ...(options.devicePreview === true ? { filePreview: 'stable-path' as const } : {}),
         actions: [...(options.deviceActions ?? ['read', 'write'])],
         transfers: [
           { direction: 'import' as const, peer: { environmentId: 'build', rootId: 'app' } },

@@ -41,7 +41,7 @@ import { searchAdditionalRoot } from './files-search.ts'
 import type { CommandInvocation, CommandResult } from '@deepseek-ai/dsh-commands'
 import { effectiveRootAccess } from './contract.ts'
 import { RemoteAdmissionError } from './remote/contract.ts'
-import { REMOTE_FILES_AUTHORIZATION_WAIT, REMOTE_FILES_FAILURES, REMOTE_FILES_LIST, RemoteFilesError, remoteFilesAuthorizationRequest, remoteFilesListRequest, remoteFilesListing } from './remote/files-contract.ts'
+import { REMOTE_FILES_AUTHORIZATION_WAIT, REMOTE_FILES_FAILURES, REMOTE_FILES_LIST, REMOTE_FILES_READ, REMOTE_FILE_PREVIEW_TRANSPORT, RemoteFilesError, remoteFilesAuthorizationRequest, remoteFilesListRequest, remoteFilesListing, remoteFilesReadContent, remoteFilesReadRequest } from './remote/files-contract.ts'
 import { remoteFilesAuthorization } from './remote/files-authorization.ts'
 import { environmentDigest, ManifestError, type RemoteEnvironment } from './remote/manifest.ts'
 import { CredentialError } from './remote/personal/credentials.ts'
@@ -862,6 +862,11 @@ async function remotesViewOf(
         transfers,
         capabilities,
         ...(browseAuthorization === undefined ? {} : { browseAuthorization }),
+        // Preview discovery hint only (ADR-0053): the live flag + opt-in are
+        // re-checked inside the read admission — this field just tells the
+        // client a preview-capable row MAY open. An absent/old host omits it.
+        ...(browseAuthorization !== undefined && browsable?.supportsPreview(binding.environmentId, binding) === true
+          ? { preview: REMOTE_FILE_PREVIEW_TRANSPORT } : {}),
         ...(state === 'unregistered' ? { reason: 'remote-unregistered' }
           : state === 'withheld' ? { reason: 'remote-withheld' }
           : state === 'revoked' ? { reason: 'remote-revoked' } : {}),
@@ -970,6 +975,27 @@ async function dispatchPanelRequest(
       panelSessionId = parsedSsh.value.sessionId
       const primaryRoot = resolvePanelPrimaryRoot(ctx, parsedSsh.value.sessionId)
       return { ok: true, value: await handlePersonalEndpoint(ctx, ctx.multiRootRegistry, primaryRoot, parsedSsh.value) }
+    }
+    // The preview read endpoint is its own strict contract beside the
+    // listing: metadata over JSON plus exactly one `bytes` attachment; the
+    // decoded content is re-validated against the wire shape before it is
+    // framed, and only vocabulary entries reach the browser (ADR-0053 P3).
+    if (endpoint === REMOTE_FILES_READ) {
+      const parsedRead = remoteFilesReadRequest.safeParse(payload)
+      if (!parsedRead.success) return { ok: false, error: { code: 'panel/bad-request', message: 'invalid remoteFiles.read request', details: {} } }
+      panelSessionId = parsedRead.data.sessionId
+      try {
+        const service = ctx.multiRootRegistry.remoteFilesService
+        if (service === undefined) throw new RemoteFilesError('provider-unavailable')
+        const read = remoteFilesReadContent.safeParse(await service.read(parsedRead.data, signal))
+        if (!read.success) throw new RemoteFilesError('invalid-content')
+        const { bytes, ...metadata } = read.data
+        const response = { ok: true as const, value: { ...metadata, bytes: null }, attachments: [{ path: ['bytes'], bytes }] }
+        return response
+      } catch (error: unknown) {
+        const failure = error instanceof RemoteFilesError ? error : new RemoteFilesError('provider-unavailable')
+        return { ok: false, error: { code: failure.code, message: failure.message, details: { retryable: failure.retryable } } }
+      }
     }
     // The browse listing endpoint is its own strict contract: it precedes the
     // remote view endpoints, shares their authenticated channel, and the raw

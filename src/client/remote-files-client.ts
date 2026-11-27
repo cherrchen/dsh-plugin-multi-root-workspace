@@ -25,13 +25,18 @@ import {
   REMOTE_FILES_FAILURES,
   REMOTE_FILES_LIMITS,
   REMOTE_FILES_LIST,
+  REMOTE_FILES_READ,
   RemoteFilesError,
   remoteFilesAuthorizationAnswer,
   remoteFilesListing,
+  remoteFilesReadContent,
+  remoteFilesReadRequest,
   type RemoteFilesAuthorizationRequest,
   type RemoteFilesFailureCode,
   type RemoteFilesListRequest,
   type RemoteFilesListing,
+  type RemoteFilesReadContent,
+  type RemoteFilesReadRequest,
 } from '../remote/files-contract.ts'
 
 interface Channel {
@@ -57,6 +62,21 @@ export interface RemoteFilesClient {
   wait(request: RemoteFilesAuthorizationRequest, signal: AbortSignal): Promise<void>
 }
 
+/**
+ * The preview content read (ADR-0053 P4): `remoteFiles.read` returns the
+ * decoded content envelope — metadata plus the one `bytes` attachment the
+ * Connection rehydrated. Fixtures that only exercise browsing may omit it.
+ */
+export interface RemoteFileContentClient {
+  /**
+   * Read one regular remote file through the Host's preview pipeline.
+   * @param request - the schema-validated read request.
+   * @param signal - the read's lifetime.
+   * @returns the validated content; failures reject as `RemoteFilesError`.
+   */
+  read(request: RemoteFilesReadRequest, signal: AbortSignal): Promise<RemoteFilesReadContent>
+}
+
 /** The failure a carrier-level breakdown reports — never the host's text. */
 const unavailable = (): RemoteFilesError => new RemoteFilesError('provider-unavailable')
 
@@ -70,7 +90,7 @@ const failureOf = (error: unknown, signal: AbortSignal): RemoteFilesError => {
   if (signal.aborted) return new RemoteFilesError('cancelled')
   if (error instanceof RemoteFilesError) return error
   const code = (error as { code?: unknown } | null | undefined)?.code
-  return typeof code === 'string' && code in REMOTE_FILES_FAILURES
+  return typeof code === 'string' && Object.hasOwn(REMOTE_FILES_FAILURES, code)
     ? new RemoteFilesError(code as RemoteFilesFailureCode)
     : unavailable()
 }
@@ -152,7 +172,7 @@ function createListGate(): {
  * @param connection - the client Connection service.
  * @returns the client, with every failure normalized to the fixed vocabulary.
  */
-export function createRemoteFilesClient(connection: Channel): RemoteFilesClient {
+export function createRemoteFilesClient(connection: Channel): RemoteFilesClient & RemoteFileContentClient {
   const listGate = createListGate()
   const call = async (endpoint: string, payload: Record<string, unknown>, signal: AbortSignal): Promise<unknown> => {
     signal.throwIfAborted()
@@ -163,6 +183,9 @@ export function createRemoteFilesClient(connection: Channel): RemoteFilesClient 
       throw failureOf(error, signal)
     }
     if (signal.aborted) throw new RemoteFilesError('cancelled')
+    // A malformed carrier answer — a missing `ok`, a non-object envelope —
+    // is a carrier failure, never a forwarded code.
+    if (result === null || typeof result !== 'object' || typeof result.ok !== 'boolean') throw unavailable()
     if (!result.ok) throw failureOf(result.error ?? unavailable(), signal)
     return result.value
   }
@@ -214,6 +237,17 @@ export function createRemoteFilesClient(connection: Channel): RemoteFilesClient 
     wait: async (request, signal) => {
       const value = await call(REMOTE_FILES_AUTHORIZATION_WAIT, { ...request }, signal)
       if (!remoteFilesAuthorizationAnswer.safeParse(value).success) throw unavailable()
+    },
+    read: async (request, signal) => {
+      if (signal.aborted) throw new RemoteFilesError('cancelled')
+      const parsedRequest = remoteFilesReadRequest.safeParse(request)
+      if (!parsedRequest.success) throw new RemoteFilesError('invalid-request')
+      const value = await call(REMOTE_FILES_READ, { ...parsedRequest.data }, signal)
+      // The Connection rehydrates exactly one `bytes` attachment into the
+      // envelope before this parse runs; there is no JSON byte fallback.
+      const result = remoteFilesReadContent.safeParse(value)
+      if (!result.success) throw new RemoteFilesError('invalid-content')
+      return result.data
     },
   }
 }

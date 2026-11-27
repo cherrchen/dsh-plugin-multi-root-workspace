@@ -14,6 +14,7 @@
  * registry's own `addRemote`.
  */
 import { z } from 'zod'
+import { REMOTE_FILE_PREVIEW_TRANSPORT } from './files-contract.ts'
 import { sshDependencyViewSchema, type SshDependencyView } from './ssh-diagnostics.ts'
 
 /** The endpoints this module owns. */
@@ -74,6 +75,12 @@ export interface RemoteEndpointView {
    * path, digest, or secret the client could reuse elsewhere.
    */
   readonly browseAuthorization?: string | undefined
+  /**
+   * Preview discovery hint (ADR-0053 P3): present only while
+   * `browseAuthorization` is live AND the host service/transport/version gate
+   * has passed. An unknown or absent value drops only preview — never listing.
+   */
+  readonly preview?: typeof REMOTE_FILE_PREVIEW_TRANSPORT | undefined
   /** Why the endpoint is not usable; a code the panel localizes. */
   readonly reason?: string | undefined
 }
@@ -110,6 +117,9 @@ const endpointViewSchema = z.object({
     read: z.boolean(), write: z.boolean(), exec: z.boolean(), receive: z.boolean(), send: z.boolean(),
   }),
   browseAuthorization: z.string().regex(/^[0-9a-f]{64}$/).optional(),
+  // An unrecognized preview value degrades to "absent" instead of failing the
+  // whole endpoint view — the hint is advisory, listing must survive.
+  preview: z.preprocess(v => v === REMOTE_FILE_PREVIEW_TRANSPORT ? v : undefined, z.literal(REMOTE_FILE_PREVIEW_TRANSPORT).optional()),
   reason: z.string().optional(),
 })
 

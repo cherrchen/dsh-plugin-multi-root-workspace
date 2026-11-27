@@ -48,6 +48,7 @@ active：
 
 
 
+
 - [Issue #32 多执行环境实施与验证计划](./active/2026-11-06-multi-environment-gates.md) — 外部评审通过，实施中：个人 SSH 档位已实施并随 `v0.1.24-beta` 线发版（实验性、默认关闭），team / hardened broker 档位仍未开放；含 PR 依赖、实施细节、故障注入与回滚验收。
 
 
@@ -58,6 +59,8 @@ active：
 
 
 completed：
+
+- [按 Provider 分派的远端文件预览](./completed/2026-11-27-provider-remote-file-preview.md) — P1–P8 完成，`PASS WITH LIMITATIONS`，待维护者审查；验收报告包含打包插件的真实 DSH Web / OpenSSH 预览、旧宿主降级和全量门禁。
 
 - [2026-11-24-provider-remote-file-tree.md](./completed/2026-11-24-provider-remote-file-tree.md) — Provider 化文件树与远端 Workspace Root 浏览：`RootRef` 判别联合 + 授权代次键控替代路径身份，Provider 端口分派 primary/additional/remote 三类根，Host 侧独立 `remoteFiles.list` 走 UI 只读准入与双准入；浏览统一要求显式稳定路径部署断言与 owned SFTP v3 通道，Helper object 授权不复用为路径身份，Broker 无目录流即 fail closed；P0–P8 与全版本 × OS 矩阵均已通过（P8 CI run 45636794330，34/34），已合入 `main`（PR #80）并随 `v0.1.25-beta.1` 发版。
 

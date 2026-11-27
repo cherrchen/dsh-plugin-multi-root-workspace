@@ -48,6 +48,7 @@ active:
 
 
 
+
 - [Issue #32 implementation and verification plan](./active/2026-11-06-multi-environment-gates.md) (Chinese) — Passed external technical review; in progress: the personal SSH tier is implemented and released in the `v0.1.24-beta` line (experimental, off by default) while the team and hardened broker tiers stay disabled. Covers PR dependencies, implementation details, fault injection and rollback.
 
 
@@ -58,6 +59,8 @@ active:
 
 
 completed:
+
+- [Provider-dispatched remote file preview](./completed/2026-11-27-provider-remote-file-preview.md) (Chinese) — P1–P8 complete, `PASS WITH LIMITATIONS`, ready for maintainer review. The report covers the packed plugin on real DSH Web and OpenSSH, graceful fallback on older hosts, and the full local verification gate.
 
 - [2026-11-24-provider-remote-file-tree.md](./completed/2026-11-24-provider-remote-file-tree.md) (Chinese) — Provider-based file tree and remote Workspace Root browsing: a `RootRef` discriminated union plus authorization-incarnation keying replaces path identity, a provider port dispatches the primary/additional/remote root kinds, and the host gains an independent `remoteFiles.list` under a UI-read-only admission with dual ordering around network I/O; browsing uniformly requires the explicit stable-path deployment assertion and an owned SFTP v3 channel, Helper object authorization is never reinterpreted as path identity, and Broker fails closed without a directory stream; P0–P8 and the full version × OS matrix have passed (P8 CI run 45636794330, 34/34), merged into `main` (PR #80) and released with `v0.1.25-beta.1`.
 

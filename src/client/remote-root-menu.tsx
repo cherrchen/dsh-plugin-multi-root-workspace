@@ -29,6 +29,7 @@ interface CapabilityDraft {
   readonly canTransfer: boolean
   readonly actions: ReadonlySet<RemoteAction>
   readonly directoryListing: boolean
+  readonly filePreview: boolean
   readonly transfers: readonly Transfer[]
 }
 
@@ -84,6 +85,7 @@ export function RemoteRootMenu(props: RemoteRootMenuProps): ReactNode {
         canTransfer: environment.transfer !== undefined,
         actions: new Set(binding.actions),
         directoryListing: binding.directoryListing === 'stable-path' && binding.actions.includes('read'),
+        filePreview: binding.filePreview === 'stable-path' && binding.directoryListing === 'stable-path' && binding.actions.includes('read'),
         transfers: binding.transfers ?? [],
       })
     }).catch((cause: unknown) => {
@@ -104,6 +106,9 @@ export function RemoteRootMenu(props: RemoteRootMenuProps): ReactNode {
         // exposes it explicitly and never derives it from read or any other
         // action silently.
         ...(draft.directoryListing && draft.actions.has('read') ? { directoryListing: 'stable-path' as const } : {}),
+        // Same assertion class extended to file contents: serialized only
+        // while read AND listing hold — never re-gained silently.
+        ...(draft.filePreview && draft.actions.has('read') && draft.directoryListing ? { filePreview: 'stable-path' as const } : {}),
         ...(draft.transfers.length === 0 ? {} : { transfers: draft.transfers }),
       })
       props.onClose()
@@ -150,7 +155,7 @@ export function RemoteRootMenu(props: RemoteRootMenuProps): ReactNode {
           const actions = new Set(draft.actions)
           if (selected) actions.delete(action)
           else actions.add(action)
-          setDraft({ ...draft, actions, ...(actions.has('read') ? {} : { directoryListing: false }) })
+          setDraft({ ...draft, actions, ...(actions.has('read') ? {} : { directoryListing: false, filePreview: false }) })
         })
       }
       const listingSelected = draft.directoryListing
@@ -167,7 +172,21 @@ export function RemoteRootMenu(props: RemoteRootMenuProps): ReactNode {
         </span>,
         disabled: saving || !draft.actions.has('read'),
       })
-      update.set('directoryListing', () => setDraft({ ...draft, directoryListing: !draft.directoryListing }))
+      update.set('directoryListing', () => setDraft({ ...draft, directoryListing: !draft.directoryListing, ...(draft.directoryListing ? { filePreview: false } : {}) }))
+
+      const previewSelected = draft.filePreview
+      if (previewSelected) checked.add('filePreview')
+      items.push({
+        id: 'filePreview',
+        // Same assertion class as listing, extended to file contents — its
+        // warning rides inside the selectable row for the same reason.
+        label: <span className="mrfw-menuCapability">
+          <span className="mrfw-menuCapabilityLabel">{t('ssh.binding.filePreview')}</span>
+          <span className="mrfw-menuCapabilityHint">{t('ssh.binding.filePreviewHint')}</span>
+        </span>,
+        disabled: saving || !draft.actions.has('read') || !draft.directoryListing,
+      })
+      update.set('filePreview', () => setDraft({ ...draft, filePreview: !draft.filePreview }))
 
       const peers = localBindingPeers(roots, t)
       for (const direction of ['import', 'export'] satisfies Direction[]) {
@@ -189,6 +208,7 @@ export function RemoteRootMenu(props: RemoteRootMenuProps): ReactNode {
       }
       const changed = draft.actions.size !== draft.binding.actions.length || draft.binding.actions.some(action => !draft.actions.has(action))
         || draft.directoryListing !== (draft.binding.directoryListing === 'stable-path' && draft.binding.actions.includes('read'))
+        || draft.filePreview !== (draft.binding.filePreview === 'stable-path' && draft.binding.directoryListing === 'stable-path' && draft.binding.actions.includes('read'))
         || draft.transfers.length !== (draft.binding.transfers?.length ?? 0)
         || draft.transfers.some(transfer => !draft.binding.transfers?.some(entry => entry.direction === transfer.direction
           && entry.peer.environmentId === transfer.peer.environmentId && entry.peer.rootId === transfer.peer.rootId))

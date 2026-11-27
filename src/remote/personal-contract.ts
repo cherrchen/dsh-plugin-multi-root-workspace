@@ -119,6 +119,9 @@ const requestSchemas = {
       // only where the editor's checkbox set it; host manifest validation
       // stays authoritative on the read dependency and runtime admission.
       directoryListing: z.literal('stable-path').optional(),
+      // The stable-path file preview opt-in (ADR-0053): same assertion class
+      // as directoryListing extended to the target file's name/object mapping.
+      filePreview: z.literal('stable-path').optional(),
       actions: z.array(z.enum(['read', 'write', 'exec'])).min(1),
       transfers: z.array(z.object({
         direction: z.enum(['import', 'export']),
@@ -235,6 +238,8 @@ export interface SshBindingView {
   readonly path: string
   /** The stable-SFTP-path browsing opt-in; absent means unsupported and draws no rows. */
   readonly directoryListing?: 'stable-path' | undefined
+  /** The stable-path file preview opt-in; absent means read-only browsing only. */
+  readonly filePreview?: 'stable-path' | undefined
   readonly actions: readonly ('read' | 'write' | 'exec')[]
   readonly transfers?: readonly {
     readonly direction: 'import' | 'export'
@@ -283,6 +288,7 @@ const environmentViewSchema = z.object({
 const bindingViewSchema = z.object({
   environmentId: z.string(), rootId: z.string(), path: z.string(),
   directoryListing: z.literal('stable-path').optional(),
+  filePreview: z.literal('stable-path').optional(),
   actions: z.array(z.enum(['read', 'write', 'exec'])),
   transfers: z.array(z.object({
     direction: z.enum(['import', 'export']),

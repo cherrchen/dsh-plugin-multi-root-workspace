@@ -384,27 +384,52 @@ export function RootSwitcher(props: RootSwitcherProps): ReactNode {
   // rebuilt every render, so a plain memo would hand the takeover effect a
   // fresh provider each pass — one slot suffices because only the current
   // selection's provider is ever live, and a key change replaces it whole.
-  const providerCache = useRef<{ readonly key: string; readonly provider: WorkspaceFilesProvider } | undefined>(undefined)
+  const providerCache = useRef<{ readonly key: string; readonly previewHint: string | undefined; readonly provider: WorkspaceFilesProvider } | undefined>(undefined)
   const selectedProvider = useMemo(() => {
     if (selected === 'primary' || filesTree === undefined || tabId === undefined) return undefined
+    // A remote provider is resolved against the FRESH view's selection, not
+    // the stored one: same-incarnation metadata updates — the preview hint
+    // included — reach the provider without a takeover re-key. The proof
+    // runs BEFORE any cache hit, so a remount with unanswered or mismatched
+    // metadata draws nothing (never a cached provider, never a cached row).
+    // Same posture as the local branch's portal gate: no pane or no live
+    // session, no provider.
+    let resolved: FilesRootSelection = selected
+    let previewHint: string | undefined
     if (selected.kind === 'remote') {
-      // A remote provider exists only while the FRESH view still mints the
-      // selection's exact incarnation — the proof runs BEFORE any cache hit,
-      // so a remount with unanswered or mismatched metadata draws nothing
-      // (never a cached provider, never a cached row). Same posture as the
-      // local branch's portal gate: no pane or no live session, no provider.
       const session = props.sessionId?.()
-      if (session === undefined || session === '' || pane === null) return undefined
+      if (session === undefined || session === '' || pane === null) { providerCache.current = undefined; return undefined }
       const endpoint = remoteView?.endpoints.find(entry =>
         entry.environmentId === selected.ref.environmentId && entry.rootId === selected.ref.rootId)
-      if (endpoint === undefined || remoteRootSelection(endpoint)?.incarnation !== selected.incarnation) return undefined
+      const proof = endpoint === undefined ? undefined : remoteRootSelection(endpoint)
+      if (proof === undefined || proof.incarnation !== selected.incarnation) { providerCache.current = undefined; return undefined }
+      resolved = proof
+      previewHint = proof.view.preview
     }
     const key = providerKey({ sessionId: filesTree.sessionId, root: selected.ref, incarnation: selected.incarnation })
-    if (providerCache.current?.key === key) return providerCache.current.provider
-    const provider = filesTree.resolveProvider(selected, () => {
+    const cached = providerCache.current
+    if (cached !== undefined && cached.key === key && cached.previewHint === previewHint) return cached.provider
+    const created = filesTree.resolveProvider(resolved, () => {
       invalidateNow(tabId, key)
     })
-    providerCache.current = provider === undefined ? undefined : { key, provider }
+    if (created === undefined) { providerCache.current = undefined; return undefined }
+    // The preview port a stale row captured must die with its cache slot:
+    // a hint drop under the same incarnation never re-keys the takeover
+    // signal, so the port fences both methods on this very provider still
+    // being the cached one.
+    let provider = created
+    if (created.preview !== undefined) {
+      const port = created.preview
+      const wrapped: WorkspaceFilesProvider = {
+        ...created,
+        preview: {
+          canOpen: resource => providerCache.current?.provider === wrapped && port.canOpen(resource),
+          open: (resource, options) => { if (providerCache.current?.provider === wrapped) port.open(resource, options) },
+        },
+      }
+      provider = wrapped
+    }
+    providerCache.current = { key, previewHint, provider }
     return provider
   }, [selected, filesTree, remoteView, tabId, pane, props.sessionId, invalidateNow])
   // Exactly the portal condition: the forked tree — and the header reload
@@ -461,25 +486,11 @@ export function RootSwitcher(props: RootSwitcherProps): ReactNode {
     const controller = new AbortController()
     const combined = AbortSignal.any([takeover.signal, controller.signal])
     if (combined.aborted) return undefined
-    const loop = async (): Promise<void> => {
-      while (!combined.aborted) {
-        // Always observe the SEED selection: a same-incarnation metadata
-        // adopt hands `selected` a new object for the same token, and a
-        // switch away must simply end this loop — never let it pass a
-        // different root's incarnation to this takeover's authority port.
-        const current = selectedRef.current
-        if (current === 'primary' || current.kind !== 'remote'
-          || providerKey({ sessionId: treeSession, root: current.ref, incarnation: current.incarnation }) !== key) return
-        try {
-          await observeAuthority(seed, combined)
-        } catch {
-          if (combined.aborted) return
-          invalidateNow(owner, key)
-          return
-        }
-      }
-    }
-    void loop()
+    // The SEED selection's hold on the shared lease: the book renews the
+    // wire wait internally, and this observer resolves only on release. A
+    // rejection while the combined signal still lives means the grant's
+    // identity stopped matching — the keyed invalidate retires the record.
+    void observeAuthority(seed, combined).catch(() => { if (!combined.aborted) invalidateNow(owner, key) })
     return () => { controller.abort() }
   }, [takeover, observeAuthority, treeSession, invalidateNow])
 
