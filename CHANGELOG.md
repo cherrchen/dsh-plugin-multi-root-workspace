@@ -8,6 +8,19 @@ English: [CHANGELOG.en.md](./CHANGELOG.en.md)
 - 安装方式、受支持的上游运行时与已知限制见 [README](./README.md)。
 - 每个版本的实施证据、编号口径与发布状态见[路线图 §进度总账](./docs/plans/active/2026-09-12-multi-root-workspace.md#进度总账)；GitHub Release 的正文由 `scripts/release-notes.mjs` 从 commit 历史生成，是本文件之外的完整原始清单。
 
+## [0.1.25-beta.2] - 2026-11-27
+
+本版是 `0.1.25` 线的第二个 beta：Files 页签里的 **SSH 远端普通文件行现在可以打开只读预览**——按绑定额外开启、默认关闭，插件自有的 Viewer 对齐宿主文档预览的外观与操作（路径头、Markdown/代码/纯文本视图、源码行号与复制、刷新与可拖宽的目录导航），内容经单一严格的 `remoteFiles.read` 一次性完整读取、由 Connection 二进制附件承载，不落盘、不进入资源流，也不提供编辑、回写、下载、文件监视、搜索或「在应用中打开」。预览只对普通文件开放，超过 2 MiB 整份拒绝而不截断，Markdown 走安全白名单子集，二进制类型只显示元数据；旧版宿主不签发预览能力，文件行保持惰性，设置可以先保存、升级后无需重新勾选。没有配置格式、协议或默认行为层面的不兼容变更：SSH 仍为实验性、默认关闭，远端浏览与预览都按绑定默认关闭，精确支持合同仍为 27 个精确发布。
+
+### Added
+
+- **在 Files 页签只读预览已授权的 SSH 远端文件（按绑定开启，默认关闭）**：在已开启「在文件中列出」的绑定上，可以再勾选 **预览文件（稳定的 SFTP 路径）**；该选项只在同时允许 `read` 时可用，勾选框旁明确它的前提——一项**部署断言**：预览期间不可信进程无法替换目标文件、其父级路径或引入链接。勾选会改变绑定身份，保存后绑定进入「待重新登记」，完成一次真实连接校验后生效。预览只用于普通文件行：标签页按扩展名显示与宿主相同的彩色图标（宿主没有该插槽时退化为纯标题），顶部是路径头，可在 Markdown/代码/纯文本之间切换；源码视图复用宿主代码组件提供行号、复制、换行与语法高亮（≤128 KiB 且 ≤4096 行），Markdown 以安全白名单子集渲染（≤128 KiB/≤4096 节点，不生成图片、链接或任意标记的活动节点，超限回退源码），致命 UTF-8、二进制与不支持的类型一律只显示元数据或「不支持预览」；2 MiB 上限双侧强制、整份拒绝不截断。右侧目录导航复用同一棵 Files 树，只读、可按宽/中/窄三档拖宽，展开、滚动与定位记忆按会话 + 授权代次 + 窗格键控，刷新会读取修改后的字节。关闭标签页、卸载、撤权或重新登记都会立即丢弃内容并让旧地址只剩显式过期态，浏览器重载后旧地址同样不可复活；资源身份是内存中的随机 UUID，不携带会话、环境、根、授权或路径事实，内容帧绝不经过 `ctx.resources`。客户端预算为至多 8 个活资源、4 份保留的查看器内容与 2 个在途读取，无共享缓存、Blob 或落盘。
+- **宿主读取管线与预览授权**：新增单一严格的 `remoteFiles.read` 操作，请求只带浏览身份与非空相对路径，响应是严格元数据加恰好一个 `bytes` 二进制附件；整个读取在同一条自有 SFTP v3 通道上完成，依次做初始、复核与最终三段 Registry 有序准入，校验根与全部祖先的 canonical 路径、只读打开后的常规文件类型与大小、128 KiB 分块的精确长度与 EOF，并在关闭自有通道之后完成最终证明才返回字节（撤权落在清理窗口也不会带出内容）。权限不足、非常规文件、缺失、过大、读取期间变化与内容非法都是文件级失败，只显示行内错误、不清空树。预览授权是独立的 `filePreview: 'stable-path'` opt-in，不随 `read` 或 `directoryListing` 继承；范围仅限个人托管的 SFTP 路径（直连，或带独立 SFTP 路径授权的 Helper），Broker、team 与 hardened 档位一律 fail closed。只有 DSH `0.2.3-alpha.2` 签发 `sftp-binary-v1` 预览能力；其余受支持的精确版本行为不变，文件行保持惰性。
+
+### Changed
+
+- **远端文件行的预览端口接线**：`WorkspaceFilesProvider` 的可选 `preview` 端口在预览能力可用时把远端普通文件行路由到插件自有 Viewer；本地主根与本地附加根的打开路径、错误码与退化行为完全不变，未接线、能力缺席或宿主版本不支持时行为与 `v0.1.25-beta.1` 相同。
+
 ## [0.1.25-beta.1] - 2026-11-26
 
 本版是 `0.1.25` 线的第一个 beta：Files 页签现在可以像浏览本地附加根一样逐层浏览**已授权的 SSH 远端 Workspace Root**——按绑定开启、默认关闭，远端树只读且不做文件监视、搜索、预览或「在应用中打开」，每次列举在 SSH I/O 前后各做一次有序准入；文件树同时重构为按 Provider 分派的三类根实现，本地根的调用拼写、错误码与退化行为保持不变。另修复从 Files 根切换菜单打开的「管理工作区目录」对话框在开启远端模式时丢失远端添加入口，以及高延迟链路上 `remote_copy` 已提交的复制留下 staging 残留。没有配置格式、协议或默认行为层面的不兼容变更；SSH 仍为实验性、默认关闭，远端浏览按绑定默认关闭，精确支持合同仍为 27 个精确发布。
@@ -486,7 +499,8 @@ English: [CHANGELOG.en.md](./CHANGELOG.en.md)
 
 - 发布前外部评审提出的 8 项发现（其中 3 项发布阻断）全部修复，每项各带一个回归测试：登记目录被替换为符号链接后授权转移（引入 `recordedPath`，**重新解析路径不等于重新授权**）、并发修改注册表丢写或复活已撤销的授权（每个主根的变更串行）、刷新不重新检查目录、手输路径被目录选择器覆盖、`reveal` 的应答契约与失败码、重复 id 未校验、主根未纳入嵌套校验、CI 先测后构建。
 
-[Unreleased]: https://github.com/cherrchen/dsh-plugin-multi-root-workspace/compare/v0.1.25-beta.1...HEAD
+[Unreleased]: https://github.com/cherrchen/dsh-plugin-multi-root-workspace/compare/v0.1.25-beta.2...HEAD
+[0.1.25-beta.2]: https://github.com/cherrchen/dsh-plugin-multi-root-workspace/compare/v0.1.25-beta.1...v0.1.25-beta.2
 [0.1.25-beta.1]: https://github.com/cherrchen/dsh-plugin-multi-root-workspace/compare/v0.1.24...v0.1.25-beta.1
 [0.1.24]: https://github.com/cherrchen/dsh-plugin-multi-root-workspace/compare/v0.1.24-beta.6...v0.1.24
 [0.1.24-beta.6]: https://github.com/cherrchen/dsh-plugin-multi-root-workspace/compare/v0.1.24-beta.5...v0.1.24-beta.6

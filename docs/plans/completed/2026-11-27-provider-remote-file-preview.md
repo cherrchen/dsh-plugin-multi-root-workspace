@@ -1,6 +1,6 @@
 # 按 Provider 分派的远端文件预览
 
-> 状态：**P1–P8 完成，PASS WITH LIMITATIONS，待维护者审查，未发布**。基线：`c7707f8f2e80aa75dd30c013af9ada37db505db4`；承接 [ADR-0052](../../decisions/ADR-0052-provider-file-browsing.md) / PR #80。
+> 状态：**P1–P8 完成，PASS WITH LIMITATIONS；已随 PR [#81](https://github.com/cherrchen/dsh-plugin-multi-root-workspace/pull/81)（`4ea9312`）合入 `main`，并随 `v0.1.25-beta.2` 发版**（接受与否由维护者决定）。基线：`c7707f8f2e80aa75dd30c013af9ada37db505db4`；承接 [ADR-0052](../../decisions/ADR-0052-provider-file-browsing.md) / PR #80。
 
 ## 交付范围
 
@@ -49,7 +49,7 @@
 | 项 | 判定 |
 | --- | --- |
 | Implementation Status | **PASS WITH LIMITATIONS** |
-| Production Readiness | **READY FOR MAINTAINER REVIEW**（未发布，不代表已通过跨平台发布验收） |
+| Production Readiness | **RELEASED IN `v0.1.25-beta.2`**（跨平台与真实安装由 tag 触发的 `release.yml` 判定） |
 | Selected Architecture | Architecture D — Plugin-owned Viewer |
 | Native Viewer Fork / Upstream Modifications | **NO / NO** |
 | Remote File Preview / Remote Folder Navigator | **SUPPORTED / SUPPORTED**，限下述已实测组合 |
@@ -61,4 +61,4 @@
 | Unresolved Critical / High Issues | **无已知未关闭项**；上述环境缺口不记为已验证。 |
 | Other Known Limitations | 旧标签页重载不会恢复内容；SFTP v3 无 inode/fd-bound/ABA 防护，部署必须满足稳定路径断言；2 MiB 不截断。 |
 | Release Blockers | 所述验收组合无已知代码阻塞；扩大宿主、平台、Helper 或托管凭据的交付承诺前，需补对应真实环境验证。 |
-| Recommended Next Action | 维护者审查本变更与 ADR；随后按目标发布覆盖范围补 CI 与真实环境车道，不自动进入后续功能或发布。 |
+| Recommended Next Action | 已随 `v0.1.25-beta.2` 发版；扩大宿主、平台、Helper 或托管凭据的交付承诺前，补齐对应的 CI 与真实环境车道。 |

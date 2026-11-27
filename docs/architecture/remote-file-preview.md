@@ -1,6 +1,6 @@
 # 按 Provider 分派的远端文件预览（冻结合同）
 
-> 状态：**已实现，待维护者审查，未发布**。实测组合、旧宿主降级与未验证场景见[验收报告](../plans/completed/2026-11-27-provider-remote-file-preview.md#最终验收报告)；决策见 [ADR-0053](../decisions/ADR-0053-provider-remote-file-preview.md)，承接 [ADR-0052 的远端浏览分层](file-browsing-providers.md)。
+> 状态：**已实现，随 `v0.1.25-beta.2` 发版**（PR [#81](https://github.com/cherrchen/dsh-plugin-multi-root-workspace/pull/81)，`4ea9312`；接受与否由维护者决定）。实测组合、旧宿主降级与未验证场景见[验收报告](../plans/completed/2026-11-27-provider-remote-file-preview.md#最终验收报告)；决策见 [ADR-0053](../decisions/ADR-0053-provider-remote-file-preview.md)，承接 [ADR-0052 的远端浏览分层](file-browsing-providers.md)。
 
 远端文件预览让 Files 页签里的 SSH 远端**普通文件行**经插件自有的 Resource/Viewer 打开只读内容，并复用同一棵 `FilesPane` 做远端 Navigator。Viewer 的外层视觉与基础交互对齐宿主文档预览（38px 路径头、查看器选择、换行/刷新/目录树工具、居中状态、源码/Markdown 排版、可拖宽的 push/overlay/fill Navigator），但这是插件独立实现的**视觉适配**，不是复制或挂载上游 Viewer 内部组件树；远端授权、一次性完整读取、安全子集与无 `open-in-app` 的合同不变。全部路径都建在既有构件上：DSH Tab/Dockkit、`resources`/`sidebarRightTabs`、Connection binary attachment、托管的 SFTP v3 通道与 Registry 逐次有序准入。**不引入**编辑、落盘、回写、watch、轮询、搜索、LSP、diff、下载、挂载、同步、新 transport/凭据或上游修改/原生 Viewer fork。
 
