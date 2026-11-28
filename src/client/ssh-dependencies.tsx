@@ -11,7 +11,7 @@ interface DependencyNoticeProps {
   readonly view: SshDependencyView
   readonly onCheck: () => void | Promise<void>
   /** Host RPC implementation of the fixed install/upgrade operation. */
-  readonly onInstall?: (() => Promise<{ readonly status: 'ready' | 'restart-required' }>) | undefined
+  readonly onInstall?: (() => Promise<DependencyInstallResult>) | undefined
   readonly checking?: boolean
   /** Inline management surfaces auto-open the dedicated prompt; an explicit repair dialog does not nest another one. */
   readonly autoPrompt?: boolean
@@ -23,6 +23,11 @@ interface DependencyNoticeProps {
 }
 
 type Operation = 'install' | 'restart' | undefined
+
+type DependencyInstallResult = {
+  readonly status: 'ready' | 'restart-required'
+  readonly dependencies?: SshDependencyView
+}
 
 const repairable = new Set(['ssh-deps-missing', 'ssh-deps-partial', 'ssh-deps-version'])
 const dismissStorageKey = 'dsh.multi-root-workspace.ssh-upgrade-dismissed.v1'
@@ -65,7 +70,7 @@ function rememberDismissed(key: string): void {
  */
 export function useSshDependencyFlow(view: SshDependencyView, options: {
   readonly onCheck: () => void | Promise<void>
-  readonly onInstall?: (() => Promise<{ readonly status: 'ready' | 'restart-required' }>) | undefined
+  readonly onInstall?: (() => Promise<DependencyInstallResult>) | undefined
   readonly autoPrompt?: boolean
 }) {
   const autoPrompt = options.autoPrompt !== false
@@ -74,17 +79,20 @@ export function useSshDependencyFlow(view: SshDependencyView, options: {
   const [operationError, setOperationError] = useState<string>()
   const [launcherPhase, setLauncherPhase] = useState<SshInstallPhase>()
   const [restartRequested, setRestartRequested] = useState(false)
+  const [operationTarget, setOperationTarget] = useState<{ readonly baseKey: string; readonly view: SshDependencyView }>()
   const [upgradeOpen, setUpgradeOpen] = useState(false)
   const [restartOpen, setRestartOpen] = useState(false)
   const [closedRestartKey, setClosedRestartKey] = useState<string>()
-  const key = fingerprintOf(view)
+  const baseKey = fingerprintOf(view)
+  const effectiveView = operationTarget?.baseKey === baseKey ? operationTarget.view : view
+  const key = fingerprintOf(effectiveView)
 
-  const hostInstall = view.capabilities?.install === true && options.onInstall !== undefined
+  const hostInstall = effectiveView.capabilities?.install === true && options.onInstall !== undefined
   const launcherInstall = launcher?.capabilities.install === true && launcher.install !== undefined
   const installAvailable = hostInstall || launcherInstall
   const restartAvailable = launcher?.capabilities.restart === true && launcher.restart !== undefined
-  const actionable = repairable.has(view.code) && view.profile !== undefined && view.release !== undefined
-  const restartRequired = restartRequested || view.code === 'ssh-deps-restart'
+  const actionable = repairable.has(effectiveView.code) && effectiveView.profile !== undefined && effectiveView.release !== undefined
+  const restartRequired = restartRequested || effectiveView.code === 'ssh-deps-restart'
 
   useEffect(() => {
     if (launcher === undefined) return undefined
@@ -92,21 +100,21 @@ export function useSshDependencyFlow(view: SshDependencyView, options: {
   }, [launcher])
 
   useEffect(() => {
-    if (autoPrompt && view.code === 'ssh-deps-version' && !readDismissed().has(key) && !restartRequested) setUpgradeOpen(true)
-  }, [autoPrompt, key, restartRequested, view.code])
+    if (autoPrompt && effectiveView.code === 'ssh-deps-version' && !readDismissed().has(key) && !restartRequested) setUpgradeOpen(true)
+  }, [autoPrompt, key, restartRequested, effectiveView.code])
 
   useEffect(() => {
     if (restartRequested) setRestartOpen(true)
   }, [restartRequested])
 
   useEffect(() => {
-    if (autoPrompt && view.code === 'ssh-deps-restart' && closedRestartKey !== key) setRestartOpen(true)
-    if (view.code === 'ready') {
+    if (autoPrompt && effectiveView.code === 'ssh-deps-restart' && closedRestartKey !== key) setRestartOpen(true)
+    if (effectiveView.code === 'ready') {
       setRestartRequested(false)
       setRestartOpen(false)
       setUpgradeOpen(false)
     }
-  }, [autoPrompt, closedRestartKey, key, view.code])
+  }, [autoPrompt, closedRestartKey, key, effectiveView.code])
 
   const dismissUpgrade = useCallback(() => {
     rememberDismissed(key)
@@ -123,10 +131,14 @@ export function useSshDependencyFlow(view: SshDependencyView, options: {
     setOperation('install')
     setOperationError(undefined)
     try {
-      const target = { profile: view.profile!, release: view.release! }
+      const target = { profile: effectiveView.profile!, release: effectiveView.release! }
       const result = hostInstall
         ? await options.onInstall!()
         : await launcher!.install!(target)
+      const dependencies = 'dependencies' in result && result.dependencies !== undefined
+        ? result.dependencies
+        : { ...effectiveView, code: result.status === 'ready' ? 'ready' as const : 'ssh-deps-restart' as const }
+      setOperationTarget({ baseKey, view: dependencies })
       if (result.status === 'ready') {
         setUpgradeOpen(false)
         await options.onCheck()
@@ -140,23 +152,24 @@ export function useSshDependencyFlow(view: SshDependencyView, options: {
     } finally {
       setOperation(undefined)
     }
-  }, [actionable, hostInstall, installAvailable, launcher, operation, options, view.profile, view.release])
+  }, [actionable, baseKey, effectiveView, hostInstall, installAvailable, launcher, operation, options])
 
   const restartHost = useCallback(async (): Promise<void> => {
-    if (!restartAvailable || operation !== undefined || view.profile === undefined || view.release === undefined) return
+    if (!restartAvailable || operation !== undefined || effectiveView.profile === undefined || effectiveView.release === undefined) return
     setOperation('restart')
     setOperationError(undefined)
     try {
-      await launcher!.restart!({ profile: view.profile, release: view.release })
+      await launcher!.restart!({ profile: effectiveView.profile, release: effectiveView.release })
       await options.onCheck()
     } catch (cause: unknown) {
       setOperationError(cause instanceof Error ? cause.message : String(cause))
     } finally {
       setOperation(undefined)
     }
-  }, [launcher, operation, options, restartAvailable, view.profile, view.release])
+  }, [effectiveView, launcher, operation, options, restartAvailable])
 
   return {
+    view: effectiveView,
     actionable, installAvailable, restartAvailable, restartRequired,
     busy: operation !== undefined, installing: operation === 'install', restarting: operation === 'restart',
     operationError, upgradeOpen, restartOpen, launcherPhase,
@@ -226,9 +239,7 @@ function UpgradeContent({ flow, view, command, status, onLater, t }: {
     <div className="mrfw-sshDependencyActions">
       {flow.installAvailable ? <Button variant="primary" size="sm" disabled={flow.busy} loading={flow.installing}
         onClick={() => void flow.installOrUpgrade()}>{t('ssh.upgradeRuntime')}</Button>
-        : command === undefined ? null : <Button variant="primary" size="sm" onClick={async () => {
-          try { await navigator.clipboard.writeText(command) } catch { /* the inline fallback reports clipboard denial */ }
-        }}>{t('ssh.copyUpgradeCommand')}</Button>}
+        : command === undefined ? null : <CopyCommand command={command} primary t={t} label="ssh.copyUpgradeCommand" />}
       <Button variant="outline" size="sm" disabled={flow.busy} onClick={() => { flow.dismissUpgrade(); onLater?.() }}>{t('ssh.later')}</Button>
     </div>
     <Progress flow={flow} t={t} />
@@ -263,36 +274,37 @@ function RestartContent({ flow, view, checking, onCheck, status, onLater, t }: {
 
 export function SshDependencyNotice({ view, onCheck, onInstall, checking = false, autoPrompt = true, surface = 'inline', onDismiss, t }: DependencyNoticeProps): ReactNode {
   const flow = useSshDependencyFlow(view, { onCheck, onInstall, autoPrompt })
-  const command = view.command
-  const actionLabel = view.code === 'ssh-deps-version' ? 'ssh.upgradeRuntime'
-    : view.code === 'ssh-deps-partial' ? 'ssh.repairRuntime' : 'ssh.installRuntime'
+  const current = flow.view
+  const command = current.command
+  const actionLabel = current.code === 'ssh-deps-version' ? 'ssh.upgradeRuntime'
+    : current.code === 'ssh-deps-partial' ? 'ssh.repairRuntime' : 'ssh.installRuntime'
   const status = flow.operationError === undefined ? undefined
     : t('ssh.installPhase.failed', { message: flow.operationError })
   if (surface === 'dialog' && flow.restartRequired) {
-    return <RestartContent flow={flow} view={view} checking={checking} onCheck={onCheck} status={status} onLater={onDismiss} t={t} />
+    return <RestartContent flow={flow} view={current} checking={checking} onCheck={onCheck} status={status} onLater={onDismiss} t={t} />
   }
-  if (surface === 'dialog' && view.code === 'ssh-deps-version') {
-    return <UpgradeContent flow={flow} view={view} command={command} status={status} onLater={onDismiss} t={t} />
+  if (surface === 'dialog' && current.code === 'ssh-deps-version') {
+    return <UpgradeContent flow={flow} view={current} command={command} status={status} onLater={onDismiss} t={t} />
   }
   return <div className="mrfw-wizStack">
-    <p className="mrfw-sshDependencySummary" role="status">{t(errorKeyOf(view.code))}</p>
-    <ProfileLine view={view} t={t} />
-    <Packages view={view} t={t} />
+    <p className="mrfw-sshDependencySummary" role="status">{t(errorKeyOf(current.code))}</p>
+    <ProfileLine view={current} t={t} />
+    <Packages view={current} t={t} />
     {command === undefined ? null : <p className="mrfw-note">{t(flow.installAvailable ? 'ssh.dependenciesInstallManual' : 'ssh.dependenciesInstall')}</p>}
-    {command === undefined && view.code !== 'ssh-deps-restart'
-      ? <p className="mrfw-note">{t(view.code.startsWith('ssh-host-') ? 'ssh.remedy.host' : 'ssh.dependenciesNoCommand')}</p> : null}
+    {command === undefined && current.code !== 'ssh-deps-restart'
+      ? <p className="mrfw-note">{t(current.code.startsWith('ssh-host-') ? 'ssh.remedy.host' : 'ssh.dependenciesNoCommand')}</p> : null}
     {command === undefined ? null : <code className="mrfw-sshDependencyCommand">{command}</code>}
     <div className="mrfw-sshDependencyActions">
-      {flow.actionable && flow.installAvailable ? <Button variant="primary" size="sm" disabled={flow.busy} loading={flow.installing}
+      {flow.actionable && !flow.restartRequired && flow.installAvailable ? <Button variant="primary" size="sm" disabled={flow.busy} loading={flow.installing}
         onClick={() => {
-          if (view.code === 'ssh-deps-version') flow.setUpgradeOpen(true)
+          if (current.code === 'ssh-deps-version') flow.setUpgradeOpen(true)
           else void flow.installOrUpgrade()
         }}>{t(actionLabel)}</Button> : null}
-      {view.code === 'ssh-deps-version' && !flow.installAvailable ? <Button variant="outline" size="sm"
+      {current.code === 'ssh-deps-version' && !flow.restartRequired && !flow.installAvailable ? <Button variant="outline" size="sm"
         onClick={() => { flow.setUpgradeOpen(true) }}>{t(actionLabel)}</Button> : null}
-      {view.code === 'ssh-deps-restart' ? <Button variant="primary" size="sm" onClick={flow.openRestart}>{t('ssh.restartGuidance')}</Button> : null}
+      {flow.restartRequired ? <Button variant="primary" size="sm" onClick={flow.openRestart}>{t('ssh.restartGuidance')}</Button> : null}
       {command === undefined ? null : <CopyCommand command={command} primary={!flow.installAvailable} t={t}
-          label={view.code === 'ssh-deps-version' ? 'ssh.copyUpgradeCommand' : 'ssh.copyInstallCommand'} />}
+          label={current.code === 'ssh-deps-version' ? 'ssh.copyUpgradeCommand' : 'ssh.copyInstallCommand'} />}
       <Button variant="outline" size="sm" disabled={checking || flow.busy} loading={checking} onClick={onCheck}>{t('ssh.recheckDependencies')}</Button>
     </div>
     <Progress flow={flow} t={t} />
@@ -300,12 +312,12 @@ export function SshDependencyNotice({ view, onCheck, onInstall, checking = false
 
     <Modal open={surface !== 'dialog' && flow.upgradeOpen} title={t('ssh.upgradeTitle')} closeLabel={t('panel.close')}
       className="mrfw-sshDependencyDialog" onClose={flow.dismissUpgrade}>
-      <UpgradeContent flow={flow} view={view} command={command} status={status} t={t} />
+      <UpgradeContent flow={flow} view={current} command={command} status={status} t={t} />
     </Modal>
 
     <Modal open={surface !== 'dialog' && flow.restartOpen} title={t('ssh.restartTitle')} closeLabel={t('panel.close')}
       className="mrfw-sshDependencyDialog" onClose={flow.closeRestart}>
-      <RestartContent flow={flow} view={view} checking={checking} onCheck={onCheck} status={status} t={t} />
+      <RestartContent flow={flow} view={current} checking={checking} onCheck={onCheck} status={status} t={t} />
     </Modal>
   </div>
 }

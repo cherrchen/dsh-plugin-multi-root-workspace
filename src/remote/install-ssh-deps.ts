@@ -148,22 +148,48 @@ export function parseSshDependencyInstallArgs(argv: readonly string[]): SshDepen
 /** Captured output per stream. The installer only classifies success; it never needs an unbounded package-manager log in memory. */
 const OUTPUT_CAPTURE_LIMIT = 8192
 
+/** Upper bound for the version preflight or the fixed profile write. A hung package manager must not pin the Host repair queue forever. */
+export const SSH_DEPENDENCY_INSTALL_TIMEOUT_MS = 5 * 60_000
+
 function boundedAppend(current: string, chunk: string): string {
   if (current.length >= OUTPUT_CAPTURE_LIMIT) return current
   return current + chunk.slice(0, OUTPUT_CAPTURE_LIMIT - current.length)
 }
 
-function runDsh(file: string, args: readonly string[], options: { readonly cwd: string; readonly env: NodeJS.ProcessEnv }): Promise<{ code: number | null; stdout: string; stderr: string }> {
+function runDsh(file: string, args: readonly string[], options: { readonly cwd: string; readonly env: NodeJS.ProcessEnv; readonly timeoutMs: number }): Promise<{ code: number | null; stdout: string; stderr: string; timedOut: boolean }> {
   return new Promise((resolvePromise, reject) => {
-    const child = spawn(file, [...args], { cwd: options.cwd, env: options.env, stdio: ['ignore', 'pipe', 'pipe'] })
+    const useHostRuntime = /\.[cm]?js$/i.test(file) && isAbsolute(process.execPath) && existsSync(process.execPath)
+    const executable = useHostRuntime ? process.execPath : file
+    const executableArgs = useHostRuntime ? [file, ...args] : [...args]
+    const env = useHostRuntime ? { ...options.env, ELECTRON_RUN_AS_NODE: '1' } : options.env
+    const child = spawn(executable, executableArgs, { cwd: options.cwd, env, stdio: ['ignore', 'pipe', 'pipe'] })
     let stdout = ''
     let stderr = ''
+    let timedOut = false
+    let forceKill: NodeJS.Timeout | undefined
+    const timeout = setTimeout(() => {
+      timedOut = true
+      try { child.kill('SIGTERM') } catch { /* the close event decides the result */ }
+      forceKill = setTimeout(() => {
+        try { child.kill('SIGKILL') } catch { /* the close event decides the result */ }
+      }, 2_000)
+      forceKill.unref()
+    }, options.timeoutMs)
+    timeout.unref()
     child.stdout?.setEncoding('utf8')
     child.stderr?.setEncoding('utf8')
     child.stdout?.on('data', (chunk: string) => { stdout = boundedAppend(stdout, chunk) })
     child.stderr?.on('data', (chunk: string) => { stderr = boundedAppend(stderr, chunk) })
-    child.once('error', reject)
-    child.once('close', code => { resolvePromise({ code, stdout, stderr }) })
+    child.once('error', error => {
+      clearTimeout(timeout)
+      if (forceKill !== undefined) clearTimeout(forceKill)
+      reject(error)
+    })
+    child.once('close', code => {
+      clearTimeout(timeout)
+      if (forceKill !== undefined) clearTimeout(forceKill)
+      resolvePromise({ code, stdout, stderr, timedOut })
+    })
   })
 }
 
@@ -203,14 +229,16 @@ function alignedProfile(dir: string, release: string): readonly SshDependencyPac
  */
 export async function runSshDependencyInstall(
   request: SshDependencyInstallRequest,
-  options: { readonly output?: (text: string, stream: 'stdout' | 'stderr') => void } = {},
+  options: { readonly output?: (text: string, stream: 'stdout' | 'stderr') => void; readonly timeoutMs?: number } = {},
 ): Promise<SshDependencyInstallResult> {
   const dir = resolveInstallProfileDir(request.home, request.profile)
   const env = { ...process.env, DSH_HOME: request.home }
   const cwd = request.cwd ?? request.home
-  const version = await runDsh(request.dsh, ['--version'], { cwd, env }).catch((error: unknown) => {
+  const timeoutMs = options.timeoutMs ?? SSH_DEPENDENCY_INSTALL_TIMEOUT_MS
+  const version = await runDsh(request.dsh, ['--version'], { cwd, env, timeoutMs }).catch((error: unknown) => {
     fail('dsh-unavailable', `cannot run the DSH CLI: ${error instanceof Error ? error.message : String(error)}`)
   })
+  if (version.timedOut) fail('dsh-unavailable', `the DSH CLI ${request.dsh} --version timed out`)
   if (version.code !== 0) fail('dsh-unavailable', `the DSH CLI ${request.dsh} --version failed`)
   if (version.stdout.trim() !== request.release) {
     fail('release-mismatch', `the DSH CLI reports ${JSON.stringify(version.stdout.trim())}, expected ${request.release}`)
@@ -219,12 +247,15 @@ export async function runSshDependencyInstall(
   if (already !== undefined) return { status: 'ready', profile: request.profile, release: request.release, packages: already }
   const args = ['plugin', '--profile', request.profile, 'add', '--save-exact',
     ...SSH_PEER_PACKAGES.map(name => `${name}@${request.release}`)]
-  const result = await runDsh(request.dsh, args, { cwd, env }).catch((error: unknown) => {
+  const result = await runDsh(request.dsh, args, { cwd, env, timeoutMs }).catch((error: unknown) => {
     fail('install-failed', `cannot run the DSH CLI: ${error instanceof Error ? error.message : String(error)}`)
   })
   const output = `${result.stdout}${result.stderr}`
   for (const line of output.split('\n')) {
     if (line !== '') options.output?.(line, result.stderr.includes(line) ? 'stderr' : 'stdout')
+  }
+  if (result.timedOut) {
+    fail('install-timeout', `dsh plugin add did not finish within ${timeoutMs}ms; the package-manager process was stopped`)
   }
   if (result.code !== 0) {
     fail('install-failed', `dsh plugin add failed with exit code ${String(result.code)}; diagnostics: ${output.trim().slice(-400)}`)

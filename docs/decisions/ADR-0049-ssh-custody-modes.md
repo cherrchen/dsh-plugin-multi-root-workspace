@@ -107,7 +107,7 @@ Helper 安装诊断区分远端写入、完整性校验和 Host CAS 登记。在
 
 2026-11-23 的修订把“完全退出 Host 后手动执行命令”作为唯一修复路径，并保持“RPC 不运行本地包管理器”的保守边界。实际用户体验把 Host 升级后的重新对齐混同在初次安装里，且假想的 v1 Desktop 启动器把安装与重启绑定为一个操作。现修订如下：
 
-- 新增用户显式触发的固定端点 `sshDependencyInstall`。这是对原保守边界的**窄化例外**，不是通用包管理 RPC：请求体为空且 strict；包集合固定为四个 SSH 可选包；版本只能来自当前 Host 的 compat release 且必须通过 `SUPPORTED_SSH_RELEASES`；Profile、home、cwd 与 CLI 只从可信 `profileContext` / Host 安装锚点推导；执行使用结构化 argv，不拼接 shell 字符串；同一目标并发合并、不同写入串行；包管理器输出在 Host 内有界捕获，原始输出和环境信息不进入面板响应；四包已对齐时不重写。
+- 新增用户显式触发的固定端点 `sshDependencyInstall`。这是对原保守边界的**窄化例外**，不是通用包管理 RPC：请求体为空且 strict；包集合固定为四个 SSH 可选包；版本只能来自当前 Host 的 compat release 且必须通过 `SUPPORTED_SSH_RELEASES`；Profile、home、cwd 与 CLI 只从可信 `profileContext` / Host 安装锚点推导；执行使用结构化 argv，不拼接 shell 字符串；JavaScript CLI 由当前 Host 的运行时执行而不是 PATH 解析；版本预检和写入各有五分钟上限并终止超时子进程；同一目标并发合并、不同写入串行；包管理器输出在 Host 内有界捕获，原始输出和环境信息不进入面板响应；四包已对齐时不重写。
 - 继续复用 `src/remote/install-ssh-deps.ts` 的安装核心，而不是改调上游 `dsh-plugin-manager/operations`。理由仍是 2026-11-23 的兼容性结论：`operations` 是 CLI 的低层实现细节，跨全部 `SUPPORTED_SSH_RELEASES` 的形状与事务行为没有公开冻结；`PluginManager.installBundle()` 要求 `dsh.bundle`，会拒绝这些普通 npm 依赖；即使磁盘写入成功，当前进程的模块解析快照与已加载模块也不能运行时原子替换。统一走 CLI 的 Profile 锁与 hoisted 依赖闭包，风险边界更小。
 - 成功后不做热激活。只要写入发生，结果一律是 `restart-required`；未写入但磁盘对齐时，只有当前进程已经加载同一状态才报告 `ready`。普通依赖的运行时热激活仍被明确否决。
 - `window.dshDesktop.sshDependencies` / `window.deepseekDesktop.sshDependencies` 接缝升级为协议 v2：`capabilities.install` 与 `capabilities.restart` 独立表达，声明能力时必须提供对应方法；`restart` 是显式重启操作，不得由重新执行安装冒充。v1 合体协议从未在上游 Desktop release 中实现，因此直接替换而不保留兼容分支。没有重启能力时，客户端必须显示手动完全退出/重新启动指引，不能展示假按钮。

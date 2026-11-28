@@ -3,7 +3,7 @@ import { join } from 'node:path'
 
 const release = '0.2.2-rc.5'
 
-export function fakeDsh(root: string, options: { release?: string; fail?: boolean; skip?: string; noEntry?: string; noisyFailure?: boolean } = {}): string {
+export function fakeDsh(root: string, options: { release?: string; fail?: boolean; skip?: string; noEntry?: string; noisyFailure?: boolean; hang?: boolean } = {}): string {
   const path = join(root, 'fake dsh.mjs')
   writeFileSync(path, `#!/usr/bin/env node
 import { appendFileSync, mkdirSync, writeFileSync } from 'node:fs'
@@ -12,6 +12,8 @@ const args = process.argv.slice(2)
 const log = process.env.FAKE_LOG
 const argsLog = process.env.FAKE_ARGS_LOG
 if (args.includes('--version')) { process.stdout.write(${JSON.stringify(options.release ?? release)} + '\\n'); process.exit(0) }
+if (${options.hang === true ? 'true' : 'false'}) setInterval(() => {}, 1000)
+else {
 const profile = args[args.indexOf('--profile') + 1]
 const home = process.env.DSH_HOME
 const dir = join(home, 'profiles', profile)
@@ -33,6 +35,7 @@ if (${options.noisyFailure === true ? 'true' : 'false'}) process.stderr.write('x
 if (log !== undefined) appendFileSync(log, 'add\\n')
 if (argsLog !== undefined) appendFileSync(argsLog, JSON.stringify(args) + '\\n')
 process.exit(${options.fail === true ? 1 : 0})
+}
 `, { mode: 0o755 })
   if (process.platform !== 'win32') chmodSync(path, 0o755)
   return path

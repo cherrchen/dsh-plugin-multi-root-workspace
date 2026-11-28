@@ -32,9 +32,9 @@ function host(version = release): Context {
   return ctx
 }
 
-function prepare(ctx: Context, home: string, profile = 'web'): string {
+function prepare(ctx: Context, home: string, profile = 'web', fakeOptions: Parameters<typeof fakeDsh>[1] = {}): string {
   const dir = provideSshProfile(ctx, home, profile, release)
-  const cli = fakeDsh(home)
+  const cli = fakeDsh(home, fakeOptions)
   const target = join(home, 'host', 'lib', 'bin.js')
   writeFileSync(target, readFileSync(cli, 'utf8'))
   chmodSync(target, 0o755)
@@ -100,6 +100,23 @@ describe.skipIf(process.platform === 'win32')('installOrUpgradeSshDependencies',
       await expect(one).resolves.toMatchObject({ status: 'restart-required' })
       await expect(two).resolves.toMatchObject({ status: 'restart-required' })
       expect(install).toHaveBeenCalledTimes(1)
+    } finally { await ctx.fiber.dispose() }
+  })
+
+  it('times out a hung write and lets a later repair attempt use the queue again', async () => {
+    const base = root()
+    const home = join(base, 'home')
+    const ctx = host()
+    try {
+      installFixtureSsh(prepare(ctx, home, 'hung', { hang: true }), '0.2.2-rc.4')
+      captureSshProfile(ctx)
+      await expect(installOrUpgradeSshDependencies(ctx, { timeoutMs: 1_000 })).rejects.toMatchObject({ code: 'ssh-deps-install-failed' })
+
+      const cli = fakeDsh(home)
+      const target = join(home, 'host', 'lib', 'bin.js')
+      writeFileSync(target, readFileSync(cli, 'utf8'))
+      chmodSync(target, 0o755)
+      await expect(installOrUpgradeSshDependencies(ctx, { timeoutMs: 5_000 })).resolves.toMatchObject({ status: 'restart-required' })
     } finally { await ctx.fiber.dispose() }
   })
 

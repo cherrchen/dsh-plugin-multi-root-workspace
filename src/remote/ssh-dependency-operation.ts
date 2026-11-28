@@ -22,6 +22,8 @@ type Installer = (request: SshDependencyInstallRequest) => Promise<SshDependency
 
 export interface SshDependencyOperationDeps {
   readonly install?: Installer
+  /** Test-only installer bound; production uses the fixed five-minute upper bound. */
+  readonly timeoutMs?: number
 }
 
 let writeChain: Promise<unknown> = Promise.resolve()
@@ -86,7 +88,7 @@ export async function installOrUpgradeSshDependencies(
   const key = keyOf(target)
   const existing = active.get(key)
   if (existing !== undefined) return existing
-  const install = deps.install ?? runSshDependencyInstall
+  const install = deps.install ?? (async request => runSshDependencyInstall(request, deps.timeoutMs === undefined ? {} : { timeoutMs: deps.timeoutMs }))
   const queued = writeChain.catch(() => undefined).then(() => runRepair(ctx, target, install))
   active.set(key, queued)
   writeChain = queued.catch(() => undefined)

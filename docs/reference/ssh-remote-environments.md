@@ -16,9 +16,9 @@
 
 ### Host 一键修复与 Desktop 重启接缝
 
-`sshDependencyInstall` 是面板通道和插件设置通道上的固定修复端点。请求体为空且 strict：调用方不能传包名、版本、argv、shell 命令、Profile、home 或 cwd。Host 每次从可信 `profileContext`、当前 compat release 与 `SUPPORTED_SSH_RELEASES` 重新推导目标；Desktop 使用 `process.resourcesPath/runtime/cli/bin/dsh`，Web 从当前 Host 的 `@deepseek-ai/dsh` manifest 解析 `bin.dsh`。端点复用 `src/remote/install-ssh-deps.ts` 的安装核心：先核对 `dsh --version`，再以结构化 argv 执行一次 `dsh plugin --profile <name> add --save-exact <四个固定包>@<Host 精确版本>`。它不经过 shell 字符串拼接，不接收上游 `PluginManager.installBundle()`（普通 npm 依赖会被 `not-bundle` 拒绝）。
+`sshDependencyInstall` 是面板通道和插件设置通道上的固定修复端点。请求体为空且 strict：调用方不能传包名、版本、argv、shell 命令、Profile、home 或 cwd。Host 每次从可信 `profileContext`、当前 compat release 与 `SUPPORTED_SSH_RELEASES` 重新推导目标；Desktop 使用 `process.resourcesPath/runtime/cli/bin/dsh`，Web 从当前 Host 的 `@deepseek-ai/dsh` manifest 解析 `bin.dsh`。端点复用 `src/remote/install-ssh-deps.ts` 的安装核心：JavaScript CLI 入口由当前 Host 的 `process.execPath` 启动（Desktop 同时设置 `ELECTRON_RUN_AS_NODE=1`），不依赖 PATH 中的 `node`；先核对 `dsh --version`，再以结构化 argv 执行一次 `dsh plugin --profile <name> add --save-exact <四个固定包>@<Host 精确版本>`。它不经过 shell 字符串拼接，不接收上游 `PluginManager.installBundle()`（普通 npm 依赖会被 `not-bundle` 拒绝）。
 
-同一目标的并发调用合并，不同写入串行化。四包已对齐时安装核心不重写；如果当前进程尚未加载这份磁盘状态，端点仍返回 `restart-required`。真正写入后不做热激活，也统一返回 `restart-required`。结果只含 `ready | restart-required` 和新的依赖视图；包管理器输出在 Host 内有界捕获，原始输出、环境变量和完整日志不进入面板响应。`ssh-deps-missing`、`ssh-deps-partial` 与 `ssh-deps-version` 可自动修复；`ssh-deps-private`、`ssh-deps-resolution`、`ssh-host-unsupported` 与 `ssh-host-platform` 不提供一键按钮。
+同一目标的并发调用合并，不同写入串行化。版本预检和固定写入各有五分钟执行上限；超时后停止子进程并释放重试队列。四包已对齐时安装核心不重写；如果当前进程尚未加载这份磁盘状态，端点仍返回 `restart-required`。真正写入后不做热激活，也统一返回 `restart-required`。结果只含 `ready | restart-required` 和新的依赖视图；包管理器输出在 Host 内有界捕获，原始输出、环境变量和完整日志不进入面板响应。`ssh-deps-missing`、`ssh-deps-partial` 与 `ssh-deps-version` 可自动修复；`ssh-deps-private`、`ssh-deps-resolution`、`ssh-host-unsupported` 与 `ssh-host-platform` 不提供一键按钮。
 
 Desktop 启动器只补充**可选能力**，不再把安装和重启绑成单体操作。能力对象是 `window.dshDesktop.sshDependencies`（Rivetdeck 桥为 `window.deepseekDesktop.sshDependencies`），协议 v2 形状固定为：
 

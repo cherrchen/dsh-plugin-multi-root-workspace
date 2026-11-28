@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 /** The split SSH dependency install/upgrade/restart flow and its degradation paths. */
-import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { SshDependencyNotice } from '../src/client/ssh-dependencies.tsx'
 import type { SshDependencyView } from '../src/remote/ssh-diagnostics.ts'
@@ -115,6 +115,22 @@ describe('SshDependencyNotice split flow', () => {
     expect(screen.getByRole('button', { name: 'ssh.recheckAfterRestart' })).toBeTruthy()
   })
 
+  it('uses the operation dependency view so Later returns to restart guidance, not the stale upgrade action', async () => {
+    const initial = view('ssh-deps-version')
+    const restarted: SshDependencyView = { ...initial, code: 'ssh-deps-restart' }
+    const onInstall = vi.fn(async () => ({ status: 'restart-required' as const, dependencies: restarted }))
+    render(<SshDependencyNotice view={initial} onCheck={() => {}} onInstall={onInstall} t={t} />)
+    const upgradeButtons = screen.getAllByRole('button', { name: 'ssh.upgradeRuntime' })
+    fireEvent.click(upgradeButtons[upgradeButtons.length - 1]!)
+    expect(await screen.findByText('ssh.manualRestartSummary')).toBeTruthy()
+    fireEvent.click(screen.getAllByRole('button', { name: 'ssh.later' })[0]!)
+    await waitFor(() => expect(screen.queryByText('ssh.restartTitle')).toBeNull())
+    expect(screen.queryByRole('button', { name: 'ssh.upgradeRuntime' })).toBeNull()
+    expect(screen.getByText('error.ssh-deps-restart')).toBeTruthy()
+    fireEvent.click(screen.getByRole('button', { name: 'ssh.restartGuidance' }))
+    expect(await screen.findByText('ssh.manualRestartSummary')).toBeTruthy()
+  })
+
   it('shows and invokes an explicit Restart Host button when restart capability exists', async () => {
     const restart = vi.fn(async (request: { profile: string; release: string }) => ({ status: 'done', ...request }))
     const install = vi.fn(async (request: { profile: string; release: string }) => ({ status: 'installed', ...request }))
@@ -173,6 +189,44 @@ describe('SshDependencyNotice split flow', () => {
     expect(screen.getByText('ssh.upgradeTitle')).toBeTruthy()
     expect(screen.getAllByRole('button', { name: 'ssh.copyUpgradeCommand' }).length).toBeGreaterThan(0)
     expect(screen.getAllByText('upgrade command').length).toBeGreaterThan(0)
+  })
+
+  it('reports clipboard success and failure for the upgrade command copy action', async () => {
+    const clipboard = Object.getOwnPropertyDescriptor(navigator, 'clipboard')
+    const writeText = vi.fn(async () => {})
+    Object.defineProperty(navigator, 'clipboard', { configurable: true, value: { writeText } })
+    try {
+      const rendered = render(<SshDependencyNotice view={view('ssh-deps-version', { command: 'upgrade command', install: false })} onCheck={() => {}} t={t} />)
+      const dialog = screen.getByRole('dialog', { name: 'ssh.upgradeTitle' })
+      fireEvent.click(within(dialog).getByRole('button', { name: 'ssh.copyUpgradeCommand' }))
+      expect(await within(dialog).findByText('ssh.commandCopied')).toBeTruthy()
+      expect(writeText).toHaveBeenCalledExactlyOnceWith('upgrade command')
+      rendered.unmount()
+
+      writeText.mockRejectedValueOnce(new Error('denied'))
+      render(<SshDependencyNotice view={view('ssh-deps-version', { command: 'upgrade command', install: false })} onCheck={() => {}} t={t} />)
+      const failedDialog = screen.getByRole('dialog', { name: 'ssh.upgradeTitle' })
+      fireEvent.click(within(failedDialog).getByRole('button', { name: 'ssh.copyUpgradeCommand' }))
+      expect(await within(failedDialog).findByText('error.copy-failed')).toBeTruthy()
+    } finally {
+      if (clipboard === undefined) Reflect.deleteProperty(navigator, 'clipboard')
+      else Object.defineProperty(navigator, 'clipboard', clipboard)
+    }
+  })
+
+  it('ignores a null launcher capabilities object and keeps the copy fallback', () => {
+    ;(window as LauncherWindow).dshDesktop = {
+      sshDependencies: {
+        protocolVersion: 2,
+        capabilities: null,
+        install: vi.fn(),
+        restart: vi.fn(),
+        subscribe: () => () => {},
+      },
+    }
+    render(<SshDependencyNotice view={view('ssh-deps-missing', { command: 'install command', install: false })} onCheck={() => {}} t={t} />)
+    expect(screen.queryByRole('button', { name: 'ssh.installRuntime' })).toBeNull()
+    expect(screen.getByRole('button', { name: 'ssh.copyInstallCommand' })).toBeTruthy()
   })
 
   it('uses a protocol-v2 launcher install when Host RPC install is unavailable and ignores v1', async () => {

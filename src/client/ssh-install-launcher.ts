@@ -79,7 +79,7 @@ function launcherFrom(value: unknown): SshInstallLauncher | undefined {
   const candidate = value as Record<string, unknown>
   if (candidate.protocolVersion !== 2) return undefined
   const capabilities = candidate.capabilities as Record<string, unknown> | undefined
-  if (capabilities === undefined || typeof capabilities.install !== 'boolean' || typeof capabilities.restart !== 'boolean') return undefined
+  if (capabilities === null || capabilities === undefined || typeof capabilities.install !== 'boolean' || typeof capabilities.restart !== 'boolean') return undefined
   if (capabilities.install && typeof candidate.install !== 'function') return undefined
   if (capabilities.restart && typeof candidate.restart !== 'function') return undefined
   if (typeof candidate.subscribe !== 'function') return undefined

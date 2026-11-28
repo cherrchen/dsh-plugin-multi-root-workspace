@@ -147,6 +147,29 @@ describe.skipIf(process.platform === 'win32')('runSshDependencyInstall', () => {
     } finally { rmSync(root, { recursive: true, force: true }) }
   })
 
+  it('runs a JavaScript CLI with the current Host runtime even when PATH has no node', async () => {
+    const { root, home, profile, dsh } = fixture()
+    const path = process.env.PATH
+    process.env.PATH = ''
+    try {
+      await expect(runSshDependencyInstall({ profile, home, release, dsh })).resolves.toMatchObject({ status: 'installed' })
+    } finally {
+      if (path === undefined) delete process.env.PATH
+      else process.env.PATH = path
+      rmSync(root, { recursive: true, force: true })
+    }
+  })
+
+  it('times out a hung package-manager process and allows a later retry', async () => {
+    const { root, home, profile } = fixture()
+    const dsh = fakeDsh(root, { hang: true })
+    try {
+      await expect(runSshDependencyInstall({ profile, home, release, dsh }, { timeoutMs: 1_000 })).rejects.toMatchObject({ code: 'install-timeout' })
+      fakeDsh(root)
+      await expect(runSshDependencyInstall({ profile, home, release, dsh }, { timeoutMs: 5_000 })).resolves.toMatchObject({ status: 'installed' })
+    } finally { rmSync(root, { recursive: true, force: true }) }
+  })
+
   it('prints a result with the profile and the restart instruction', async () => {
     const { root, home, profile, dsh, log } = fixture()
     process.env.FAKE_LOG = log
