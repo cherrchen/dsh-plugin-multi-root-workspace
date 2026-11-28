@@ -198,8 +198,11 @@ describe('SshDependencyNotice split flow', () => {
     try {
       const rendered = render(<SshDependencyNotice view={view('ssh-deps-version', { command: 'upgrade command', install: false })} onCheck={() => {}} t={t} />)
       const dialog = screen.getByRole('dialog', { name: 'ssh.upgradeTitle' })
-      fireEvent.click(within(dialog).getByRole('button', { name: 'ssh.copyUpgradeCommand' }))
-      expect(await within(dialog).findByText('ssh.commandCopied')).toBeTruthy()
+      const copy = within(dialog).getByRole('button', { name: 'ssh.copyUpgradeCommand' })
+      expect(copy.closest('.mrfw-sshCommandCard')).not.toBeNull()
+      fireEvent.click(copy)
+      expect(await within(dialog).findByText('ssh.copied')).toBeTruthy()
+      expect(screen.getByRole('button', { name: 'ssh.copied' }).closest('.mrfw-sshCommandFooter')).not.toBeNull()
       expect(writeText).toHaveBeenCalledExactlyOnceWith('upgrade command')
       rendered.unmount()
 

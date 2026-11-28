@@ -516,7 +516,6 @@ export const de = {
   'ssh.installPhase.done': "Installiert. Der neu gestartete Host prüft die vier SSH-Pakete.",
   'ssh.installPhase.failed': "Installation fehlgeschlagen: {message}",
   'ssh.copyInstallCommand': "Installationsbefehl kopieren",
-  'ssh.commandCopied': "Befehl kopiert.",
   'ssh.recheckDependencies': "Abhängigkeiten erneut prüfen",
   'ssh.dependency.missing': "Fehlt",
   'ssh.dependency.installed': "Installiert",

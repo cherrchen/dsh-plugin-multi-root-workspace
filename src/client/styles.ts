@@ -2604,13 +2604,78 @@ button.mrfw-choice:hover:not(:disabled) {
   overflow-wrap: anywhere;
 }
 
-.mrfw-sshDependencyCommand {
-  padding: 10px 12px;
+.mrfw-sshCommandCard {
+  overflow: hidden;
   border: 1px solid var(--dsw-alias-border-l3);
-  border-radius: 8px;
+  border-radius: 10px;
   background: var(--dsw-alias-settings-card-fill);
-  overflow-wrap: anywhere;
+}
+
+.mrfw-sshCommandScroll {
+  max-width: 100%;
+  padding: 10px 12px;
+  overflow-x: auto;
+  scrollbar-width: thin;
+}
+
+.mrfw-sshCommandScroll code {
+  display: block;
+  width: max-content;
+  min-width: 100%;
+  color: var(--dsw-alias-label-secondary);
+  font-family: var(--ds-font-family-code);
+  font-size: 12px;
+  line-height: 18px;
+  white-space: pre;
   user-select: text;
+}
+
+.mrfw-sshCommandFooter {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 10px;
+  min-height: 40px;
+  padding: 6px 8px;
+  border-top: 1px solid var(--dsw-alias-border-l3);
+  background: color-mix(in srgb, var(--dsw-alias-bg-module-platform) 58%, transparent);
+}
+
+.mrfw-sshCommandError {
+  flex: 1;
+  min-width: 0;
+  margin: 0;
+  color: var(--dsw-alias-state-error-primary);
+  font-size: 12px;
+  line-height: 18px;
+}
+
+.mrfw-sshCopyButton .mrfw-btnLabel {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.mrfw-sshCopyGlyph {
+  display: inline-flex;
+  width: 14px;
+  height: 14px;
+  align-items: center;
+  justify-content: center;
+  flex: none;
+}
+
+.mrfw-sshCopyButton[data-copied='true'] {
+  border-color: var(--dsw-alias-state-success-primary);
+  color: var(--dsw-alias-state-success-primary);
+}
+
+.mrfw-sshCommandCard[data-state='copied'] {
+  border-color: color-mix(in srgb, var(--dsw-alias-state-success-primary) 42%, var(--dsw-alias-border-l3));
+}
+
+.mrfw-sshCommandCard[data-state='error'] {
+  border-color: color-mix(in srgb, var(--dsw-alias-state-error-primary) 44%, var(--dsw-alias-border-l3));
 }
 
 .mrfw-sshDependencyActions {

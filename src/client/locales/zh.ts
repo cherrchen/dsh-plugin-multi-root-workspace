@@ -515,7 +515,6 @@ export const zh = {
   'ssh.installPhase.done': "安装完成。重启后的 Host 正在检测四个 SSH 包。",
   'ssh.installPhase.failed': "安装未完成：{message}",
   'ssh.copyInstallCommand': "复制安装命令",
-  'ssh.commandCopied': "已复制命令。",
   'ssh.recheckDependencies': "重新检测依赖",
   'ssh.dependency.missing': "缺失",
   'ssh.dependency.installed': "已安装",

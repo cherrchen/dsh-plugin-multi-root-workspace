@@ -516,7 +516,6 @@ export const ja = {
   'ssh.installPhase.done': "インストールが完了しました。再起動した Host が 4 つの SSH パッケージを確認しています。",
   'ssh.installPhase.failed': "インストールに失敗しました: {message}",
   'ssh.copyInstallCommand': "インストールコマンドをコピー",
-  'ssh.commandCopied': "コマンドをコピーしました。",
   'ssh.recheckDependencies': "依存関係を再確認",
   'ssh.dependency.missing': "未インストール",
   'ssh.dependency.installed': "インストール済み",

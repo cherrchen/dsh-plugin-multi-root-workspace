@@ -375,7 +375,7 @@ describe('personal SSH remote-environments settings', () => {
       const dialog = await screen.findByRole('dialog', { name: 'ssh.dialog.title' })
       expect(await within(dialog).findByText(command)).toBeTruthy()
       fireEvent.click(within(dialog).getByRole('button', { name: 'ssh.copyInstallCommand' }))
-      expect(await within(dialog).findByText('ssh.commandCopied')).toBeTruthy()
+      expect(await within(dialog).findByText('ssh.copied')).toBeTruthy()
       expect(writeText).toHaveBeenCalledExactlyOnceWith(command)
 
       repaired = true

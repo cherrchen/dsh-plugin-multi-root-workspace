@@ -516,7 +516,6 @@ export const ru = {
   'ssh.installPhase.done': "Установлено. Перезапущенный Host проверяет четыре пакета SSH.",
   'ssh.installPhase.failed': "Не удалось установить: {message}",
   'ssh.copyInstallCommand': "Скопировать команду установки",
-  'ssh.commandCopied': "Команда скопирована.",
   'ssh.recheckDependencies': "Проверить зависимости снова",
   'ssh.dependency.missing': "Отсутствует",
   'ssh.dependency.installed': "Установлен",

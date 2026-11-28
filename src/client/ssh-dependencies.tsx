@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState, type ReactNode } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { Modal } from '@deepseek-ai/dsh-client-ui-primitives'
 import type { SshDependencyView } from '../remote/ssh-diagnostics.ts'
 import type { Translate } from './WorkspaceFoldersAction.tsx'
@@ -6,6 +6,7 @@ import { errorKeyOf, type PanelError } from './panel-client.ts'
 import { PanelErrorToast } from './error-toast.tsx'
 import { SshButton as Button } from './panel-buttons.tsx'
 import { sshInstallLauncher, type SshInstallPhase } from './ssh-install-launcher.ts'
+import { IconCheck, IconCopy } from '../compat/client-icons.ts'
 
 interface DependencyNoticeProps {
   readonly view: SshDependencyView
@@ -194,17 +195,36 @@ function ProfileLine({ view, t }: { readonly view: SshDependencyView; readonly t
 
 function CopyCommand({ command, primary, label = 'ssh.copyInstallCommand', t }: { readonly command: string; readonly primary: boolean; readonly label?: 'ssh.copyInstallCommand' | 'ssh.copyUpgradeCommand'; readonly t: Translate }): ReactNode {
   const [copy, setCopy] = useState<boolean>()
-  return <>
-    <Button variant={primary ? 'primary' : 'outline'} size="sm" onClick={async () => {
-      try {
-        await navigator.clipboard.writeText(command)
-        setCopy(true)
-      } catch {
-        setCopy(false)
-      }
-    }}>{t(label)}</Button>
-    {copy === undefined ? null : <p className="mrfw-note" role="status">{t(copy ? 'ssh.commandCopied' : 'error.copy-failed')}</p>}
-  </>
+  const reset = useRef<number>()
+  useEffect(() => () => { window.clearTimeout(reset.current) }, [])
+  const copied = copy === true
+  return <div className="mrfw-sshCommandCard" data-state={copy === false ? 'error' : copied ? 'copied' : undefined}>
+    <div className="mrfw-sshCommandScroll">
+      <code>{command}</code>
+    </div>
+    <div className="mrfw-sshCommandFooter">
+      {copy === false ? <p className="mrfw-sshCommandError" role="alert">{t('error.copy-failed')}</p> : null}
+      <Button variant={copied ? 'outline' : primary ? 'primary' : 'outline'} size="sm" className="mrfw-sshCopyButton" data-copied={copied || undefined}
+        onClick={async () => {
+          try {
+            await navigator.clipboard.writeText(command)
+            window.clearTimeout(reset.current)
+            setCopy(true)
+            reset.current = window.setTimeout(() => { setCopy(undefined) }, 1500)
+          } catch {
+            window.clearTimeout(reset.current)
+            setCopy(false)
+          }
+        }}>
+        <span className="mrfw-sshCopyGlyph" aria-hidden="true">
+          {copied
+            ? IconCheck === undefined ? '✓' : <IconCheck size={14} />
+            : <IconCopy size={14} />}
+        </span>
+        <span>{copied ? t('ssh.copied') : t(label)}</span>
+      </Button>
+    </div>
+  </div>
 }
 
 
@@ -235,11 +255,11 @@ function UpgradeContent({ flow, view, command, status, onLater, t }: {
     <p className="mrfw-note">{t('ssh.upgradeScope')}</p>
     <p className="mrfw-note">{t('ssh.upgradeCaution')}</p>
     <p className="mrfw-note">{t('ssh.upgradeRestartNeeded')}</p>
-    {command === undefined || flow.installAvailable ? null : <code className="mrfw-sshDependencyCommand">{command}</code>}
+    {command === undefined || flow.installAvailable ? null : <CopyCommand command={command} primary t={t} label="ssh.copyUpgradeCommand" />}
     <div className="mrfw-sshDependencyActions">
       {flow.installAvailable ? <Button variant="primary" size="sm" disabled={flow.busy} loading={flow.installing}
         onClick={() => void flow.installOrUpgrade()}>{t('ssh.upgradeRuntime')}</Button>
-        : command === undefined ? null : <CopyCommand command={command} primary t={t} label="ssh.copyUpgradeCommand" />}
+        : null}
       <Button variant="outline" size="sm" disabled={flow.busy} onClick={() => { flow.dismissUpgrade(); onLater?.() }}>{t('ssh.later')}</Button>
     </div>
     <Progress flow={flow} t={t} />
@@ -293,7 +313,8 @@ export function SshDependencyNotice({ view, onCheck, onInstall, checking = false
     {command === undefined ? null : <p className="mrfw-note">{t(flow.installAvailable ? 'ssh.dependenciesInstallManual' : 'ssh.dependenciesInstall')}</p>}
     {command === undefined && current.code !== 'ssh-deps-restart'
       ? <p className="mrfw-note">{t(current.code.startsWith('ssh-host-') ? 'ssh.remedy.host' : 'ssh.dependenciesNoCommand')}</p> : null}
-    {command === undefined ? null : <code className="mrfw-sshDependencyCommand">{command}</code>}
+    {command === undefined ? null : <CopyCommand command={command} primary={!flow.installAvailable || !flow.actionable} t={t}
+      label={current.code === 'ssh-deps-version' ? 'ssh.copyUpgradeCommand' : 'ssh.copyInstallCommand'} />}
     <div className="mrfw-sshDependencyActions">
       {flow.actionable && !flow.restartRequired && flow.installAvailable ? <Button variant="primary" size="sm" disabled={flow.busy} loading={flow.installing}
         onClick={() => {
@@ -303,8 +324,6 @@ export function SshDependencyNotice({ view, onCheck, onInstall, checking = false
       {current.code === 'ssh-deps-version' && !flow.restartRequired && !flow.installAvailable ? <Button variant="outline" size="sm"
         onClick={() => { flow.setUpgradeOpen(true) }}>{t(actionLabel)}</Button> : null}
       {flow.restartRequired ? <Button variant="primary" size="sm" onClick={flow.openRestart}>{t('ssh.restartGuidance')}</Button> : null}
-      {command === undefined ? null : <CopyCommand command={command} primary={!flow.installAvailable} t={t}
-          label={current.code === 'ssh-deps-version' ? 'ssh.copyUpgradeCommand' : 'ssh.copyInstallCommand'} />}
       <Button variant="outline" size="sm" disabled={checking || flow.busy} loading={checking} onClick={onCheck}>{t('ssh.recheckDependencies')}</Button>
     </div>
     <Progress flow={flow} t={t} />
