@@ -13,7 +13,7 @@
  * @module @dsh-electron/dsh-plugin-multi-root-workspace/remote/install-ssh-deps
  */
 
-import { spawn } from 'node:child_process'
+import { spawn, type ChildProcess } from 'node:child_process'
 import { existsSync, readFileSync, realpathSync } from 'node:fs'
 import { createRequire } from 'node:module'
 import { dirname, isAbsolute, join, relative, sep } from 'node:path'
@@ -156,22 +156,102 @@ function boundedAppend(current: string, chunk: string): string {
   return current + chunk.slice(0, OUTPUT_CAPTURE_LIMIT - current.length)
 }
 
+/**
+ * Signal every member of the child's process tree.
+ *
+ * The child is spawned detached on POSIX, so it leads a process group that
+ * the package manager it launches shares. A negative pid signals the whole
+ * group, including a descendant that keeps the inherited output pipes open
+ * after the direct child is already gone; killing only the direct child
+ * would leave that descendant running and the pipes open. Windows has no
+ * process groups: SSH repair is never offered there, so a best-effort
+ * taskkill tree termination is enough.
+ */
+function killTree(child: ChildProcess, signal: NodeJS.Signals): void {
+  if (process.platform !== 'win32' && child.pid !== undefined) {
+    try {
+      process.kill(-child.pid, signal)
+      return
+    } catch { /* the group is empty or already reaped; fall through to the direct child */ }
+  }
+  try { child.kill(signal) } catch { /* the close event decides the result */ }
+  if (process.platform === 'win32' && child.pid !== undefined) {
+    try {
+      const taskkill = spawn('taskkill', ['/pid', String(child.pid), '/T', '/F'], { stdio: 'ignore' })
+      taskkill.once('error', () => {})
+      taskkill.unref()
+    } catch { /* best effort only: the SSH repair flow is not offered on Windows */ }
+  }
+}
+
 function runDsh(file: string, args: readonly string[], options: { readonly cwd: string; readonly env: NodeJS.ProcessEnv; readonly timeoutMs: number }): Promise<{ code: number | null; stdout: string; stderr: string; timedOut: boolean }> {
   return new Promise((resolvePromise, reject) => {
     const useHostRuntime = /\.[cm]?js$/i.test(file) && isAbsolute(process.execPath) && existsSync(process.execPath)
     const executable = useHostRuntime ? process.execPath : file
     const executableArgs = useHostRuntime ? [file, ...args] : [...args]
     const env = useHostRuntime ? { ...options.env, ELECTRON_RUN_AS_NODE: '1' } : options.env
-    const child = spawn(executable, executableArgs, { cwd: options.cwd, env, stdio: ['ignore', 'pipe', 'pipe'] })
+    const child = spawn(executable, executableArgs, {
+      cwd: options.cwd, env, stdio: ['ignore', 'pipe', 'pipe'], detached: process.platform !== 'win32',
+    })
     let stdout = ''
     let stderr = ''
     let timedOut = false
-    let forceKill: NodeJS.Timeout | undefined
+    let settled = false
+
+    // A detached child leaves the terminal's foreground process group, so an
+    // interactive Ctrl+C would otherwise orphan the package manager while it
+    // still holds the profile writer lock — and Node processes survive the
+    // resulting EPIPE, so the orphan would not notice. Interruptions are
+    // forwarded into the tree instead. When the embedding process has other
+    // listeners for the signal (the Host, or a test runner), they own the
+    // shutdown and the signal is not re-raised; when this forwarder is the
+    // only listener, the default termination would have applied without it,
+    // so the signal is re-raised after forwarding.
+    const forwarders: Array<readonly ['SIGINT' | 'SIGTERM', () => void]> = []
+    const removeForwarders = (): void => {
+      for (const [signal, listener] of forwarders) process.removeListener(signal, listener)
+      forwarders.length = 0
+    }
+    for (const signal of ['SIGINT', 'SIGTERM'] as const) {
+      const listener = (): void => {
+        killTree(child, signal)
+        if (process.listenerCount(signal) === 1) {
+          removeForwarders()
+          process.kill(process.pid, signal)
+        }
+      }
+      forwarders.push([signal, listener] as const)
+      process.on(signal, listener)
+    }
+
+    const finish = (result: { code: number | null; stdout: string; stderr: string; timedOut: boolean }): void => {
+      if (settled) return
+      settled = true
+      clearTimeout(timeout)
+      removeForwarders()
+      resolvePromise(result)
+    }
+
     const timeout = setTimeout(() => {
       timedOut = true
-      try { child.kill('SIGTERM') } catch { /* the close event decides the result */ }
-      forceKill = setTimeout(() => {
-        try { child.kill('SIGKILL') } catch { /* the close event decides the result */ }
+      killTree(child, 'SIGTERM')
+      // Closing the pipes from this side unblocks settlement even when a
+      // descendant keeps its inherited copies open: 'close' can fire as soon
+      // as the direct child is reaped, and the descendant's next write fails.
+      child.stdout?.destroy()
+      child.stderr?.destroy()
+      // The escalation chain deliberately completes even when the operation
+      // settles earlier: a package manager that ignored SIGTERM still has to
+      // die, or it keeps the profile writer lock and defeats the retry.
+      const forceKill = setTimeout(() => {
+        killTree(child, 'SIGKILL')
+        const backstop = setTimeout(() => {
+          // SIGKILL is unconditional on POSIX, so reaching this line means the
+          // platform never reported the exit. Settle anyway: a hung pipe must
+          // not pin the profile-write queue open forever.
+          finish({ code: null, stdout, stderr, timedOut })
+        }, 2_000)
+        backstop.unref()
       }, 2_000)
       forceKill.unref()
     }, options.timeoutMs)
@@ -182,13 +262,11 @@ function runDsh(file: string, args: readonly string[], options: { readonly cwd: 
     child.stderr?.on('data', (chunk: string) => { stderr = boundedAppend(stderr, chunk) })
     child.once('error', error => {
       clearTimeout(timeout)
-      if (forceKill !== undefined) clearTimeout(forceKill)
+      removeForwarders()
       reject(error)
     })
     child.once('close', code => {
-      clearTimeout(timeout)
-      if (forceKill !== undefined) clearTimeout(forceKill)
-      resolvePromise({ code, stdout, stderr, timedOut })
+      finish({ code, stdout, stderr, timedOut })
     })
   })
 }

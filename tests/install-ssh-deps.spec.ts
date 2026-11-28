@@ -170,6 +170,61 @@ describe.skipIf(process.platform === 'win32')('runSshDependencyInstall', () => {
     } finally { rmSync(root, { recursive: true, force: true }) }
   })
 
+  it('terminates the whole subprocess tree on timeout, including a SIGTERM-proof package manager', async () => {
+    const { root, home, profile } = fixture()
+    process.env.FAKE_PID_LOG = join(root, 'pids.log')
+    const dsh = fakeDsh(root, { treeHang: true })
+    try {
+      await expect(runSshDependencyInstall({ profile, home, release, dsh }, { timeoutMs: 1_000 }))
+        .rejects.toMatchObject({ code: 'install-timeout' })
+      // The grandchild ignores SIGTERM and never writes, so only the
+      // escalated group SIGKILL can end it; the signal lands two seconds
+      // after the timeout. Poll instead of asserting a fixed clock.
+      const pid = Number(readFileSync(join(root, 'pids.log'), 'utf8').trim().split('\n').at(-1))
+      const deadline = Date.now() + 6_000
+      let alive = true
+      while (alive && Date.now() < deadline) {
+        try {
+          process.kill(pid, 0)
+          await new Promise(resolve => setTimeout(resolve, 100))
+        } catch { alive = false }
+      }
+      expect(alive).toBe(false)
+    } finally {
+      delete process.env.FAKE_PID_LOG
+      rmSync(root, { recursive: true, force: true })
+    }
+  })
+
+  it('settles within a bounded period when an escaped descendant keeps the pipes open', async () => {
+    const { root, home, profile } = fixture()
+    process.env.FAKE_PID_LOG = join(root, 'pids.log')
+    const dsh = fakeDsh(root, { detachedHang: true })
+    try {
+      await expect(runSshDependencyInstall({ profile, home, release, dsh }, { timeoutMs: 1_000 }))
+        .rejects.toMatchObject({ code: 'install-timeout' })
+      // The detached grandchild leaves the installer's process group, so the
+      // group signals cannot reach it: the rejection above can only have
+      // arrived through the bounded pipe cleanup. Prove the scenario was
+      // real — the descendant is still alive — then end it manually.
+      const pid = Number(readFileSync(join(root, 'pids.log'), 'utf8').trim().split('\n').at(-1))
+      expect(() => process.kill(pid, 0)).not.toThrow()
+      try { process.kill(pid, 'SIGKILL') } catch { /* already gone */ }
+    } finally {
+      delete process.env.FAKE_PID_LOG
+      rmSync(root, { recursive: true, force: true })
+    }
+  })
+
+  it('does not leak signal forwarders across operations', async () => {
+    const { root, home, profile, dsh } = fixture()
+    try {
+      const before = process.listenerCount('SIGINT') + process.listenerCount('SIGTERM')
+      await runSshDependencyInstall({ profile, home, release, dsh })
+      expect(process.listenerCount('SIGINT') + process.listenerCount('SIGTERM')).toBe(before)
+    } finally { rmSync(root, { recursive: true, force: true }) }
+  })
+
   it('prints a result with the profile and the restart instruction', async () => {
     const { root, home, profile, dsh, log } = fixture()
     process.env.FAKE_LOG = log
