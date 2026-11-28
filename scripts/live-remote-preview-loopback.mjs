@@ -17,12 +17,13 @@ import { packTarball } from './check-pack.mjs'
 import { captureDsh, installPluginProfile, loadRuntimeModule, REPO_ROOT, runtimeRequire } from './lib/dsh-runtime.mjs'
 import { bootProfile } from './lib/profile-boot.mjs'
 import { chatCompletionFrames } from './lib/scripted-model-frames.mjs'
+import { SUPPORTED_SSH_RELEASES } from '../src/compat/dsh-version.ts'
 
 if (process.env.DSH_LIVE_PREVIEW !== '1') throw new Error('Set DSH_LIVE_PREVIEW=1 to run the isolated loopback/browser acceptance.')
 const sshdPath = ['/usr/sbin/sshd', '/usr/bin/sshd', '/sbin/sshd'].find(existsSync)
 if (process.platform === 'win32' || !sshdPath) throw new Error('A usable POSIX sshd is required.')
 const version = runtimeRequire()('@deepseek-ai/dsh/package.json').version
-const previewExpected = version === '0.2.3-alpha.2'
+const previewExpected = SUPPORTED_SSH_RELEASES.includes(version)
 const run = realpathSync(mkdtempSync(join(tmpdir(), 'mrfw-preview-live-')))
 const artifacts = join(REPO_ROOT, '.dsh-smoke', 'remote-preview', `${version}-${randomUUID().slice(0, 8)}`)
 mkdirSync(artifacts, { recursive: true })
@@ -190,7 +191,7 @@ try {
   }
   const authorized = (await call('addRemote', endpoint)).endpoints.find(item => item.rootId === endpoint.rootId)
   check('personal binding registered through real SSH identity and SFTP', authorized?.state === 'registered' && !!authorized.browseAuthorization)
-  check('exact-release capability hint', authorized.preview === (previewExpected ? 'sftp-binary-v1' : undefined))
+  check('SSH-matrix capability hint', authorized.preview === (previewExpected ? 'sftp-binary-v1' : undefined))
   if (previewExpected) {
     await call('addRemote', second)
     const browseOnly = (await call('addRemote', listOnly)).endpoints.find(item => item.rootId === listOnly.rootId)

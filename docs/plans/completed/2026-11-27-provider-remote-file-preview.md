@@ -1,6 +1,6 @@
 # 按 Provider 分派的远端文件预览
 
-> 状态：**P1–P8 完成，PASS WITH LIMITATIONS；已随 PR [#81](https://github.com/cherrchen/dsh-plugin-multi-root-workspace/pull/81)（`4ea9312`）合入 `main`，并随 `v0.1.25-beta.2` 发版**（接受与否由维护者决定）。基线：`c7707f8f2e80aa75dd30c013af9ada37db505db4`；承接 [ADR-0052](../../decisions/ADR-0052-provider-file-browsing.md) / PR #80。
+> 状态：**P1–P8 完成，PASS WITH LIMITATIONS；已随 PR [#81](https://github.com/cherrchen/dsh-plugin-multi-root-workspace/pull/81)（`4ea9312`）合入 `main`，并随 `v0.1.25-beta.2` 发版**（接受与否由维护者决定）。PR [#82](https://github.com/cherrchen/dsh-plugin-multi-root-workspace/pull/82) 把预览签发扩大到完整 `SUPPORTED_SSH_RELEASES`，全矩阵补证见文末「审查补证」节；退出判定的宿主版本行以该节为准。基线：`c7707f8f2e80aa75dd30c013af9ada37db505db4`；承接 [ADR-0052](../../decisions/ADR-0052-provider-file-browsing.md) / PR #80。
 
 ## 交付范围
 
@@ -62,3 +62,29 @@
 | Other Known Limitations | 旧标签页重载不会恢复内容；SFTP v3 无 inode/fd-bound/ABA 防护，部署必须满足稳定路径断言；2 MiB 不截断。 |
 | Release Blockers | 所述验收组合无已知代码阻塞；扩大宿主、平台、Helper 或托管凭据的交付承诺前，需补对应真实环境验证。 |
 | Recommended Next Action | 已随 `v0.1.25-beta.2` 发版；扩大宿主、平台、Helper 或托管凭据的交付承诺前，补齐对应的 CI 与真实环境车道。 |
+
+## 审查补证：签发范围扩大的全 SSH 矩阵验收（2026-11-28）
+
+PR [#82](https://github.com/cherrchen/dsh-plugin-multi-root-workspace/pull/82) 把 `sftp-binary-v1` 的签发范围从仅 `0.2.3-alpha.2` 扩大到完整 `SUPPORTED_SSH_RELEASES`（版本门改为直读该列表，不维护第二份预览版本表）。外部 Code Review 指出两处冲突：`AGENTS.md` invariant 15 仍把签发限定在 `0.2.3-alpha.2`；本节上文 P7 的证据只在旧宿主覆盖预览**关闭**的降级路径（`rc.1`/`rc.2`/`rc.5` 各 4/4 且文件行惰性），从未验证其生产内容链路。维护者选择保留扩大的签发并补齐证据，本节记录补证运行；invariant 15 与路线图总账按结果同步修订。
+
+### 补证运行方式
+
+与 P7 同一脚本、同一打包机制：macOS（darwin-arm64）上对每一版本串行运行 `pnpm build` 产物驱动的 `DSH_LIVE_PREVIEW=1 node scripts/live-remote-preview-loopback.mjs`；旧宿主经 `DSH_CLI` 指向各自的 npm 精确安装树（`npm install @deepseek-ai/dsh@<精确版本>`，树内 `@deepseek-ai/*` 均解析到同一精确版本，`0.2.2` 车道 cordis 解析为 `4.1.0`）。Node 版本按 CI 分流：`0.2.2` 车道 `24.9.0`、`0.2.3` 车道 `24.22.3`。六条车道使用**同一打包产物**（tarball SHA-256 全部为 `d2efb8e93758b2d1ef2c8ee9a9c0297f43fc657652083f19a9667f2bccc6bc04`），逐版串行打包与运行，真实 OpenSSH 回环 + 真实 Chromium，不使用 mock。
+
+### 补证结果
+
+| 实际 DSH 版本 | Node | 真实 Web / Chromium + SSH 结果 |
+| --- | --- | --- |
+| `0.2.2-rc.1` | 24.9.0 | **25/25 PASS**；能力提示签发、生产预览正路径、Folder Navigator、授权生命周期全部正向 |
+| `0.2.2-rc.2` | 24.9.0 | **25/25 PASS**；同上 |
+| `0.2.2-rc.3` | 24.9.0 | **25/25 PASS**；同上 |
+| `0.2.2-rc.4` | 24.9.0 | **25/25 PASS**；同上 |
+| `0.2.2-rc.5` | 24.9.0 | **25/25 PASS**；同上 |
+| `0.2.3-alpha.2` | 24.22.3 | **25/25 PASS**；对照车道（开发 pin 安装树） |
+
+25 项为当前脚本的全部正路径检查：注册与能力提示、列举不授予内容、真实 SFTP 字节经二进制附件到达只读 Viewer、标签页文件类型图标、刷新重读、Folder reveal/同 pane 替换/展开记忆、Markdown 安全子集、深色宿主令牌、Plain text/Code 切换、2,040,000 字节 SHA-256 逐字节一致、2 MiB+1 整份拒绝、8 预览上限与限内替换、重载过期、撤权失效、重授不复活、无 opt-in 惰性、跨环境同路径隔离、关闭清内容、本地附加根与主根原生预览对照。P7 表的 `20/20` 是 PR #81 审查修复前的脚本口径，修复批次（`bb371e5`/`1a788d1`）增加了检查项；`rc.3`/`rc.4` 在 P7 未跑，本次为首次覆盖。每版证据（`evidence.json` 与明/暗截图）写入 Git 忽略的 `.dsh-smoke/remote-preview/`。
+
+### 结论修订
+
+- 退出判定表「Supported / Unsupported Host Versions」一行由本补证**取代**：`sftp-binary-v1` 在完整 `SUPPORTED_SSH_RELEASES`（当前 `0.2.2-rc.1`–`0.2.2-rc.5`、`0.2.3-alpha.2`）上签发并经验收；SSH 浏览地板以下的宿主本来不能选择远端根，不存在预览语义。既有插件兼容声明不变。
+- 未覆盖项不变：Helper-backed 预览生产全链路、托管密钥、team/broker、非 macOS 的真实 GUI、多客户端压力等仍按 P7/P8 口径记为未验证；本补证只覆盖宿主版本维度。
