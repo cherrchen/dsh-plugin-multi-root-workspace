@@ -8,6 +8,14 @@ This file records the user-visible changes of every **released** version.
 - For installation sources, the supported upstream runtimes, and known limitations, see the [README](./README.en.md).
 - The evidence, numbering, and release state of each version live in the [roadmap progress ledger](./docs/plans/active/2026-09-12-multi-root-workspace.md#进度总账). The body of each GitHub Release is generated from the commit history by `scripts/release-notes.mjs` and is the complete raw list behind this file.
 
+## [0.1.25-beta.3] - 2026-11-28
+
+This is the third beta of the `0.1.25` line, and it only widens the host coverage of SSH remote file preview: the `sftp-binary-v1` preview capability used to be issued on DSH `0.2.3-alpha.2` alone and is now issued on the same exact-support matrix as SSH remote browsing (`0.2.2-rc.1`–`0.2.2-rc.5` plus `0.2.3-alpha.2`, six releases), so a binding with preview enabled on a supported `0.2.2` host can open remote files without upgrading to `0.2.3` first. The version gate reads `SUPPORTED_SSH_RELEASES` directly instead of keeping a second preview release table; hosts below the SSH browsing floor cannot select a remote root in the first place, so their behavior is unchanged. There are no incompatible changes to configuration formats, protocols or default behavior; SSH stays experimental and off by default, remote browsing and preview stay off by default per binding, and the exact-support contract remains 27 exact releases.
+
+### Changed
+
+- **The preview capability's host range now follows the SSH browsing matrix**: `remoteFilePreviewTransport()` reads `SUPPORTED_SSH_RELEASES` directly, so the only remaining refusal is a host outside that list. The wider issuance is backed by real content-path evidence on every supported release (one packed artifact, 25/25 checks on each of the six versions; see the plan's review-addendum section), so remote file rows on `0.2.2-rc.1`–`0.2.2-rc.5` are no longer inert while `0.2.3-alpha.2` keeps its behavior. The setting, the binding digest, the read protocol, the 2 MiB limit, the read-only boundary and the default-off switches are unchanged.
+
 ## [0.1.25-beta.2] - 2026-11-27
 
 This is the second beta of the `0.1.25` line: **ordinary SSH remote files in the Files tab can now open a read-only preview** — enabled per binding, off by default, in a plugin-owned viewer that follows the host document preview's appearance and interactions (path header, Markdown/code/plain-text views, source line numbers and copy, refresh, and a resizable folder navigator). Content comes from one strict `remoteFiles.read` that reads the file completely and travels as a single Connection binary attachment; nothing is written to disk or routed through the resource stream, and there is no editing, writeback, download, file watching, search or open-in-app. Preview is open to ordinary files only: anything above 2 MiB is refused whole rather than truncated, Markdown renders through a safe subset, and binary types show metadata only. Older hosts do not issue the preview capability, so file rows stay inert while the setting can still be saved and later works without re-ticking. There are no incompatible changes to configuration formats, protocols or default behavior; SSH stays experimental and off by default, remote browsing and preview stay off by default per binding, and the exact-support contract remains 27 exact releases.
@@ -499,7 +507,8 @@ The first release: the three MVP milestones (M1–M3).
 
 - All eight findings of the pre-release external review (three of them release-blocking) are fixed, each with a regression test: a registered directory replaced by a symlink transplanting its authority (which introduced `recordedPath` — **re-resolving a path is not re-authorizing it**), concurrent registry mutations losing a write or reviving a revoked grant (per-primary-root mutations are serialized), a refresh not re-checking directories, a typed path being overwritten by the directory picker, the `reveal` response contract and failure code, duplicate ids not validated, the primary root missing from nesting validation, and CI testing before building.
 
-[Unreleased]: https://github.com/cherrchen/dsh-plugin-multi-root-workspace/compare/v0.1.25-beta.2...HEAD
+[Unreleased]: https://github.com/cherrchen/dsh-plugin-multi-root-workspace/compare/v0.1.25-beta.3...HEAD
+[0.1.25-beta.3]: https://github.com/cherrchen/dsh-plugin-multi-root-workspace/compare/v0.1.25-beta.2...v0.1.25-beta.3
 [0.1.25-beta.2]: https://github.com/cherrchen/dsh-plugin-multi-root-workspace/compare/v0.1.25-beta.1...v0.1.25-beta.2
 [0.1.25-beta.1]: https://github.com/cherrchen/dsh-plugin-multi-root-workspace/compare/v0.1.24...v0.1.25-beta.1
 [0.1.24]: https://github.com/cherrchen/dsh-plugin-multi-root-workspace/compare/v0.1.24-beta.6...v0.1.24

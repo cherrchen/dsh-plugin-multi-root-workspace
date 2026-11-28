@@ -2,7 +2,7 @@
 
 ## 状态
 
-Proposed，2026-11-27。实现与验收见[配套计划](../plans/completed/2026-11-27-provider-remote-file-preview.md)，接受与否由维护者决定；实施已随 PR [#81](https://github.com/cherrchen/dsh-plugin-multi-root-workspace/pull/81)（`4ea9312`）合入 `main`，并随 `v0.1.25-beta.2` 发版；冻结合同见 [remote-file-preview](../architecture/remote-file-preview.md)。承接 [ADR-0052](ADR-0052-provider-file-browsing.md)（远端浏览身份/权威/传输分层，不改写）。
+Proposed，2026-11-27。实现与验收见[配套计划](../plans/completed/2026-11-27-provider-remote-file-preview.md)，接受与否由维护者决定；实施已随 PR [#81](https://github.com/cherrchen/dsh-plugin-multi-root-workspace/pull/81)（`4ea9312`）合入 `main`，并随 `v0.1.25-beta.2` 发版；签发范围随后由 PR [#82](https://github.com/cherrchen/dsh-plugin-multi-root-workspace/pull/82)（`48f3205`）扩至完整 `SUPPORTED_SSH_RELEASES`，随 `v0.1.25-beta.3` 发版；冻结合同见 [remote-file-preview](../architecture/remote-file-preview.md)。承接 [ADR-0052](ADR-0052-provider-file-browsing.md)（远端浏览身份/权威/传输分层，不改写）。
 
 ## 背景
 

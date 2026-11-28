@@ -1,6 +1,6 @@
 # 按 Provider 分派的远端文件预览
 
-> 状态：**P1–P8 完成，PASS WITH LIMITATIONS；已随 PR [#81](https://github.com/cherrchen/dsh-plugin-multi-root-workspace/pull/81)（`4ea9312`）合入 `main`，并随 `v0.1.25-beta.2` 发版**（接受与否由维护者决定）。PR [#82](https://github.com/cherrchen/dsh-plugin-multi-root-workspace/pull/82) 把预览签发扩大到完整 `SUPPORTED_SSH_RELEASES`，全矩阵补证见文末「审查补证」节；退出判定的宿主版本行以该节为准。基线：`c7707f8f2e80aa75dd30c013af9ada37db505db4`；承接 [ADR-0052](../../decisions/ADR-0052-provider-file-browsing.md) / PR #80。
+> 状态：**P1–P8 完成，PASS WITH LIMITATIONS；已随 PR [#81](https://github.com/cherrchen/dsh-plugin-multi-root-workspace/pull/81)（`4ea9312`）合入 `main`，并随 `v0.1.25-beta.2` 发版**（接受与否由维护者决定）。PR [#82](https://github.com/cherrchen/dsh-plugin-multi-root-workspace/pull/82) 把预览签发扩大到完整 `SUPPORTED_SSH_RELEASES`，全矩阵补证见文末「审查补证」节；退出判定的宿主版本行以该节为准；签发范围随 `v0.1.25-beta.3` 发版。基线：`c7707f8f2e80aa75dd30c013af9ada37db505db4`；承接 [ADR-0052](../../decisions/ADR-0052-provider-file-browsing.md) / PR #80。
 
 ## 交付范围
 

@@ -1,6 +1,6 @@
 # 架构文档：Files 标签页的文件浏览 Provider（本地 + SSH 远端）
 
-> 状态：**已实现**。Provider 化的目录浏览见 [ADR-0052](../decisions/ADR-0052-provider-file-browsing.md) 与[实施计划](../plans/completed/2026-11-24-provider-remote-file-tree.md)；远端预览见 [ADR-0053 扩展](remote-file-preview.md) 与[实施计划](../plans/completed/2026-11-27-provider-remote-file-preview.md)，随 `v0.1.25-beta.2` 发版。
+> 状态：**已实现**。Provider 化的目录浏览见 [ADR-0052](../decisions/ADR-0052-provider-file-browsing.md) 与[实施计划](../plans/completed/2026-11-24-provider-remote-file-tree.md)；远端预览见 [ADR-0053 扩展](remote-file-preview.md) 与[实施计划](../plans/completed/2026-11-27-provider-remote-file-preview.md)，随 `v0.1.25-beta.2` 发版；签发范围随 `v0.1.25-beta.3` 扩至完整 SSH 支持矩阵。
 > 相关文档：宿主侧 RPC 契约与服务的实现细节见 ADR-0052 与本文件 §6；用户配置见 [SSH 远端环境使用指南](../guide/user/ssh-remote-environments.md)；Fields 树 fork 的上游对齐职责见 [FORK.md](../../src/client/files-tree/FORK.md)。
 
 ## 1. 总览

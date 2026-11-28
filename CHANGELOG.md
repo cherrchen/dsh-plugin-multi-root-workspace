@@ -8,6 +8,14 @@ English: [CHANGELOG.en.md](./CHANGELOG.en.md)
 - 安装方式、受支持的上游运行时与已知限制见 [README](./README.md)。
 - 每个版本的实施证据、编号口径与发布状态见[路线图 §进度总账](./docs/plans/active/2026-09-12-multi-root-workspace.md#进度总账)；GitHub Release 的正文由 `scripts/release-notes.mjs` 从 commit 历史生成，是本文件之外的完整原始清单。
 
+## [0.1.25-beta.3] - 2026-11-28
+
+本版是 `0.1.25` 线的第三个 beta，只扩大 SSH 远端文件预览的宿主覆盖范围：`sftp-binary-v1` 预览能力原先只在 DSH `0.2.3-alpha.2` 上签发，现在与 SSH 远端浏览共用同一份精确支持矩阵（`0.2.2-rc.1`–`0.2.2-rc.5` 与 `0.2.3-alpha.2` 共 6 个版本），因此在 `0.2.2` 线的受支持宿主上，已开启预览的绑定也能打开远端文件，不必先升级到 `0.2.3`。版本门直接读取 `SUPPORTED_SSH_RELEASES`，不再维护第二份预览版本表；SSH 浏览地板以下的宿主本来就不能选择远端根，行为不变。没有配置格式、协议或默认行为层面的不兼容变更：SSH 仍为实验性、默认关闭，远端浏览与预览按绑定默认关闭，精确支持合同仍为 27 个精确发布。
+
+### Changed
+
+- **预览能力的宿主范围与 SSH 浏览矩阵对齐**：`remoteFilePreviewTransport()` 改为直接读取 `SUPPORTED_SSH_RELEASES`，拒绝条件只剩「宿主版本不在该列表」；签发范围按每个受支持版本的真实内容链路补证（同一打包产物在六个版本上各 25/25 通过，详见计划的审查补证节），因此 `0.2.2-rc.1`–`0.2.2-rc.5` 上的远端文件行不再保持惰性，`0.2.3-alpha.2` 的行为不变。设置项、绑定摘要、读取协议、2 MiB 上限、只读边界与默认开关都没有变化。
+
 ## [0.1.25-beta.2] - 2026-11-27
 
 本版是 `0.1.25` 线的第二个 beta：Files 页签里的 **SSH 远端普通文件行现在可以打开只读预览**——按绑定额外开启、默认关闭，插件自有的 Viewer 对齐宿主文档预览的外观与操作（路径头、Markdown/代码/纯文本视图、源码行号与复制、刷新与可拖宽的目录导航），内容经单一严格的 `remoteFiles.read` 一次性完整读取、由 Connection 二进制附件承载，不落盘、不进入资源流，也不提供编辑、回写、下载、文件监视、搜索或「在应用中打开」。预览只对普通文件开放，超过 2 MiB 整份拒绝而不截断，Markdown 走安全白名单子集，二进制类型只显示元数据；旧版宿主不签发预览能力，文件行保持惰性，设置可以先保存、升级后无需重新勾选。没有配置格式、协议或默认行为层面的不兼容变更：SSH 仍为实验性、默认关闭，远端浏览与预览都按绑定默认关闭，精确支持合同仍为 27 个精确发布。
@@ -499,7 +507,8 @@ English: [CHANGELOG.en.md](./CHANGELOG.en.md)
 
 - 发布前外部评审提出的 8 项发现（其中 3 项发布阻断）全部修复，每项各带一个回归测试：登记目录被替换为符号链接后授权转移（引入 `recordedPath`，**重新解析路径不等于重新授权**）、并发修改注册表丢写或复活已撤销的授权（每个主根的变更串行）、刷新不重新检查目录、手输路径被目录选择器覆盖、`reveal` 的应答契约与失败码、重复 id 未校验、主根未纳入嵌套校验、CI 先测后构建。
 
-[Unreleased]: https://github.com/cherrchen/dsh-plugin-multi-root-workspace/compare/v0.1.25-beta.2...HEAD
+[Unreleased]: https://github.com/cherrchen/dsh-plugin-multi-root-workspace/compare/v0.1.25-beta.3...HEAD
+[0.1.25-beta.3]: https://github.com/cherrchen/dsh-plugin-multi-root-workspace/compare/v0.1.25-beta.2...v0.1.25-beta.3
 [0.1.25-beta.2]: https://github.com/cherrchen/dsh-plugin-multi-root-workspace/compare/v0.1.25-beta.1...v0.1.25-beta.2
 [0.1.25-beta.1]: https://github.com/cherrchen/dsh-plugin-multi-root-workspace/compare/v0.1.24...v0.1.25-beta.1
 [0.1.24]: https://github.com/cherrchen/dsh-plugin-multi-root-workspace/compare/v0.1.24-beta.6...v0.1.24
