@@ -11,28 +11,34 @@
 - `SUPPORTED_SSH_RELEASES` 是 SSH 支持的精确版本真源。四个官方包分别为 `@deepseek-ai/dsh-ssh`、`@deepseek-ai/dsh-fs-ssh`、`@deepseek-ai/dsh-subprocess-ssh` 和 `@deepseek-ai/dsh-sandbox-ssh`，都须与当前 Host 同版。它们在插件 manifest 中仍是 optional peers，局部安装故障只阻断 SSH。
 - 上游 Profile 使用 `nodeLinker: hoisted`、`autoInstallPeers: false`。CLI 的 `dsh plugin --profile <name> add` 支持普通 npm 依赖，并将它们写入该 Profile 的 `package.json` 与锁文件，安装到该 Profile 的 `node_modules`。Bundle 选择保持原样。官方安装闭包为共用包提供回退。运行中 Plugin Manager 的 Bundle 安装接口拒绝普通包。决策依据见 [ADR-0049](../decisions/ADR-0049-ssh-custody-modes.md)。
 - 发布 tarball 带 `scripts/install-ssh-deps.mjs` 与构建入口 `lib/install-ssh-deps.js`。命令由 `src/compat/ssh-profile.ts` 从可信安装上下文生成：Desktop 使用 `process.resourcesPath/runtime/cli/bin/dsh`，脚本本身由 `ELECTRON_RUN_AS_NODE=1 <应用可执行文件>` 启动（`runtime/bin/node` 依赖 Desktop 启动器注入的 `DSH_DESKTOP_NODE_EXECUTABLE`，普通终端不可用）；Web 从 `profileContext.installAnchor` 指向的 `@deepseek-ai/dsh` manifest 解析 `bin.dsh`，并复用当前进程的 Node。命令携带脚本、精确 CLI、Profile、DSH Home 与 Host 版本；脚本先运行一次 `dsh --version` 核对版本、校验 Profile 位于该 Home 且不是重定向目录，然后以结构化 argv 执行一次 `dsh plugin --profile <name> add --save-exact`，绝不从调用方接收包名。四包已对齐时直接报告已就绪，不再次写入；版本不符、Profile 不在该 Home、Desktop Profile 未初始化或版本不在 `SUPPORTED_SSH_RELEASES` 时返回诊断并停止。路径中的空格、单引号与非 ASCII 字符由 POSIX 引用与 argv 传递共同支持。
-- 插件优先使用上游发布的安装闭包中的 SSH 包，否则从当前 Profile 的直接依赖中解析。Profile 副本的模块入口必须位于对应包目录，DSH/Cordis peers 必须指向当前安装闭包，SSH 包间的 peer 必须指向同一组副本。插件私有副本只用于诊断。启动时记录的包位置和身份与现状不同则要求重启。重新检测只读取状态，开关、工具启动及 RPC 均不会运行本地包管理器。
-- Settings 的 `status` 和工作区的 `remotes` 可返回 `dependencies`，含 Host 版本、Profile 名称、每包状态和可选的精确安装命令。仅在启动器目录对应 CLI 管理的 Profile 且能确定唯一目标 CLI 时生成命令；否则返回诊断。三种结果分开：本次写入成功（安装完成）、磁盘已对齐但当前进程仍需重启（`ssh-deps-restart`）、当前 Host 已能解析四包（`ready`）。用户步骤见[个人 SSH 指南](../guide/user/ssh-remote-environments.md#安装当前-profile-的-ssh-依赖)。
+- 插件优先使用上游发布的安装闭包中的 SSH 包，否则从当前 Profile 的直接依赖中解析。Profile 副本的模块入口必须位于对应包目录，DSH/Cordis peers 必须指向当前安装闭包，SSH 包间的 peer 必须指向同一组副本。插件私有副本只用于诊断。启动时记录的包位置和身份与现状不同则要求重启。重新检测只读取状态；开关、工具启动和普通状态 RPC 不运行本地包管理器。唯一的例外是用户显式触发的固定修复端点 `sshDependencyInstall`（见下）。
+- Settings 的 `status` 和工作区的 `remotes` 可返回 `dependencies`，含 Host 版本、Profile 名称、每包状态、Host 侧一键修复能力 `capabilities.install` 和可选的精确安装命令。仅在启动器目录对应 CLI 管理的 Profile 且能确定唯一目标 CLI 时生成命令；否则返回诊断。三种结果分开：本次写入成功（统一进入待重启）、磁盘已对齐但当前进程仍需重启（`ssh-deps-restart`）、当前 Host 已能解析四包（`ready`）。用户步骤见[个人 SSH 指南](../guide/user/ssh-remote-environments.md#安装当前-profile-的-ssh-依赖)。
 
-### Desktop 一键安装的启动器接缝
+### Host 一键修复与 Desktop 重启接缝
 
-客户端只在 `view.code` 为 `ssh-deps-missing` 或 `ssh-deps-partial`、且启动器显式声明能力时显示 **安装并重启**。能力对象是 `window.dshDesktop.sshDependencies`（Rivetdeck 桥为 `window.deepseekDesktop.sshDependencies`），形状固定为：
+`sshDependencyInstall` 是面板通道和插件设置通道上的固定修复端点。请求体为空且 strict：调用方不能传包名、版本、argv、shell 命令、Profile、home 或 cwd。Host 每次从可信 `profileContext`、当前 compat release 与 `SUPPORTED_SSH_RELEASES` 重新推导目标；Desktop 使用 `process.resourcesPath/runtime/cli/bin/dsh`，Web 从当前 Host 的 `@deepseek-ai/dsh` manifest 解析 `bin.dsh`。端点复用 `src/remote/install-ssh-deps.ts` 的安装核心：先核对 `dsh --version`，再以结构化 argv 执行一次 `dsh plugin --profile <name> add --save-exact <四个固定包>@<Host 精确版本>`。它不经过 shell 字符串拼接，不接收上游 `PluginManager.installBundle()`（普通 npm 依赖会被 `not-bundle` 拒绝）。
+
+同一目标的并发调用合并，不同写入串行化。四包已对齐时安装核心不重写；如果当前进程尚未加载这份磁盘状态，端点仍返回 `restart-required`。真正写入后不做热激活，也统一返回 `restart-required`。结果只含 `ready | restart-required` 和新的依赖视图；包管理器输出在 Host 内有界捕获，原始输出、环境变量和完整日志不进入面板响应。`ssh-deps-missing`、`ssh-deps-partial` 与 `ssh-deps-version` 可自动修复；`ssh-deps-private`、`ssh-deps-resolution`、`ssh-host-unsupported` 与 `ssh-host-platform` 不提供一键按钮。
+
+Desktop 启动器只补充**可选能力**，不再把安装和重启绑成单体操作。能力对象是 `window.dshDesktop.sshDependencies`（Rivetdeck 桥为 `window.deepseekDesktop.sshDependencies`），协议 v2 形状固定为：
 
 ```ts
 {
-  protocolVersion: 1,
-  install(request: { profile: string; release: string }): Promise<{
-    status: 'ready' | 'installed' | 'restart-required',
-    profile: string,
-    release: string,
+  protocolVersion: 2,
+  capabilities: { install: boolean, restart: boolean },
+  install?(request: { profile: string; release: string }): Promise<{
+    status: 'ready' | 'installed' | 'restart-required', profile: string, release: string,
+  }>,
+  restart?(request: { profile: string; release: string }): Promise<{
+    status: 'done' | 'restart-required', profile: string, release: string,
   }>,
   subscribe(listener: (phase: 'stopping' | 'installing' | 'restarting' | 'checking' | 'done') => void): () => void,
 }
 ```
 
-启动器必须用自己的可信状态校验请求的 Host、Profile 与版本（不接收包名、argv 或任意命令），合并或拒绝同一 Profile 的并发请求；先停止目标 Host 并等待退出，再复用 `scripts/install-ssh-deps.mjs` 的安装核心，最后以原配置重启同一 Profile，并在每个阶段发出上述事件。停止失败必须结束请求；安装失败且 Host 已停止时尝试恢复启动并保留可重试诊断；新 Host 启动后由既有 `dependencies` 检测确认四包解析与加载，未就绪时继续显示依赖提示。
+`capabilities` 必须诚实表达四种组合：安装可用/不可用与重启可用/不可用相互独立。声明某项能力时必须提供同名方法；结果必须回显请求中的同一 Profile 和 release。`restart` 是明确的重启操作，客户端不得用重新执行安装冒充重启。没有重启能力时，界面只显示“完全退出并重新启动当前 Host”的手动指引和重新检测按钮。客户端优先使用 Host RPC 的安装能力；启动器 `install` 是 Host RPC 不可用时的另一种固定实现，复制命令则是最后的降级路径。
 
-**当前阻塞点**：本仓库的硬约束是不修改上游 `deepseek-harness` 任何包，而 `dsh-v0.2.2-rc.5` 的 `apps/desktop` 只暴露 `dshDesktop` 的既有 IPC（文件、更新、快捷键、浏览器、目录选择等），没有 Profile 安装或 Host 停止/重启的桥接口；实际启动器也不在本仓库。因此 Web 与当前 Desktop 不显示该按钮，客户端保留复制命令与重新检测。接入方只需在启动器主进程按上述对象实现能力并通过 preload 暴露；插件侧无需再改协议。
+协议 v1 的“install 合体操作”从未在任何上游 Desktop release 中实现，因此 v2 直接替换 v1，不保留兼容分支。接入方在启动器主进程按上述对象实现能力并经 preload 暴露即可；Web、旧版 Desktop 或未暴露能力的桥接仍走复制命令与手动重启指引。
 
 ### 停用的旧配置
 
@@ -53,8 +59,9 @@ Host 将显式的 `team`、`hardened` 或其他不支持的模式视为停用。
 
 ## RPC 端点与拒绝码
 
-面板通道 `PANEL_CHANNEL` 上的 `ssh*` 端点（`src/remote/personal-contract.ts`）：每个请求携带 `sessionId`，Host 由会话解析主根；未知字段即 `panel/bad-request`。所有端点在开关未开或 `mode !== 'personal'` 时拒绝 `remote-personal-unavailable`；所有变更端点返回刷新后的 `sshState`。
+面板通道 `PANEL_CHANNEL` 上的 `ssh*` 端点（`src/remote/personal-contract.ts`）：每个请求携带 `sessionId`，Host 由会话解析主根；未知字段即 `panel/bad-request`。所有端点在开关未开或 `mode !== 'personal'` 时拒绝 `remote-personal-unavailable`；除 `sshDependencyInstall` 外的个人配置变更端点返回刷新后的 `sshState`。
 
+- `sshDependencyInstall` 执行上文所述的固定 SSH 依赖安装/升级；请求体为空，成功结果为 `ready` 或 `restart-required`。
 - `sshState`、`sshCredentialGenerate`、`sshCredentialImport`、`sshCredentialPassword`、`sshCredentialRemove`（`credential-in-use`）、`sshConfigLink`（写入 Include）。
 - `sshConfigAliases` 只返回本机 `~/.ssh/config` 中的字面 `Host` 别名。跳过通配和否定项，读取失败返回空数组。
 - `sshListDirectories` 按连接经只读 SFTP 返回 `{ path, parent, entries: [{ name, path }] }`，最多 500 条。ssh-config 来源在打开 SFTP 前使用 `ssh -G` 和用户 known_hosts 核对已保存的主机、端口、账号与指纹。漂移会拒绝浏览。managed 来源使用 `-F <credentialRoot>/ssh_config`，可在链接 `~/.ssh/config` 前浏览。SFTP 错误为 `remote-path-listing-failed`。

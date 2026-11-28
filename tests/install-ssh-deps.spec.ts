@@ -1,5 +1,5 @@
 /** The published SSH dependency installer: exact target, one CLI operation, idempotent. */
-import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { describe, expect, it } from 'vitest'
@@ -7,40 +7,9 @@ import {
   main, parseSshDependencyInstallArgs, runSshDependencyInstall, SshDependencyInstallError,
 } from '../src/remote/install-ssh-deps.ts'
 import { SSH_PEER_PACKAGES } from '../src/compat/dsh-version.ts'
+import { fakeDsh } from './support/fake-dsh.ts'
 
 const release = '0.2.2-rc.5'
-
-function fakeDsh(root: string, options: { release?: string; fail?: boolean; skip?: string; noEntry?: string } = {}): string {
-  const path = join(root, 'fake dsh.mjs')
-  writeFileSync(path, `#!/usr/bin/env node
-import { appendFileSync, mkdirSync, writeFileSync } from 'node:fs'
-import { join } from 'node:path'
-const args = process.argv.slice(2)
-const log = process.env.FAKE_LOG
-if (args.includes('--version')) { process.stdout.write(${JSON.stringify(options.release ?? release)} + '\\n'); process.exit(0) }
-const profile = args[args.indexOf('--profile') + 1]
-const home = process.env.DSH_HOME
-const dir = join(home, 'profiles', profile)
-mkdirSync(dir, { recursive: true })
-const dependencies = {}
-for (const arg of args) {
-  if (!arg.startsWith('@deepseek-ai/')) continue
-  const at = arg.lastIndexOf('@')
-  const name = arg.slice(0, at)
-  if (name === ${JSON.stringify(options.skip ?? '')}) continue
-  const pkgRoot = join(dir, 'node_modules', ...name.split('/'))
-  mkdirSync(pkgRoot, { recursive: true })
-  writeFileSync(join(pkgRoot, 'package.json'), JSON.stringify({ name, version: arg.slice(at + 1), main: './index.js' }))
-  if (name !== ${JSON.stringify(options.noEntry ?? '')}) writeFileSync(join(pkgRoot, 'index.js'), 'module.exports = {}')
-  dependencies[name] = arg.slice(at + 1)
-}
-writeFileSync(join(dir, 'package.json'), JSON.stringify({ dependencies }))
-if (log !== undefined) appendFileSync(log, 'add\\n')
-process.exit(${options.fail === true ? 1 : 0})
-`, { mode: 0o755 })
-  if (process.platform !== 'win32') chmodSync(path, 0o755)
-  return path
-}
 
 function fixture(): { root: string; home: string; profile: string; dsh: string; log: string } {
   const root = mkdtempSync(join(tmpdir(), "mrfw-install-'"))
@@ -145,6 +114,36 @@ describe.skipIf(process.platform === 'win32')('runSshDependencyInstall', () => {
     try {
       await expect(runSshDependencyInstall({ profile, home, release, dsh }))
         .rejects.toMatchObject({ code: 'install-incomplete' })
+    } finally { rmSync(root, { recursive: true, force: true }) }
+  })
+
+  it('completes a partial install in one fixed operation', async () => {
+    const { root, home, profile, dsh, log } = fixture()
+    process.env.FAKE_LOG = log
+    try {
+      const dir = join(home, 'profiles', profile)
+      const first = SSH_PEER_PACKAGES[0]
+      mkdirSync(join(dir, 'node_modules', ...first.split('/')), { recursive: true })
+      writeFileSync(join(dir, 'package.json'), JSON.stringify({ dependencies: { [first]: release } }))
+      writeFileSync(join(dir, 'node_modules', ...first.split('/'), 'package.json'), JSON.stringify({ name: first, version: release, main: './index.js' }))
+      writeFileSync(join(dir, 'node_modules', ...first.split('/'), 'index.js'), 'module.exports = {}')
+      await expect(runSshDependencyInstall({ profile, home, release, dsh })).resolves.toMatchObject({ status: 'installed' })
+      expect(readFileSync(log, 'utf8')).toBe('add\n')
+      await expect(runSshDependencyInstall({ profile, home, release, dsh })).resolves.toMatchObject({ status: 'ready' })
+    } finally {
+      delete process.env.FAKE_LOG
+      rmSync(root, { recursive: true, force: true })
+    }
+  })
+
+  it('bounds package-manager diagnostics and does not expose later output bytes', async () => {
+    const { root, home, profile } = fixture()
+    const dsh = fakeDsh(root, { fail: true, noisyFailure: true })
+    try {
+      await expect(runSshDependencyInstall({ profile, home, release, dsh })).rejects.toMatchObject({
+        code: 'install-failed',
+        message: expect.not.stringContaining('SECRET_TOKEN_SHOULD_NOT_CROSS'),
+      })
     } finally { rmSync(root, { recursive: true, force: true }) }
   })
 

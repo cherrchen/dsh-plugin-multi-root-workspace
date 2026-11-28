@@ -32,6 +32,7 @@ export const SSH_ENDPOINTS = [
   'sshBindingSave',
   'sshBindingRemove',
   'sshConfigLink',
+  'sshDependencyInstall',
 ] as const
 
 export type SshEndpoint = (typeof SSH_ENDPOINTS)[number]
@@ -78,8 +79,19 @@ export const environmentDraftSchema = z.object({
   }).optional(),
 })
 
+/** The dependency-repair request is deliberately empty: package names, versions, argv, cwd, and profile are Host-derived. */
+export const sshDependencyInstallRequestSchema = z.object({}).strict()
+export type SshDependencyInstallRequestPayload = z.infer<typeof sshDependencyInstallRequestSchema>
+
+export const sshDependencyInstallResultSchema = z.object({
+  status: z.enum(['ready', 'restart-required']),
+  dependencies: sshDependencyViewSchema,
+}).strict()
+export type SshDependencyInstallResultPayload = z.infer<typeof sshDependencyInstallResultSchema>
+
 const requestSchemas = {
   sshState: z.object({}).strict(),
+  sshDependencyInstall: sshDependencyInstallRequestSchema,
   // Read-only helpers for setup: local Host aliases and the
   // remote directory picker. Neither answer carries file or secret bytes.
   sshConfigAliases: z.object({}).strict(),
@@ -134,7 +146,7 @@ const requestSchemas = {
 } as const
 
 type SshRequest = {
-  [E in SshEndpoint]: E extends 'sshState' | 'sshConfigAliases' | 'sshConfigLink'
+  [E in SshEndpoint]: E extends 'sshState' | 'sshConfigAliases' | 'sshConfigLink' | 'sshDependencyInstall'
     ? { endpoint: E }
     : { endpoint: E } & z.infer<(typeof requestSchemas)[E]>
 }[SshEndpoint]
@@ -142,7 +154,7 @@ export type SshCall = SshRequest & { sessionId: string }
 const SSH_SETTINGS_ENDPOINTS = [
   'sshState', 'sshConfigAliases', 'sshCredentialGenerate', 'sshCredentialImport', 'sshCredentialPassword',
   'sshCredentialRemove', 'sshHostKeyScan', 'sshEnvironmentSave', 'sshEnvironmentRemove', 'sshEnvironmentTest',
-  'sshHelperInstall', 'sshAccessKeyInstall', 'sshConfigLink',
+  'sshHelperInstall', 'sshAccessKeyInstall', 'sshConfigLink', 'sshDependencyInstall',
 ] as const satisfies readonly SshEndpoint[]
 export type SshSettingsCall = Extract<SshRequest, { endpoint: typeof SSH_SETTINGS_ENDPOINTS[number] }>
 
@@ -349,8 +361,9 @@ const remoteDirectoryListingSchema = z.object({
  * @returns the answer, or the reason it is not one.
  */
 export function parseSshAnswer(endpoint: SshEndpoint, value: unknown): SshParsed<unknown> {
-  const schema = endpoint === 'sshHostKeyScan' ? sshScanResultSchema
-    : endpoint === 'sshEnvironmentTest' ? connectionTestSchema
+  const schema = endpoint === 'sshDependencyInstall' ? sshDependencyInstallResultSchema
+    : endpoint === 'sshHostKeyScan' ? sshScanResultSchema
+      : endpoint === 'sshEnvironmentTest' ? connectionTestSchema
       : endpoint === 'sshConfigAliases' ? sshAliasesViewSchema
         : endpoint === 'sshListDirectories' ? remoteDirectoryListingSchema
           : sshStateSchema

@@ -337,9 +337,9 @@ describe('personal SSH remote-environments settings', () => {
     expect(within(repair).getByRole('button', { name: 'ssh.copyInstallCommand' })).toBeTruthy()
     installed = true
     fireEvent.click(within(repair).getByRole('button', { name: 'ssh.recheckDependencies' }))
-    expect(await within(repair).findByText('error.ssh-deps-restart')).toBeTruthy()
+    expect(await within(repair).findByText('ssh.manualRestartSummary')).toBeTruthy()
     fireEvent.click(within(repair).getByRole('button', { name: 'panel.close' }))
-    expect(screen.queryByRole('dialog', { name: 'ssh.dependenciesTitle' })).toBeNull()
+    expect(screen.queryByRole('dialog', { name: 'ssh.restartTitle' })).toBeNull()
     await act(async () => {
       snapshot = { ...snapshot, revision: 3 }
       listeners.forEach(listener => listener())
@@ -380,10 +380,11 @@ describe('personal SSH remote-environments settings', () => {
 
       repaired = true
       fireEvent.click(within(dialog).getByRole('button', { name: 'ssh.recheckDependencies' }))
-      expect(await within(dialog).findByText('error.ssh-deps-restart')).toBeTruthy()
+      const restart = await screen.findByRole('dialog', { name: 'ssh.restartTitle' })
+      expect(within(restart).getByText('ssh.manualRestartSummary')).toBeTruthy()
       expect(call.mock.calls.some(([, endpoint]) => endpoint === 'sshState')).toBe(false)
       restarted = true
-      fireEvent.click(within(dialog).getByRole('button', { name: 'ssh.recheckDependencies' }))
+      fireEvent.click(within(restart).getByRole('button', { name: 'ssh.recheckAfterRestart' }))
       expect(await within(dialog).findByRole('button', { name: 'ssh.tab.add' })).toBeTruthy()
     } finally {
       if (clipboard === undefined) Reflect.deleteProperty(navigator, 'clipboard')

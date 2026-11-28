@@ -18,6 +18,7 @@ import { CommandExecutionError, CredentialStore, defaultExec, type ExecFile } fr
 import { helperProtocol, HostKeyScans, installAccessKey, installHelper, pinAccessKeyTarget, removeAccessKey, testConnection } from './personal/operations.ts'
 import { link, linkStatus, listSshConfigAliases, recordKnownHost, renderSshConfig } from './personal/ssh-files.ts'
 import { listRemoteDirectories } from './personal/remote-paths.ts'
+import { installOrUpgradeSshDependencies } from './ssh-dependency-operation.ts'
 import { primaryKey } from '../roots.ts'
 
 const scans = new HostKeyScans(defaultExec)
@@ -170,7 +171,7 @@ export async function handlePersonalEndpoint(
   ctx: Context, registry: MultiRootRegistry, primary: string | undefined, call: SshCall | SshSettingsCall, deps: PersonalDeps = {},
 ): Promise<unknown> {
   if (call.endpoint !== 'sshState' && call.endpoint !== 'sshHostKeyScan' && call.endpoint !== 'sshEnvironmentTest'
-    && call.endpoint !== 'sshConfigAliases' && call.endpoint !== 'sshListDirectories') {
+    && call.endpoint !== 'sshConfigAliases' && call.endpoint !== 'sshListDirectories' && call.endpoint !== 'sshDependencyInstall') {
     return await enqueueMutation(async () => await runPersonalEndpoint(ctx, registry, primary, call, deps))
   }
   return await runPersonalEndpoint(ctx, registry, primary, call, deps)
@@ -267,6 +268,8 @@ async function runPersonalEndpoint(
     case 'sshConfigAliases':
       // Local read only; no mutation and no remote connection.
       return { aliases: listSshConfigAliases() }
+    case 'sshDependencyInstall':
+      return await installOrUpgradeSshDependencies(ctx)
     case 'sshListDirectories': {
       if (call.path !== undefined && call.path !== '' && (!call.path.startsWith('/') || call.path.includes('\0'))) {
         throw new RemoteAdmissionError('remote-path-listing-failed', 'the remote path must be an absolute POSIX path')

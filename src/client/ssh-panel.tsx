@@ -1065,7 +1065,8 @@ export function SshManagementDialog(props: SshManagementDialogProps): ReactNode 
   const renderManagement = (): ReactNode => {
     if (props.overviewError !== undefined) return <><PanelErrorToast error={props.overviewError} t={t} />
       <p className="mrfw-note">{t('ssh.loadFailed')}</p><Button onClick={props.onChanged}>{t('ssh.recheckDependencies')}</Button></>
-    if (blocked) return <SshDependencyNotice view={props.dependencies!} onCheck={props.onChanged} t={t} />
+    if (blocked) return <SshDependencyNotice view={props.dependencies!} onCheck={props.onChanged} t={t}
+      onInstall={ssh === undefined ? undefined : async () => await ssh.dependencyInstall(sessionId)} />
     if (status === undefined) return <p className="mrfw-note">{t('ssh.add.loading')}</p>
     if (status.state !== 'ready') return renderUnavailable()
     if (custodyMode !== 'personal' || ssh === undefined) return <p className="mrfw-note">{t('ssh.add.noClient')}</p>

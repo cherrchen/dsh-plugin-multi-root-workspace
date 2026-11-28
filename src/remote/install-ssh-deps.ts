@@ -145,6 +145,14 @@ export function parseSshDependencyInstallArgs(argv: readonly string[]): SshDepen
   return { profile, home, release, dsh }
 }
 
+/** Captured output per stream. The installer only classifies success; it never needs an unbounded package-manager log in memory. */
+const OUTPUT_CAPTURE_LIMIT = 8192
+
+function boundedAppend(current: string, chunk: string): string {
+  if (current.length >= OUTPUT_CAPTURE_LIMIT) return current
+  return current + chunk.slice(0, OUTPUT_CAPTURE_LIMIT - current.length)
+}
+
 function runDsh(file: string, args: readonly string[], options: { readonly cwd: string; readonly env: NodeJS.ProcessEnv }): Promise<{ code: number | null; stdout: string; stderr: string }> {
   return new Promise((resolvePromise, reject) => {
     const child = spawn(file, [...args], { cwd: options.cwd, env: options.env, stdio: ['ignore', 'pipe', 'pipe'] })
@@ -152,8 +160,8 @@ function runDsh(file: string, args: readonly string[], options: { readonly cwd: 
     let stderr = ''
     child.stdout?.setEncoding('utf8')
     child.stderr?.setEncoding('utf8')
-    child.stdout?.on('data', (chunk: string) => { stdout += chunk })
-    child.stderr?.on('data', (chunk: string) => { stderr += chunk })
+    child.stdout?.on('data', (chunk: string) => { stdout = boundedAppend(stdout, chunk) })
+    child.stderr?.on('data', (chunk: string) => { stderr = boundedAppend(stderr, chunk) })
     child.once('error', reject)
     child.once('close', code => { resolvePromise({ code, stdout, stderr }) })
   })
