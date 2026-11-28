@@ -28,6 +28,15 @@ const selfRequire = createRequire(import.meta.url)
 const pluginRoot = pluginPackageRoot(selfRequire)
 const startup = new WeakMap<ProfileContext, PackageInspection[]>()
 
+/** The only target the Host-side dependency repair may write: this Host's own profile, CLI and release. */
+export interface TrustedSshDependencyTarget {
+  readonly profile: string
+  readonly home: string
+  readonly release: string
+  readonly dsh: string
+  readonly cwd: string
+}
+
 function real(path: string): string | undefined {
   try { return realpathSync(path) } catch { return undefined }
 }
@@ -181,12 +190,31 @@ function nodeCommand(): string | undefined {
   return isAbsolute(process.execPath) && existsSync(process.execPath) ? quoteProfileValue(process.execPath) : undefined
 }
 
-function commandFor(profile: ProfileContext | undefined, release: string): string | undefined {
+function validProfile(profile: ProfileContext | undefined): profile is ProfileContext {
   if (profile === undefined || !isAbsolute(profile.home) || profile.name.length === 0
     || ['.', '..', 'node_modules'].includes(profile.name) || /[/\\\0\r\n]/.test(profile.name)
-    || /[\0\r\n]/.test(profile.home)) return undefined
+    || /[\0\r\n]/.test(profile.home)) return false
   const expected = real(join(profile.home, 'profiles', profile.name))
-  if (expected === undefined || expected !== real(profile.dir)) return undefined
+  return expected !== undefined && expected === real(profile.dir)
+}
+
+/**
+ * Resolve the fixed install/upgrade target from trusted Host facts alone.
+ * Returning `undefined` means the one-click capability is unavailable; callers
+ * may still offer the copyable command fallback. No caller-controlled package
+ * names, versions, argv, cwd, or shell text participates in this target.
+ */
+export function sshDependencyInstallTarget(ctx: Context): TrustedSshDependencyTarget | undefined {
+  const { profile } = profileFacts(ctx)
+  const release = ctx.get('multiRootCompat')?.report.release
+  if (release === undefined || !SUPPORTED_SSH_RELEASES.some(item => item === release) || !validProfile(profile)) return undefined
+  const dsh = dshCommand(profile)
+  if (dsh === undefined || !isAbsolute(dsh)) return undefined
+  return { profile: profile.name, home: profile.home, release, dsh, cwd: profile.home }
+}
+
+function commandFor(profile: ProfileContext | undefined, release: string): string | undefined {
+  if (!validProfile(profile)) return undefined
   const dsh = dshCommand(profile)
   const node = nodeCommand()
   const script = pluginRoot === undefined ? undefined : join(pluginRoot, 'scripts', 'install-ssh-deps.mjs')
@@ -217,8 +245,10 @@ export function inspectSshProfile(ctx: Context): { view: SshDependencyView; gate
   const release = local.release
   const command = release === undefined || code === 'ready' || code === 'ssh-deps-restart' || code.startsWith('ssh-host-')
     ? undefined : commandFor(profile, release)
+  const target = sshDependencyInstallTarget(ctx)
   const view = {
     code, packages: packages.map(({ name, state, version }) => ({ name, state, ...(version === undefined ? {} : { version }) })),
+    capabilities: { install: target !== undefined },
     ...(release === undefined ? {} : { release }), ...(profile === undefined ? {} : { profile: profile.name }),
     ...(command === undefined ? {} : { command }),
   }

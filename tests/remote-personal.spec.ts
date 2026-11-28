@@ -336,6 +336,12 @@ describe('relaxed ssh -G parsing and fail-closed settings', () => {
     expect(state.ok).toBe(true)
     const scan = parseSshCall('sshHostKeyScan', { sessionId: 's1', hostname: 'h', port: 2222 })
     expect(scan.ok).toBe(true)
+    const repair = parseSshCall('sshDependencyInstall', { sessionId: 's1' })
+    expect(repair.ok).toBe(true)
+    expect(parseSshAnswer('sshDependencyInstall', {
+      status: 'restart-required',
+      dependencies: { code: 'ssh-deps-restart', packages: [] },
+    })).toMatchObject({ ok: true })
   })
 })
 

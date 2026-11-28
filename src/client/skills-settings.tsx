@@ -230,7 +230,8 @@ function EnabledSshManagementSetting({ client, revision, takeEnableRequest, t }:
       <Button variant="outline" size="sm" onClick={() => { recheck(); setDialog('management') }}>{t('ssh.settings.manage')}</Button>
     </div>
     {dialog === 'repair' && blocked ? <SshDependencyDialog view={dependencies} checking={checking}
-      error={error} onClose={close} onCheck={recheck} t={t} /> : null}
+      error={error} onClose={close} onCheck={recheck} t={t}
+      onInstall={async () => await client.management.dependencyInstall(undefined)} /> : null}
     {dialog === 'management' ? <SshManagementDialog initialTab="connections" fromSettings sessionId={undefined} ssh={client.management}
       custodyMode={view?.custodyMode} status={view?.status} dependencies={dependencies}
       overviewError={error} onClose={close} onChanged={recheck} t={t} /> : null}

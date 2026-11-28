@@ -25,23 +25,28 @@ Personal SSH is experimental and off by default. Once enabled, the Agent can use
    - **Plugin detail page**: once enabled, a **Remote SSH → Manage** button appears at the top of the card (manages global connections without an active session).
    - **Workspace Folders dialog**: click **Folders** at the bottom of the sidebar (or the New Session hero entry) → under **Remote working directories**, click **Manage SSH remotes…**.
 
-## Install the SSH dependencies for the current profile
+## Install, upgrade, and restart the SSH dependencies for the current profile
 
-Installing Multi-root Workspace makes the local workspace features available. After you confirm that you want to enable personal SSH, **Install SSH dependencies** opens automatically if the active profile needs attention. You can close it and check the four packages later in **Manage SSH environments**. If the dependencies are ready, proceed to connection setup.
+Installing Multi-root Workspace makes the local workspace features available. After you confirm that you want to enable personal SSH, the matching dependency repair dialog opens if the active profile needs attention. You can close it and check the four packages later in **Manage SSH environments**. If the dependencies are ready, proceed to connection setup.
 
-There are two entries for the repair; either one writes only to the current profile and never asks you to install packages one by one or type a version.
+The flow has three separate stages: **install or upgrade**, **restart the Host**, and **check again**. The four packages are written only to the current profile; you never install them one by one or type a version.
 
-1. **One-click Desktop install (when the launcher supports it)**: the dialog shows **Install and restart**. The Desktop launcher verifies the current Host, profile, and release, stops the Host and waits for it to exit, reuses the same install core as the command below, and restarts the same `desktop` profile with its original configuration. The button reports stopping, installing, restarting, and checking states. Web, older Desktop builds, and launchers without this capability do not show it.
-2. **Copy install command (every host)**: click **Copy install command**, fully quit the affected DSH Host, and run it on the machine hosting DSH. The command uses the CLI at the **exact** release shown in the dialog, the exact profile and DSH Home, and runs one `dsh plugin --profile <name> add --save-exact` operation to align all four packages. For Web, use the machine running the Web Host; for Desktop, quit the app completely before running the command for the `desktop` profile. Repeating it is safe: a profile that is already aligned reports **ready** without another write.
-3. Restart the Host with the same profile and reopen **Manage SSH environments**. If a dependency message remains, click **Recheck dependencies** and review the state of each package. The check only reads state. When the running Host detects repaired files, it still requires a restart.
+1. **One-click install / repair / upgrade (when the Host supports it)**:
+   - `ssh-deps-missing` shows **Install SSH runtime**;
+   - `ssh-deps-partial` shows **Repair SSH runtime**;
+   - `ssh-deps-version` opens the dedicated **SSH runtime upgrade required** dialog with the current profile, the Host's exact DSH release, the current state of all four packages, and the target version. The upgrade writes only this profile's dependencies; it does not change workspaces, SSH connections, credentials, or bindings. Do not close the Host while **Upgrade SSH runtime** is running. A failure leaves a retryable error summary.
+   - **Later** only closes the prompt; it does not repair the profile, and the management surface keeps a prominent upgrade entry. The same profile, Host release, and four-package state is not auto-shown repeatedly. If any of those facts changes, the prompt may appear again.
+2. **Copy command (the fallback when one-click install is unavailable)**: click **Copy install command** or **Copy upgrade command**, fully quit the affected DSH Host, and run the command on the machine hosting DSH. The command uses the CLI at the **exact** release shown in the dialog, the exact profile and DSH Home, and runs one `dsh plugin --profile <name> add --save-exact` operation to align all four packages. Repeating it is safe: a profile that is already aligned reports **ready** without another write.
+3. **Restart and check again**: whenever the operation really wrote the profile — initial install, completion, or upgrade — the UI enters restart guidance. A Desktop launcher with restart capability shows **Restart Host**. Without that capability, no pretend restart button is shown: fully quit and restart the current DSH Host, then click **I restarted; check again**. The `ssh-deps-restart` state itself enters the same guidance instead of showing install or upgrade buttons again.
 
-Keep the three results apart:
+Keep the four outcomes apart:
 
-- **Installed**: this command or launcher operation wrote the four packages;
+- **Initial install / completion finished**: missing or partial packages were written at the current Host's exact version;
+- **Upgrade / realignment finished**: older packages left behind by a Host upgrade were realigned to the current Host's exact version;
 - **Restart required**: the packages on disk are aligned, but this process still uses the dependencies it loaded at startup;
 - **Ready**: the current Host resolves all four matching packages, so connection setup can proceed.
 
-After changing DSH versions, run the command shown by the new Host to align all four packages. See the [SSH technical reference](../../reference/ssh-remote-environments.md#host-profile-依赖) for version and deployment details.
+`ssh-deps-private`, `ssh-deps-resolution`, `ssh-host-unsupported`, and `ssh-host-platform` cannot be repaired in one click; use the diagnostic in the dialog to inspect the installation source, Host platform, and release. See the [SSH technical reference](../../reference/ssh-remote-environments.md#host-profile-依赖) for version and deployment details.
 
 ## Set up connections and directory bindings
 

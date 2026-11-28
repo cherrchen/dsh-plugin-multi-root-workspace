@@ -8,7 +8,7 @@
  * @module @dsh-electron/dsh-plugin-multi-root-workspace/client/ssh-client
  */
 import { PANEL_CHANNEL, parseErrorView } from '../contract.ts'
-import { SSH_SETTINGS_CHANNEL, sshSettingsViewSchema, parseSshAnswer, type SshSettingsView, type SshEndpoint, type SshStateView, type CredentialPublicView, type SshEnvironmentView, type SshBindingDraft, type SshBindingView, type SshAliasesView, type RemoteDirectoryListing } from '../remote/personal-contract.ts'
+import { SSH_SETTINGS_CHANNEL, sshSettingsViewSchema, parseSshAnswer, type SshSettingsView, type SshEndpoint, type SshStateView, type CredentialPublicView, type SshEnvironmentView, type SshBindingDraft, type SshBindingView, type SshAliasesView, type RemoteDirectoryListing, type SshDependencyInstallResultPayload } from '../remote/personal-contract.ts'
 import { PanelError } from './panel-client.ts'
 
 interface Channel {
@@ -44,6 +44,7 @@ export interface SshClient {
   bindingSave(sessionId: string, revision: number, binding: SshBindingDraft, signal?: AbortSignal): Promise<SshStateView>
   bindingRemove(sessionId: string, revision: number, environmentId: string, rootId: string, signal?: AbortSignal): Promise<SshStateView>
   configLink(sessionId: string | undefined, signal?: AbortSignal): Promise<SshStateView>
+  dependencyInstall(sessionId: string | undefined, signal?: AbortSignal): Promise<SshDependencyInstallResultPayload>
 }
 
 export type SshManagementClient = Omit<SshClient, 'listDirectories' | 'bindingSave' | 'bindingRemove'>
@@ -119,5 +120,6 @@ export function createSshClient(connection: Channel, channel: typeof PANEL_CHANN
     bindingSave: async (sessionId, revision, binding, signal) => await call('sshBindingSave', { sessionId, revision, binding }, signal),
     bindingRemove: async (sessionId, revision, environmentId, rootId, signal) => await call('sshBindingRemove', { sessionId, revision, environmentId, rootId }, signal),
     configLink: async (sessionId, signal) => await call('sshConfigLink', { sessionId }, signal),
+    dependencyInstall: async (sessionId, signal) => await call('sshDependencyInstall', { sessionId }, signal),
   }
 }

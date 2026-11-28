@@ -37,6 +37,8 @@ export const sshDependencyViewSchema = z.object({
     state: z.enum(['missing', 'installed', 'version-mismatch', 'private', 'unresolvable']),
     version: z.string().optional(),
   })),
+  /** Host-derived one-click repair capability. Restart is deliberately absent: it belongs to the client launcher seam. */
+  capabilities: z.object({ install: z.boolean() }).strict().optional(),
 })
 export type SshDependencyView = z.infer<typeof sshDependencyViewSchema>
 
